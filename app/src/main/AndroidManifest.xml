@@ -46,14 +46,36 @@
             android:name="xposedscope"
             android:resource="@array/xposed_scope" />
 
+        <!--
+            MainActivity 同时承担两个入口：
+            1. MODULE_SETTINGS：LSPosed 管理器里「打开」模块时使用；
+            2. activity-alias LauncherEntry 的 targetActivity：桌面 / 抽屉图标。
+            桌面图标由单独的 alias 承载，隐藏图标只禁用 alias，MainActivity 本身仍在，
+            不会出现「隐藏后连设置页都打不开」的自锁。
+        -->
         <activity
             android:name=".ui.MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
             </intent-filter>
         </activity>
+
+        <!-- 桌面图标入口。name 用完整类名，代码侧 util/LauncherIcon.kt 里同名字符串 -->
+        <activity-alias
+            android:name="io.github.qmryqmm.hyperopen.LauncherEntry"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/app_name"
+            android:roundIcon="@mipmap/ic_launcher"
+            android:targetActivity=".ui.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- 跨进程配置共享 Provider (给 SystemUI 实时提供最新配置) -->
         <!-- directBootAware：用户未解锁（Direct Boot 锁定期）时也必须可访问，
