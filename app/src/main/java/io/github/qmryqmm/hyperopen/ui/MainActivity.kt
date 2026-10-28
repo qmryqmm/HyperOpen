@@ -85,6 +85,7 @@ import io.github.qmryqmm.hyperopen.layout.LayoutCapacity
 import io.github.qmryqmm.hyperopen.model.ActivityLaunchSpec
 import io.github.qmryqmm.hyperopen.model.ShortcutItem
 import io.github.qmryqmm.hyperopen.safety.SafetyStore
+import io.github.qmryqmm.hyperopen.util.LauncherIcon
 import io.github.qmryqmm.hyperopen.view.IconGlyphFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -5070,6 +5071,40 @@ fun SettingsPage(
                         )
                     },
                     onClick = onResetShortcuts,
+                )
+            }
+        }
+
+        // ── 桌面图标 ──
+        item(key = "launcher_icon_title") { SmallTitle("桌面图标") }
+        item(key = "launcher_icon_card") {
+            val ctx = LocalContext.current
+            var iconHidden by remember { mutableStateOf(LauncherIcon.isHidden(ctx)) }
+            Card(
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .fillMaxWidth(),
+            ) {
+                SwitchPreference(
+                    title = "隐藏桌面图标",
+                    summary = "从桌面与应用抽屉中移除本模块图标；隐藏后仍可从 LSPosed 管理器打开本页恢复",
+                    checked = iconHidden,
+                    onCheckedChange = { hide ->
+                        if (LauncherIcon.setHidden(ctx, hide)) {
+                            iconHidden = hide
+                            Toast.makeText(
+                                ctx,
+                                if (hide) {
+                                    "桌面图标已隐藏，可从 LSPosed 管理器重新打开本页"
+                                } else {
+                                    "桌面图标已恢复"
+                                },
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        } else {
+                            Toast.makeText(ctx, "修改桌面图标失败，请重试", Toast.LENGTH_LONG).show()
+                        }
+                    },
                 )
             }
         }
