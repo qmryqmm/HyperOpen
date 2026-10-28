@@ -58,6 +58,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
@@ -80,6 +81,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.qmryqmm.hyperopen.config.ConfigBackup
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
 import io.github.qmryqmm.hyperopen.layout.LayoutCapacity
 import io.github.qmryqmm.hyperopen.model.ActivityLaunchSpec
@@ -114,12 +116,14 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.icon.extended.Import
 import top.yukonga.miuix.kmp.icon.extended.ListView
 import top.yukonga.miuix.kmp.icon.extended.Photos
 import top.yukonga.miuix.kmp.icon.extended.Reset
 import top.yukonga.miuix.kmp.icon.extended.ScreenMirroring
 import top.yukonga.miuix.kmp.icon.extended.Scan
 import top.yukonga.miuix.kmp.icon.extended.Settings
+import top.yukonga.miuix.kmp.icon.extended.Share
 import top.yukonga.miuix.kmp.icon.extended.Theme
 import top.yukonga.miuix.kmp.icon.extended.Tune
 import top.yukonga.miuix.kmp.blur.BlurColors
@@ -245,6 +249,62 @@ fun HyperOpenApp(
     var page by remember { mutableStateOf(0) }
     var showResetDefaultsDialog by remember { mutableStateOf(false) }
     var showResetShortcutsDialog by remember { mutableStateOf(false) }
+    // 配置导入：先读文件并预检，通过后弹确认框再落盘
+    var showImportConfirmDialog by remember { mutableStateOf(false) }
+    var pendingImportText by remember { mutableStateOf<String?>(null) }
+    var pendingImportSummary by remember { mutableStateOf<ConfigBackup.Result?>(null) }
+
+    // ── 配置导入 / 导出：SAF 选文件，读写与解析都在 IO 线程 ──
+    val configScope = rememberCoroutineScope()
+
+    val exportConfigLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            configScope.launch(Dispatchers.IO) {
+                val msg = runCatching {
+                    val json = ConfigBackup.buildExportJson(ctx)
+                    ConfigBackup.writeTo(ctx, uri, json)
+                    // prefs 只存「改过的项」，全默认时文件里只有快捷方式，这里如实告知
+                    val preview = ConfigBackup.preview(json)
+                    if (preview.keyCount == 0) {
+                        "已导出快捷方式（当前参数均为默认值，无自定义项）"
+                    } else {
+                        "配置已导出：${preview.keyCount} 项参数、${preview.shortcutCount} 个快捷方式"
+                    }
+                }.getOrElse { "导出失败：${it.message ?: it.javaClass.simpleName}" }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    val importConfigLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            configScope.launch(Dispatchers.IO) {
+                val pair = runCatching {
+                    val text = ConfigBackup.readFrom(ctx, uri)
+                    ConfigBackup.preview(text) to text
+                }.getOrElse {
+                    ConfigBackup.Result.fail("读取失败：${it.message ?: it.javaClass.simpleName}") to null
+                }
+                withContext(Dispatchers.Main) {
+                    val preview = pair.first
+                    val text = pair.second
+                    if (preview.ok && text != null) {
+                        pendingImportText = text
+                        pendingImportSummary = preview
+                        showImportConfirmDialog = true
+                    } else {
+                        Toast.makeText(ctx, preview.message ?: "读取失败", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+    }
 
     // ── 页面滚动位置记忆：状态提升到 HyperOpenApp 顶层，跨底部导航切换与二级页进出持续存活，
     //    返回页面时停在上次滚动位置而不是回到顶部 ──
@@ -983,6 +1043,19 @@ fun HyperOpenApp(
                                     onOpenPermissionPage = { subPage = 4 },
                                     onResetDefaults = { showResetDefaultsDialog = true },
                                     onResetShortcuts = { showResetShortcutsDialog = true },
+                                    onExportConfig = {
+                                        exportConfigLauncher.launch(ConfigBackup.suggestedFileName(ctx))
+                                    },
+                                    onImportConfig = {
+                                        // 部分文件管理器把 .json 报成 text/plain 或 octet-stream，一并放行
+                                        importConfigLauncher.launch(
+                                            arrayOf(
+                                                "application/json",
+                                                "text/plain",
+                                                "application/octet-stream",
+                                            )
+                                        )
+                                    },
                                 )
                             }
                         }
@@ -1184,6 +1257,84 @@ fun HyperOpenApp(
                                     showLayoutSaveDialog = false
                                     previewViewRef?.commitLayoutChanges()
                                     subPage = 0
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 导入配置二次确认：先展示文件来源与条目数，确认后再落盘 ──
+        if (showImportConfirmDialog) {
+            val summary = pendingImportSummary
+            Dialog(
+                onDismissRequest = { showImportConfirmDialog = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth(0.86f)
+                        .padding(vertical = 16.dp),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                    ) {
+                        Text(
+                            text = "导入配置？",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MiuixTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            text = "文件来自 HyperOpen v${summary?.appVersion ?: "?"}，包含 " +
+                                "${summary?.keyCount ?: 0} 项参数、${summary?.shortcutCount ?: 0} 个快捷方式。\n" +
+                                "同名项会被覆盖，文件里没有的项保持不动；导入完成后界面会重新加载。",
+                            fontSize = 14.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            lineHeight = 20.sp,
+                        )
+                        Spacer(Modifier.height(22.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            TextButton(
+                                text = "取消",
+                                onClick = { showImportConfirmDialog = false },
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            TextButton(
+                                text = "导入",
+                                colors = ButtonDefaults.textButtonColorsPrimary(),
+                                onClick = {
+                                    showImportConfirmDialog = false
+                                    val content = pendingImportText
+                                    if (content != null) {
+                                        configScope.launch(Dispatchers.IO) {
+                                            val r = ConfigBackup.apply(ctx, content)
+                                            withContext(Dispatchers.Main) {
+                                                if (r.ok) {
+                                                    Toast.makeText(
+                                                        ctx,
+                                                        "已导入 ${r.keyCount} 项参数、${r.shortcutCount} 个快捷方式",
+                                                        Toast.LENGTH_SHORT,
+                                                    ).show()
+                                                    // 界面状态是启动时的一次性快照，重建 Activity 才能读到新配置
+                                                    activity?.recreate()
+                                                } else {
+                                                    Toast.makeText(
+                                                        ctx,
+                                                        r.message ?: "导入失败",
+                                                        Toast.LENGTH_LONG,
+                                                    ).show()
+                                                }
+                                            }
+                                        }
+                                    }
                                 },
                             )
                         }
@@ -4951,6 +5102,8 @@ fun SettingsPage(
     onOpenPermissionPage: () -> Unit,
     onResetDefaults: () -> Unit,
     onResetShortcuts: () -> Unit,
+    onExportConfig: () -> Unit,
+    onImportConfig: () -> Unit,
 ) {
     LazyColumn(
         state = lazyListState,
@@ -5070,6 +5223,43 @@ fun SettingsPage(
                         )
                     },
                     onClick = onResetShortcuts,
+                )
+            }
+        }
+
+        // ── 配置备份 ──
+        item(key = "config_backup_title") { SmallTitle("配置备份") }
+        item(key = "config_backup_card") {
+            Card(
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .fillMaxWidth(),
+            ) {
+                ArrowPreference(
+                    title = "导出配置",
+                    summary = "把当前全部参数与快捷方式写成 JSON 文件，便于备份或换机迁移",
+                    startAction = {
+                        Icon(
+                            imageVector = MiuixIcons.Share,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.primary,
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                    },
+                    onClick = onExportConfig,
+                )
+                ArrowPreference(
+                    title = "导入配置",
+                    summary = "从 JSON 文件恢复参数与快捷方式；只覆盖文件里包含的项",
+                    startAction = {
+                        Icon(
+                            imageVector = MiuixIcons.Import,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.primary,
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                    },
+                    onClick = onImportConfig,
                 )
             }
         }
