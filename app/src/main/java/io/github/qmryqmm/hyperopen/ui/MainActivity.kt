@@ -239,6 +239,8 @@ fun HyperOpenApp(
     var predictiveBack by remember { mutableStateOf(initialConfig.predictiveBack) }
     var maxIconCount by remember { mutableStateOf(initialConfig.maxIconCount.toFloat()) }
     var layoutStyle by remember { mutableStateOf(initialConfig.layoutStyle) }
+    var stockSystemAnim by remember { mutableStateOf(initialConfig.stockSystemAnim) }
+    var stockSystemRegion by remember { mutableStateOf(initialConfig.stockSystemRegion) }
     var ringCount by remember { mutableStateOf(initialConfig.ringCount.toFloat()) }
     val shortcuts = remember { mutableStateListOf<ShortcutItem>().apply { addAll(initialConfig.shortcuts) } }
     var safetyTick by remember { mutableStateOf(0) }
@@ -334,6 +336,8 @@ fun HyperOpenApp(
         c.iconSize = iconSize.toInt()
         c.maxIconCount = maxIconCount.toInt()
         c.layoutStyle = layoutStyle
+        c.stockSystemAnim = stockSystemAnim
+        c.stockSystemRegion = stockSystemRegion
         c.ringCount = ringCount.toInt().coerceIn(1, 4)
         c.maxScale = maxScale
         c.influenceRadius = influenceRadius.toInt()
@@ -397,6 +401,8 @@ fun HyperOpenApp(
         iconSize = defaults.iconSize.toFloat()
         maxIconCount = defaults.maxIconCount.toFloat()
         layoutStyle = defaults.layoutStyle
+        stockSystemAnim = defaults.stockSystemAnim
+        stockSystemRegion = defaults.stockSystemRegion
         ringCount = defaults.ringCount.toFloat()
         maxScale = defaults.maxScale
         influenceRadius = defaults.influenceRadius.toFloat()
@@ -605,6 +611,10 @@ fun HyperOpenApp(
                             this.ringCount = ringCount.toInt().coerceIn(1, 4)
                             this.maxScale = maxScale
                             this.influenceRadius = influenceRadius.toInt()
+                            this.layoutStyle = layoutStyle
+                            this.stockSystemAnim = stockSystemAnim
+                            this.stockSystemRegion = stockSystemRegion
+                            this.ringCount = ringCount.toInt()
                             this.iconAlpha = iconAlpha
                             this.fisheyeZoomAlpha = fisheyeZoomAlpha
                             this.fullscreenBlurMaskAlpha = fullscreenBlurMaskAlpha
@@ -902,6 +912,12 @@ fun HyperOpenApp(
                                     enabledShortcutsCount = enabledShortcutsCount,
                                     layoutStyle = layoutStyle,
                                     onLayoutStyle = { layoutStyle = it; clampIconCountToCapacity(); persist() },
+                                    stockSystemAnim = stockSystemAnim,
+                                    onStockSystemAnim = { stockSystemAnim = it; persist() },
+                                    stockSystemRegion = stockSystemRegion,
+                                    onStockSystemRegion = { stockSystemRegion = it; persist() },
+                                    ringCount = ringCount,
+                                    onRingCount = { ringCount = it; clampIconCountToCapacity(); persist() },
                                     maxScale = maxScale,
                                     onMaxScale = { maxScale = it; persist() },
                                     influenceRadius = influenceRadius,
@@ -1304,6 +1320,9 @@ fun ParamsPage(
     maxIconCount: Float, onMaxIconCount: (Float) -> Unit,
     iconCapacity: Int, enabledShortcutsCount: Int,
     layoutStyle: Int, onLayoutStyle: (Int) -> Unit,
+    stockSystemAnim: Boolean, onStockSystemAnim: (Boolean) -> Unit,
+    stockSystemRegion: Boolean, onStockSystemRegion: (Boolean) -> Unit,
+    ringCount: Float, onRingCount: (Float) -> Unit,
     maxScale: Float, onMaxScale: (Float) -> Unit,
     influenceRadius: Float, onInfluenceRadius: (Float) -> Unit,
     iconAlpha: Float, onIconAlpha: (Float) -> Unit,
@@ -1447,7 +1466,7 @@ fun ParamsPage(
                 RadioButtonPreference(
                     title = "蜂窝阵列布局",
                     summary = "图标紧凑排布在整个圆形视界内（默认）",
-                    selected = layoutStyle != HyperOpenConfig.LAYOUT_RING && layoutStyle != HyperOpenConfig.LAYOUT_ARC,
+                    selected = layoutStyle == HyperOpenConfig.LAYOUT_HONEYCOMB,
                     onClick = { onLayoutStyle(HyperOpenConfig.LAYOUT_HONEYCOMB) },
                 )
                 RadioButtonPreference(
@@ -1462,13 +1481,42 @@ fun ParamsPage(
                     selected = layoutStyle == HyperOpenConfig.LAYOUT_ARC,
                     onClick = { onLayoutStyle(HyperOpenConfig.LAYOUT_ARC) },
                 )
+                RadioButtonPreference(
+                    title = "系统经典扇形布局",
+                    summary = "完全复用 MIUI/HyperOS 原生 45°/60° 扇形几何与直线展开动画",
+                    selected = layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK,
+                    onClick = { onLayoutStyle(HyperOpenConfig.LAYOUT_SYSTEM_STOCK) },
+                )
+                if (layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
+                    SwitchPreference(
+                        title = "复用系统直线发射动画",
+                        summary = "开启后使用系统 150ms 原生从指纹发射飞出动画；关闭则使用蜂窝弹性缩放动画",
+                        checked = stockSystemAnim,
+                        onCheckedChange = onStockSystemAnim,
+                    )
+                    SwitchPreference(
+                        title = "复用系统几何扇区判定",
+                        summary = "开启后使用系统原生 Path 差集多边形扇区判定当前选中项（无缝还原官方手感）",
+                        checked = stockSystemRegion,
+                        onCheckedChange = onStockSystemRegion,
+                    )
+                }
+                if (layoutStyle == HyperOpenConfig.LAYOUT_RING) {
+                    SliderPreference(
+                        title = "同心圆环圈数",
+                        summary = "中心留空，图标分布在 N 圈同心环上",
+                        valueText = "${ringCount.toInt()} 圈",
+                        value = ringCount,
+                        valueRange = 1f..4f,
+                        onValueChange = onRingCount,
+                    )
+                }
                 SliderPreference(
                     title = "图标数量",
-                    summary = if (layoutStyle == HyperOpenConfig.LAYOUT_ARC) {
-                        "弧形扇面布局不设几何上限；已启用 $enabledShortcutsCount 项"
-                    } else {
-                        "当前参数下最多容纳 $iconCapacity 个；已启用 $enabledShortcutsCount 项" +
-                            "，超出上限的启用项不显示"
+                    summary = when (layoutStyle) {
+                        HyperOpenConfig.LAYOUT_SYSTEM_STOCK -> "系统经典扇形建议 3~5 项（最多支持 $iconCapacity 项）；已启用 $enabledShortcutsCount 项"
+                        HyperOpenConfig.LAYOUT_ARC -> "弧形扇面布局不设几何上限；已启用 $enabledShortcutsCount 项"
+                        else -> "当前参数下最多容纳 $iconCapacity 个；已启用 $enabledShortcutsCount 项，超出上限的启用项不显示"
                     },
                     valueText = if (maxIconCount.toInt() <= 0) "全部显示" else "${maxIconCount.toInt()} 个",
                     value = maxIconCount.coerceIn(0f, maxOf(iconCapacity, 1).toFloat()),

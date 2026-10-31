@@ -172,6 +172,8 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putInt("icon_size", sp.getInt("icon_size", 60));
                 bundle.putInt("max_icon_count", sp.getInt("max_icon_count", 0));
                 bundle.putInt("layout_style", sp.getInt("layout_style", HyperOpenConfig.LAYOUT_HONEYCOMB));
+                bundle.putBoolean("stock_system_anim", sp.getBoolean("stock_system_anim", true));
+                bundle.putBoolean("stock_system_region", sp.getBoolean("stock_system_region", true));
                 bundle.putInt("ring_count", sp.getInt("ring_count", 2));
                 bundle.putFloat("max_scale", sp.getFloat("max_scale", 1.40f));
                 bundle.putInt("influence_radius", sp.getInt("influence_radius", 70));

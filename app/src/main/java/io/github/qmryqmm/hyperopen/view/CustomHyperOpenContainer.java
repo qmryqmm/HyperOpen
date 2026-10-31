@@ -22,6 +22,7 @@ import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory;
 import io.github.qmryqmm.hyperopen.layout.CircularHoneycombPacking;
 import io.github.qmryqmm.hyperopen.layout.ArcFanPacking;
 import io.github.qmryqmm.hyperopen.layout.HollowRingPacking;
+import io.github.qmryqmm.hyperopen.layout.StockFanPacking;
 import io.github.qmryqmm.hyperopen.model.ShortcutItem;
 
 import java.util.ArrayList;
@@ -48,6 +49,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
     private CircularRegionBackdropView regionBackdrop;
     private FrameLayout bubblesContainer;
     private final List<CircularBubbleView> bubbles = new ArrayList<>();
+    private final List<StockFanPacking.StockItemSpec> stockSpecs = new ArrayList<>();
     private CircularBubbleView currentSelectedBubble = null;
 
     private Vibrator vibrator;
@@ -397,7 +399,25 @@ public class CustomHyperOpenContainer extends FrameLayout {
         // 计算布局坐标（紧凑度偏移量对蜂窝、空心圆环与弧形扇面通用）
         float spacingOffsetPx = dpToPx(config.iconSpacingOffset);
         List<PointF> points;
-        if (config.layoutStyle == HyperOpenConfig.LAYOUT_RING) {
+        stockSpecs.clear();
+
+        if (config.layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
+            // 系统经典扇形布局：直接调用 StockFanPacking（对齐小米系统 45°/60° 扇面与 Region 扇区多边形判定）
+            // 扇面扩散半径对齐系统原生（约 140dp 视界尺度）
+            float stockRadius = Math.max(regionRadiusPx * 0.95f, iconSizePx * 1.8f);
+            List<StockFanPacking.StockItemSpec> specs = StockFanPacking.calculate(
+                activeItems.size(),
+                fodCenterX,
+                fodCenterY,
+                stockRadius,
+                iconSizePx
+            );
+            stockSpecs.addAll(specs);
+            points = new ArrayList<>(specs.size());
+            for (StockFanPacking.StockItemSpec spec : specs) {
+                points.add(spec.center);
+            }
+        } else if (config.layoutStyle == HyperOpenConfig.LAYOUT_RING) {
             // 空心同心圆环布局：中心留空，图标排布在 ringCount 圈同心环上
             points = HollowRingPacking.calculatePoints(
                 activeItems.size(),
@@ -495,6 +515,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
     }
 
     private void playExpandAnimation() {
+        boolean isStockSystem = (config != null && config.layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK);
+        boolean useStockAnim = isStockSystem && config.stockSystemAnim;
+
         for (int i = 0; i < bubbles.size(); i++) {
             final CircularBubbleView b = bubbles.get(i);
             b.animate().cancel();
@@ -503,25 +526,43 @@ public class CustomHyperOpenContainer extends FrameLayout {
 
             b.setTranslationX(startTranslationX);
             b.setTranslationY(startTranslationY);
-            b.setScaleX(0.1f);
-            b.setScaleY(0.1f);
-            b.setAlpha(0f);
-            b.syncBlurCornerRadiusWithViewScale();
 
-            // SkRRect::setRectRadii 在 RenderThread 合成时自动钳制圆角保持 100% 正圆，
-            // 无需设置每帧 ValueAnimator UpdateListener 反射调用 updateCornerRadius
-            b.animate()
-                .translationX(0f)
-                .translationY(0f)
-                .scaleX(1.0f)
-                .scaleY(1.0f)
-                .alpha(1.0f)
-                .setInterpolator(EXPAND_INTERPOLATOR)
-                .setDuration(320)
-                .setStartDelay(i * 15L)
-                .setUpdateListener(null)
-                .withEndAction(() -> b.applyScale(1.0f))
-                .start();
+            if (useStockAnim) {
+                // 系统原生动画规格：从指纹中心直线平移飞出，时长 150ms，配合透明度渐入 (Scale 保持 1.0)
+                b.setScaleX(1.0f);
+                b.setScaleY(1.0f);
+                b.setAlpha(0f);
+                b.animate()
+                    .translationX(0f)
+                    .translationY(0f)
+                    .scaleX(1.0f)
+                    .scaleY(1.0f)
+                    .alpha(1.0f)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .setDuration(150)
+                    .setStartDelay(0L)
+                    .setUpdateListener(null)
+                    .withEndAction(() -> b.applyScale(1.0f))
+                    .start();
+            } else {
+                b.setScaleX(0.1f);
+                b.setScaleY(0.1f);
+                b.setAlpha(0f);
+                b.syncBlurCornerRadiusWithViewScale();
+
+                b.animate()
+                    .translationX(0f)
+                    .translationY(0f)
+                    .scaleX(1.0f)
+                    .scaleY(1.0f)
+                    .alpha(1.0f)
+                    .setInterpolator(EXPAND_INTERPOLATOR)
+                    .setDuration(320)
+                    .setStartDelay(i * 15L)
+                    .setUpdateListener(null)
+                    .withEndAction(() -> b.applyScale(1.0f))
+                    .start();
+            }
         }
     }
 
@@ -545,6 +586,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
      * 手指滑动时调用：计算实时鱼眼动力学与命中目标
      */
     public void onFingerMove(float touchX, float touchY) {
+        boolean isStockSystem = (config != null && config.layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK);
+        boolean useStockRegion = isStockSystem && config.stockSystemRegion;
+
         float influenceRadiusPx = dpToPx(config.influenceRadius);
         float iconSizePx = dpToPx(config.iconSize);
         float hitDistanceThreshold = iconSizePx * 0.95f;
@@ -552,30 +596,48 @@ public class CustomHyperOpenContainer extends FrameLayout {
         CircularBubbleView closest = null;
         float minDistance = Float.MAX_VALUE;
 
-        for (int i = 0, n = bubbles.size(); i < n; i++) {
-            CircularBubbleView b = bubbles.get(i);
-            float dx = touchX - b.targetX;
-            float dy = touchY - b.targetY;
-            float dist = (float) Math.hypot(dx, dy);
-            if (dist < minDistance) {
-                minDistance = dist;
-                closest = b;
+        if (useStockRegion && !stockSpecs.isEmpty()) {
+            // 系统原生 Region 扇形多边形判定模式
+            int hitIndex = StockFanPacking.findTouchedIndex(stockSpecs, touchX, touchY, fodCenterX, fodCenterY);
+            if (hitIndex >= 0 && hitIndex < bubbles.size()) {
+                closest = bubbles.get(hitIndex);
+                minDistance = 0f; // 明确命中扇区
             }
+            // 系统原生模式下：对所有气泡应用基础尺寸，或被命中气泡应用选中倍率
+            for (int i = 0, n = bubbles.size(); i < n; i++) {
+                CircularBubbleView b = bubbles.get(i);
+                float scale = (b == closest) ? config.selectedIconScale : 1.0f;
+                b.applyScale(scale);
+                b.setIconAlpha(config.iconAlpha);
+            }
+        } else {
+            // 经典连续余弦鱼眼动力学与欧氏距离判定模式
+            for (int i = 0, n = bubbles.size(); i < n; i++) {
+                CircularBubbleView b = bubbles.get(i);
+                float dx = touchX - b.targetX;
+                float dy = touchY - b.targetY;
+                float dist = (float) Math.hypot(dx, dy);
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    closest = b;
+                }
 
-            // 连续余弦鱼眼缩放与动态放大透明度曲线
-            float scale = 1.0f;
-            float currentAlpha = config.iconAlpha;
-            if (dist < influenceRadiusPx) {
-                float factor = (float) Math.cos((dist / influenceRadiusPx) * (Math.PI / 2.0));
-                scale = 1.0f + (config.maxScale - 1.0f) * factor;
-                currentAlpha = config.iconAlpha + (config.fisheyeZoomAlpha - config.iconAlpha) * factor;
+                // 连续余弦鱼眼缩放与动态放大透明度曲线
+                float scale = 1.0f;
+                float currentAlpha = config.iconAlpha;
+                if (dist < influenceRadiusPx) {
+                    float factor = (float) Math.cos((dist / influenceRadiusPx) * (Math.PI / 2.0));
+                    scale = 1.0f + (config.maxScale - 1.0f) * factor;
+                    currentAlpha = config.iconAlpha + (config.fisheyeZoomAlpha - config.iconAlpha) * factor;
+                }
+                b.applyScale(scale);
+                b.setIconAlpha(currentAlpha);
             }
-            b.applyScale(scale);
-            b.setIconAlpha(currentAlpha);
         }
 
         // 判定选中项
-        if (closest != null && minDistance < hitDistanceThreshold) {
+        boolean isSelected = (useStockRegion ? (closest != null) : (closest != null && minDistance < hitDistanceThreshold));
+        if (isSelected) {
             if (currentSelectedBubble != closest) {
                 if (currentSelectedBubble != null) {
                     currentSelectedBubble.setSelectedState(false);

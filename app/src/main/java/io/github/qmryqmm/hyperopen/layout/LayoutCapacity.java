@@ -32,8 +32,10 @@ public class LayoutCapacity {
      */
     public static int maxFeasibleCount(int layoutStyle, float regionRadiusPx, float iconSizePx,
                                        float spacingOffsetPx, int ringCount) {
-        // 弧形扇面无几何上限（>7 个自动转双弧），按滑块设计上限处理
-        if (layoutStyle == HyperOpenConfig.LAYOUT_ARC) return MAX_VISIBLE;
+        // 弧形扇面与系统扇形布局无蜂窝拥挤几何上限（系统扇形经典支持 3~5 项，向上兼容至多项），按滑块设计上限处理
+        if (layoutStyle == HyperOpenConfig.LAYOUT_ARC || layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
+            return MAX_VISIBLE;
+        }
 
         List<PointF> pts;
         if (layoutStyle == HyperOpenConfig.LAYOUT_RING) {

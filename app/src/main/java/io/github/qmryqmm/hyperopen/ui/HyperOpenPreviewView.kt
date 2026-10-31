@@ -21,6 +21,7 @@ import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory
 import io.github.qmryqmm.hyperopen.layout.ArcFanPacking
 import io.github.qmryqmm.hyperopen.layout.CircularHoneycombPacking
 import io.github.qmryqmm.hyperopen.layout.HollowRingPacking
+import io.github.qmryqmm.hyperopen.layout.StockFanPacking
 import io.github.qmryqmm.hyperopen.model.ShortcutItem
 import io.github.qmryqmm.hyperopen.view.CircularBubbleView
 import io.github.qmryqmm.hyperopen.view.CircularRegionBackdropView
@@ -660,7 +661,17 @@ class HyperOpenPreviewView(
 
         // 计算布局坐标（图标紧凑程度对蜂窝、空心圆环与弧形扇面通用）
         val spacingOffsetPx = dpToPx(config.iconSpacingOffset.toFloat())
-        val points = if (config.layoutStyle == HyperOpenConfig.LAYOUT_RING) {
+        val points = if (config.layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
+            // 系统经典扇形布局：调用 StockFanPacking
+            val stockRadius = maxOf(regionRadiusPx * 0.95f, iconSizePx * 1.8f)
+            StockFanPacking.calculatePoints(
+                activeShortcuts.size,
+                fodX,
+                fodY,
+                stockRadius,
+                iconSizePx
+            )
+        } else if (config.layoutStyle == HyperOpenConfig.LAYOUT_RING) {
             // 空心同心圆环：中心留空，图标排布在 ringCount 圈同心环上
             HollowRingPacking.calculatePoints(
                 activeShortcuts.size,

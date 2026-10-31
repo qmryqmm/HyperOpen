@@ -95,8 +95,14 @@ public class HyperOpenConfig {
     public static final int LAYOUT_RING = 1;
     /** 图标布局样式常量：弧形扇面（150° 弧带排布，单弧放不下自动转双弧） */
     public static final int LAYOUT_ARC = 2;
-    /** 图标布局样式 (LAYOUT_HONEYCOMB / LAYOUT_RING / LAYOUT_ARC，默认蜂窝) */
+    /** 图标布局样式常量：系统经典扇形（对齐 MIUI/HyperOS 原生 45°/60° 扇带与直线飞入动画） */
+    public static final int LAYOUT_SYSTEM_STOCK = 3;
+    /** 图标布局样式 (LAYOUT_HONEYCOMB / LAYOUT_RING / LAYOUT_ARC / LAYOUT_SYSTEM_STOCK，默认蜂窝) */
     public int layoutStyle = LAYOUT_HONEYCOMB;
+    /** 系统经典布局：复用系统原生直线飞出展开动画（150ms 轨迹飞入） */
+    public boolean stockSystemAnim = true;
+    /** 系统经典布局：复用系统原生精准扇区多边形选中算法（关闭则走欧氏距离） */
+    public boolean stockSystemRegion = true;
     /** 空心同心圆环布局的同心环圈数 (1 ~ 4，默认 2，中心保持空心) */
     public int ringCount = 2;
     public float maxScale = 1.40f;
@@ -315,6 +321,8 @@ public class HyperOpenConfig {
                     config.iconSize = bundle.getInt("icon_size", 60);
                     config.maxIconCount = bundle.getInt("max_icon_count", 0);
                     config.layoutStyle = bundle.getInt("layout_style", LAYOUT_HONEYCOMB);
+                    config.stockSystemAnim = bundle.getBoolean("stock_system_anim", true);
+                    config.stockSystemRegion = bundle.getBoolean("stock_system_region", true);
                     config.ringCount = bundle.getInt("ring_count", 2);
                     config.maxScale = bundle.getFloat("max_scale", 1.40f);
                     config.influenceRadius = bundle.getInt("influence_radius", 70);
@@ -388,6 +396,8 @@ public class HyperOpenConfig {
         config.iconSize = xPrefs.getInt("icon_size", 60);
         config.maxIconCount = xPrefs.getInt("max_icon_count", 0);
         config.layoutStyle = xPrefs.getInt("layout_style", LAYOUT_HONEYCOMB);
+        config.stockSystemAnim = xPrefs.getBoolean("stock_system_anim", true);
+        config.stockSystemRegion = xPrefs.getBoolean("stock_system_region", true);
         config.ringCount = xPrefs.getInt("ring_count", 2);
         config.maxScale = xPrefs.getFloat("max_scale", 1.40f);
         config.influenceRadius = xPrefs.getInt("influence_radius", 70);
@@ -451,6 +461,8 @@ public class HyperOpenConfig {
         config.iconSize = sp.getInt("icon_size", 60);
         config.maxIconCount = sp.getInt("max_icon_count", 0);
         config.layoutStyle = sp.getInt("layout_style", LAYOUT_HONEYCOMB);
+        config.stockSystemAnim = sp.getBoolean("stock_system_anim", true);
+        config.stockSystemRegion = sp.getBoolean("stock_system_region", true);
         config.ringCount = sp.getInt("ring_count", 2);
         config.maxScale = sp.getFloat("max_scale", 1.40f);
         config.influenceRadius = sp.getInt("influence_radius", 70);
@@ -514,6 +526,8 @@ public class HyperOpenConfig {
             .putInt("icon_size", iconSize)
             .putInt("max_icon_count", maxIconCount)
             .putInt("layout_style", layoutStyle)
+            .putBoolean("stock_system_anim", stockSystemAnim)
+            .putBoolean("stock_system_region", stockSystemRegion)
             .putInt("ring_count", ringCount)
             .putFloat("max_scale", maxScale)
             .putInt("influence_radius", influenceRadius)
