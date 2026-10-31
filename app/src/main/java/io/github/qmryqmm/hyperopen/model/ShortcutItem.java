@@ -647,17 +647,40 @@ public class ShortcutItem {
         }
     }
 
-    private static boolean isFlashlightOn = false;
+    private static volatile boolean isFlashlightOn = false;
+    private static volatile boolean torchCallbackRegistered = false;
+
+    private static synchronized void ensureTorchCallback(CameraManager cm) {
+        if (torchCallbackRegistered || cm == null) return;
+        try {
+            cm.registerTorchCallback(new CameraManager.TorchCallback() {
+                @Override
+                public void onTorchModeChanged(String cameraId, boolean enabled) {
+                    isFlashlightOn = enabled;
+                }
+
+                @Override
+                public void onTorchModeUnavailable(String cameraId) {
+                    isFlashlightOn = false;
+                }
+            }, new Handler(Looper.getMainLooper()));
+            torchCallbackRegistered = true;
+        } catch (Throwable t) {
+            Log.w(TAG, "注册手电筒状态回调失败", t);
+        }
+    }
 
     private static void toggleFlashlight(Context context) {
         try {
             CameraManager cm = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
             if (cm != null) {
+                ensureTorchCallback(cm);
                 String[] cameraIdList = cm.getCameraIdList();
                 if (cameraIdList.length > 0) {
                     String cameraId = cameraIdList[0];
-                    isFlashlightOn = !isFlashlightOn;
-                    cm.setTorchMode(cameraId, isFlashlightOn);
+                    boolean nextState = !isFlashlightOn;
+                    cm.setTorchMode(cameraId, nextState);
+                    isFlashlightOn = nextState;
                 }
             }
         } catch (Throwable t) {

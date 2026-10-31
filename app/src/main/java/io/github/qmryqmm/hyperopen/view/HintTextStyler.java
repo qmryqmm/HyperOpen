@@ -69,7 +69,9 @@ public final class HintTextStyler {
 
     /** 复位到 idle/默认样式（buildHeader 初始观感：白标题假粗体、0xAA 白副标题、无特效） */
     public static void reset(TextView tv, boolean isTitle) {
-        tv.setVisibility(View.VISIBLE);
+        if (tv.getVisibility() != View.VISIBLE) {
+            tv.setVisibility(View.VISIBLE);
+        }
         tv.setTextColor(isTitle ? Color.WHITE : 0xAAFFFFFF);
         tv.setShadowLayer(0f, 0f, 0f, 0);
         if (tv instanceof StrokeTextView) {

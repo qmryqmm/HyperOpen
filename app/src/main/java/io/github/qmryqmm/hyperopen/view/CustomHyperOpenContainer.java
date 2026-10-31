@@ -101,6 +101,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
     public void updateConfig(HyperOpenConfig newConfig) {
         if (newConfig != null) {
             this.config = newConfig;
+            if (config.layoutStyle != HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
+                stockSpecs.clear();
+            }
             this.resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(getContext(), config.materialStyle);
             if (regionBackdrop != null) {
                 regionBackdrop.setStyle(resolvedStyle);
