@@ -158,7 +158,9 @@ public final class SafetyGuard {
             // 否则一旦 Hook 在安装过程中就崩掉，这次崩溃就归不了因。
             call(ctx, M_PROVIDER_MARK, null);
             scheduleHeartbeat();
-            startRuntimeWatch();
+            // 不再启用死循环式的 10s 运行期巡检 (startRuntimeWatch)：
+            // 避免在用户长时间不用手机、模块 App 进程被系统深度冻结/杀死后，因跨进程 IPC 异常引发误停用。
+            // 外部安全状态变更统一通过广播按需驱动刷新。
         }
 
         return allowed;

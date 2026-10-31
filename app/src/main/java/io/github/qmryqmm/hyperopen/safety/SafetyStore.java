@@ -298,6 +298,11 @@ public final class SafetyStore {
             e.apply();
             applyWorldReadable(ctx);
             Log.i(TAG, "Hook 总开关已设置为: " + enabled);
+            try {
+                android.content.Intent notify = new android.content.Intent(HyperOpenConfig.ACTION_CONFIG_CHANGED);
+                notify.setPackage("com.android.systemui");
+                ctx.sendBroadcast(notify);
+            } catch (Throwable ignored) {}
             return getStateLocked(p);
         }
     }

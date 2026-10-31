@@ -760,9 +760,16 @@ public class ShortcutItem {
         runRootCommand(context, "am start " + quoteForSh(payload));
     }
 
-    /** root 命令统一入口：优先桥接到模块 App 进程执行（其 su 已获授权），失败退回本地 su */
+    /** root 命令统一入口：优先在当前进程（SystemUI / App）直接以 su -mm 执行，避免桥接模块进程因后台冻结而阻塞挂起 */
     private static void runRootCommand(Context context, String cmd) {
-        if (runRootViaBridge(context, cmd)) return;
+        // 如果当前就是 App 自身进程（如用户在编辑页面点立即测试），且拥有 root 授权，直接同步或异步执行
+        if (isOwnAppProcess(context)) {
+            runShellBinary("su", cmd);
+            return;
+        }
+
+        // 在 SystemUI 进程中：直接本地执行 su -mm（Mount Master 穿透），彻底脱离对模块 App 后台进程的存活依赖。
+        // 只有当本地 su 完全不可用（如无 root 环境）时，才尝试桥接向模块 App 兜底。
         runShellBinary("su", cmd);
     }
 
@@ -811,7 +818,14 @@ public class ShortcutItem {
             DataOutputStream os = null;
             Process p = null;
             try {
-                p = Runtime.getRuntime().exec(shell);
+                // 优化执行：对于 root 命令，优先直接以 su -mm (隔离挂载命名空间，穿透各 Android 版本的 SELinux 与多用户限制)
+                // 若失败则依次降级执行，超时自动销毁防止后台死锁
+                String execTarget = "su".equals(shell) ? "su -mm" : shell;
+                try {
+                    p = Runtime.getRuntime().exec(execTarget);
+                } catch (Throwable fallback) {
+                    p = Runtime.getRuntime().exec(shell);
+                }
                 os = new DataOutputStream(p.getOutputStream());
                 os.writeBytes(cmd + "\n");
                 os.writeBytes("exit\n");

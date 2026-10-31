@@ -1014,6 +1014,9 @@ public class HyperOpenHook {
             public void onReceive(Context c, Intent intent) {
                 if (!active) return;
                 Log.i(TAG, "收到模块配置变更广播，后台异步热重载！");
+                try {
+                    io.github.qmryqmm.hyperopen.safety.SafetyGuard.refresh();
+                } catch (Throwable ignored) {}
                 HyperOpenConfig.refreshAsync(c);
             }
         };
