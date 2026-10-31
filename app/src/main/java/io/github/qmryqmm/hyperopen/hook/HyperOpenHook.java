@@ -349,6 +349,10 @@ public class HyperOpenHook {
                     container.bringToFront();
                     container.setupAndExpand(fodX, fodY);
                     Log.i(TAG, "CustomHyperOpenContainer 展开成功，指纹中心: (" + fodX + ", " + fodY + ")");
+
+                    // 在指纹快捷面板完全展开展示的这一瞬间，后台轻量唤醒/解冻模块 App 进程（纯粹 Provider 探活，零前台弹窗）
+                    // 若用户随后滑动选中了依赖 Root 的快捷方式，模块已被解冻处于活跃态，am start 命令可秒级响应
+                    warmupModuleProcessAsync(view.getContext());
                 }
             }));
 
@@ -1221,6 +1225,23 @@ public class HyperOpenHook {
 
         Log.e(TAG, "安全模式已停用全部 Hook，共卸载 " + removed + " 个回调，SystemUI 已恢复原生行为");
         return removed;
+    }
+
+    /**
+     * 在指纹面板完全展开时后台静默唤醒模块进程（通过纯粹的 ContentProvider ping 探活，不展示任何 Activity）。
+     * 消除系统 Linux cgroup v2 Freezer 挂起导致的跨进程延迟，为潜在的 Root 动作提前预热解冻。
+     */
+    private static void warmupModuleProcessAsync(Context context) {
+        if (context == null) return;
+        final Context appCtx = context.getApplicationContext() != null ? context.getApplicationContext() : context;
+        io.github.qmryqmm.hyperopen.util.IpcExecutor.runAsync(() -> {
+            try {
+                appCtx.getContentResolver().call(
+                    android.net.Uri.parse("content://io.github.qmryqmm.hyperopen.provider"),
+                    "ping", null, null
+                );
+            } catch (Throwable ignored) {}
+        });
     }
 
     private static Point getDisplaySize(Context context) {

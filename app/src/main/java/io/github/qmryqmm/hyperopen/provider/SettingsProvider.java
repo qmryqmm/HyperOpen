@@ -21,6 +21,8 @@ public class SettingsProvider extends ContentProvider {
 
     public static final String METHOD_GET_CONFIG = "get_config";
     public static final String METHOD_SAVE_FOD_CENTER = "save_fod_center";
+    /** 轻量后台保活/解冻 Ping：仅用于在指纹面板展开时后台解冻模块进程，绝不启动任何前台 Activity */
+    public static final String METHOD_PING = "ping";
     /**
      * 跨进程 Shell/Root 执行桥：SystemUI 侧把命令交回模块 App 进程执行。
      * 背景：SystemUI 进程里 su 请求 root 时 Magisk 无法弹授权/超时；模块 App 进程的 su 已获授权。
@@ -127,6 +129,13 @@ public class SettingsProvider extends ContentProvider {
                 } catch (Throwable ignored) {}
             }
             return new Bundle();
+        }
+
+        if (METHOD_PING.equals(method)) {
+            // 轻量静默探活：宿主拉起即完成解冻，不产生任何前台弹窗或界面展示
+            Bundle r = new Bundle();
+            r.putBoolean("pong", true);
+            return r;
         }
 
         if (METHOD_RUN_SHELL.equals(method)) {

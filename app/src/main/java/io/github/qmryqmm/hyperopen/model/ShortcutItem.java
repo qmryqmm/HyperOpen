@@ -783,16 +783,23 @@ public class ShortcutItem {
         runRootCommand(context, "am start " + quoteForSh(payload));
     }
 
-    /** root 命令统一入口：优先在当前进程（SystemUI / App）直接以 su -mm 执行，避免桥接模块进程因后台冻结而阻塞挂起 */
+    /**
+     * root 命令统一入口：优先桥接给拥有 Root 授权的模块 App 后台代理执行（避免 SystemUI/KernelSU 无权调用 su）；
+     * 若桥接未受理或无响应，自动降级回退到当前进程本地 su 执行。
+     */
     private static void runRootCommand(Context context, String cmd) {
-        // 如果当前就是 App 自身进程（如用户在编辑页面点立即测试），且拥有 root 授权，直接同步或异步执行
+        // 如果当前就是 App 自身进程（如用户在编辑页面点立即测试），直接本地执行
         if (isOwnAppProcess(context)) {
             runShellBinary("su", cmd);
             return;
         }
 
-        // 在 SystemUI 进程中：直接本地执行 su -mm（Mount Master 穿透），彻底脱离对模块 App 后台进程的存活依赖。
-        // 只有当本地 su 完全不可用（如无 root 环境）时，才尝试桥接向模块 App 兜底。
+        // 在 SystemUI 进程中：
+        // 因面板完全展开时已静默预热解冻模块进程，此处桥接将直接由已解冻的模块 App 秒级执行；
+        // 若桥接失败再回退本地尝试
+        if (runRootViaBridge(context, cmd)) {
+            return;
+        }
         runShellBinary("su", cmd);
     }
 
