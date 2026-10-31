@@ -512,6 +512,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
 
         setAlpha(1.0f);
         playExpandAnimation();
+
+        // 唤出快捷方式面板后的专属震动反馈（对齐系统原生 startShowQuickOpenItemAnimation 震动样式，且跟随模块震动参数）：
+        triggerHaptic();
     }
 
     private void playExpandAnimation() {

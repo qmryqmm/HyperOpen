@@ -1455,14 +1455,16 @@ fun ParamsPage(
                     valueRange = 0f..450f,
                     onValueChange = onOffsetY,
                 )
-                SliderPreference(
-                    title = "圆形视界直径",
-                    summary = "修改此项同时会影响最大图标显示数量",
-                    valueText = "${regionDiameter.toInt()} dp",
-                    value = regionDiameter,
-                    valueRange = 150f..420f,
-                    onValueChange = onRegionDiameter,
-                )
+                if (layoutStyle != HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
+                    SliderPreference(
+                        title = "圆形视界直径",
+                        summary = "修改此项同时会影响最大图标显示数量",
+                        valueText = "${regionDiameter.toInt()} dp",
+                        value = regionDiameter,
+                        valueRange = 150f..420f,
+                        onValueChange = onRegionDiameter,
+                    )
+                }
                 RadioButtonPreference(
                     title = "蜂窝阵列布局",
                     summary = "图标紧凑排布在整个圆形视界内（默认）",
@@ -1523,28 +1525,30 @@ fun ParamsPage(
                     valueRange = 0f..maxOf(iconCapacity, 1).toFloat(),
                     onValueChange = onMaxIconCount,
                 )
-                SwitchPreference(
-                    title = "显示圆形区域底衬与边框",
-                    checked = showRegionBg,
-                    onCheckedChange = onShowRegionBg,
-                )
-                if (showRegionBg) {
-                    SliderPreference(
-                        title = "圆形视界背景模糊半径",
-                        summary = "结合高斯模糊与次表面散射渲染毛玻璃底盘",
-                        valueText = if (regionBlurRadius.toInt() == 0) "已关闭模糊" else "${regionBlurRadius.toInt()} dp",
-                        value = regionBlurRadius,
-                        valueRange = 0f..50f,
-                        onValueChange = onRegionBlurRadius,
+                if (layoutStyle != HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
+                    SwitchPreference(
+                        title = "显示圆形区域底衬与边框",
+                        checked = showRegionBg,
+                        onCheckedChange = onShowRegionBg,
                     )
-                    SliderPreference(
-                        title = "圆形视界背景压暗程度",
-                        summary = "在毛玻璃底盘之上叠加黑色压暗，提升图标对比度",
-                        valueText = if (kotlin.math.round(regionDimAlpha * 100f) <= 0.5f) "不压暗" else "${kotlin.math.round(regionDimAlpha * 100f).toInt()} %",
-                        value = regionDimAlpha * 100f,
-                        valueRange = 0f..100f,
-                        onValueChange = { onRegionDimAlpha(it / 100f) },
-                    )
+                    if (showRegionBg) {
+                        SliderPreference(
+                            title = "圆形视界背景模糊半径",
+                            summary = "结合高斯模糊与次表面散射渲染毛玻璃底盘",
+                            valueText = if (regionBlurRadius.toInt() == 0) "已关闭模糊" else "${regionBlurRadius.toInt()} dp",
+                            value = regionBlurRadius,
+                            valueRange = 0f..50f,
+                            onValueChange = onRegionBlurRadius,
+                        )
+                        SliderPreference(
+                            title = "圆形视界背景压暗程度",
+                            summary = "在毛玻璃底盘之上叠加黑色压暗，提升图标对比度",
+                            valueText = if (kotlin.math.round(regionDimAlpha * 100f) <= 0.5f) "不压暗" else "${kotlin.math.round(regionDimAlpha * 100f).toInt()} %",
+                            value = regionDimAlpha * 100f,
+                            valueRange = 0f..100f,
+                            onValueChange = { onRegionDimAlpha(it / 100f) },
+                        )
+                    }
                 }
             }
         }

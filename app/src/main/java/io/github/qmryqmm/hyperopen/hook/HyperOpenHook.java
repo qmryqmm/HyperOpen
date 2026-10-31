@@ -584,6 +584,36 @@ public class HyperOpenHook {
         } catch (Throwable t) {
             Log.w(TAG, "Hook KeyguardUpdateMonitorInjector.isFingerprintUnlock 失败", t);
         }
+
+        // 7. Hook MiuiGxzwIconView$1.run() (mGotoUnlockRunnable)：
+        //    在人脸识别成功停留在锁屏时，用户按指纹图标进入桌面时添加震动，
+        //    震动反馈与正常指纹解锁一致，且跟随模块震动参数（模式、强度、时长与总开关）。
+        try {
+            Class<?> gotoUnlockClass = XposedHelpers.findClass(
+                "com.miui.keyguard.biometrics.fod.MiuiGxzwIconView$1", cl
+            );
+            record(XposedHelpers.findAndHookMethod(
+                gotoUnlockClass, "run", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (!active) return;
+                        HyperOpenConfig cfg = HyperOpenConfig.getCached();
+                        if (cfg == null || !cfg.hapticEnabled) return;
+                        try {
+                            Object iconView = XposedHelpers.getObjectField(param.thisObject, "this$0");
+                            if (iconView instanceof View) {
+                                Context ctx = ((View) iconView).getContext();
+                                android.os.Vibrator v = (android.os.Vibrator) ctx.getSystemService(Context.VIBRATOR_SERVICE);
+                                CustomHyperOpenContainer.performConfiguredHaptic(v, cfg);
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                }
+            ));
+            Log.i(TAG, "已成功安装 MiuiGxzwIconView$1.run 人脸解锁按指纹进桌面触觉震动 Hook！");
+        } catch (Throwable t) {
+            Log.w(TAG, "Hook MiuiGxzwIconView$1 失败", t);
+        }
     }
 
     /**

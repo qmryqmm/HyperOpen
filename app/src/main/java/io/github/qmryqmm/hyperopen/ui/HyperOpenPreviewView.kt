@@ -87,9 +87,12 @@ class HyperOpenPreviewView(
     private lateinit var regionBackdrop: CircularRegionBackdropView
     private lateinit var bubblesContainer: FrameLayout
     private val bubbleViews = mutableListOf<CircularBubbleView>()
+    private val stockSpecs = mutableListOf<StockFanPacking.StockItemSpec>()
     private val activeShortcuts = mutableListOf<ShortcutItem>()
     private val gridPoints = mutableListOf<PointF>()
 
+    private var lastFodX = 0f
+    private var lastFodY = 0f
     private var lastRegionCenterX = 0f
     private var lastRegionCenterY = 0f
     private var lastRegionDiameterPx = 0f
@@ -620,6 +623,8 @@ class HyperOpenPreviewView(
         val regionRadiusPx = regionDiameterPx / 2f
         val iconSizePx = dpToPx(config.iconSize.toFloat())
 
+        lastFodX = fodX
+        lastFodY = fodY
         lastRegionCenterX = fodX
         lastRegionCenterY = regionCenterY
         lastRegionDiameterPx = regionDiameterPx
@@ -661,16 +666,19 @@ class HyperOpenPreviewView(
 
         // 计算布局坐标（图标紧凑程度对蜂窝、空心圆环与弧形扇面通用）
         val spacingOffsetPx = dpToPx(config.iconSpacingOffset.toFloat())
+        stockSpecs.clear()
         val points = if (config.layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
             // 系统经典扇形布局：调用 StockFanPacking
             val stockRadius = maxOf(regionRadiusPx * 0.95f, iconSizePx * 1.8f)
-            StockFanPacking.calculatePoints(
+            val specs = StockFanPacking.calculate(
                 activeShortcuts.size,
                 fodX,
                 fodY,
                 stockRadius,
                 iconSizePx
             )
+            stockSpecs.addAll(specs)
+            specs.map { it.center }
         } else if (config.layoutStyle == HyperOpenConfig.LAYOUT_RING) {
             // 空心同心圆环：中心留空，图标排布在 ringCount 圈同心环上
             HollowRingPacking.calculatePoints(
@@ -1175,6 +1183,9 @@ class HyperOpenPreviewView(
      * 模拟指纹滑动物理动力学
      */
     private fun handleFingerHover(touchX: Float, touchY: Float) {
+        val isStockSystem = (config.layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK)
+        val useStockRegion = isStockSystem && config.stockSystemRegion
+
         val influenceRadiusPx = dpToPx(config.influenceRadius.toFloat())
         val iconSizePx = dpToPx(config.iconSize.toFloat())
         val hitDistanceThreshold = iconSizePx * 0.95f
@@ -1182,29 +1193,44 @@ class HyperOpenPreviewView(
         var closest: CircularBubbleView? = null
         var minDistance = Float.MAX_VALUE
 
-        for (b in bubbleViews) {
-            val dist = Math.hypot((touchX - b.targetX).toDouble(), (touchY - b.targetY).toDouble()).toFloat()
-            if (dist < minDistance) {
-                minDistance = dist
-                closest = b
+        if (useStockRegion && stockSpecs.isNotEmpty()) {
+            val hitIndex = StockFanPacking.findTouchedIndex(stockSpecs, touchX, touchY, lastFodX, lastFodY)
+            if (hitIndex >= 0 && hitIndex < bubbleViews.size) {
+                closest = bubbleViews[hitIndex]
+                minDistance = 0f
             }
+            for (b in bubbleViews) {
+                val scale = if (b == closest) config.selectedIconScale else 1.0f
+                b.applyScale(scale)
+                b.setIconAlpha(config.iconAlpha)
+            }
+        } else {
+            for (b in bubbleViews) {
+                val dist = Math.hypot((touchX - b.targetX).toDouble(), (touchY - b.targetY).toDouble()).toFloat()
+                if (dist < minDistance) {
+                    minDistance = dist
+                    closest = b
+                }
 
-            var scale = 1.0f
-            var currentAlpha = config.iconAlpha
-            if (dist < influenceRadiusPx) {
-                val factor = Math.cos((dist / influenceRadiusPx) * (Math.PI / 2.0)).toFloat()
-                scale = 1.0f + (config.maxScale - 1.0f) * factor
-                currentAlpha = config.iconAlpha + (config.fisheyeZoomAlpha - config.iconAlpha) * factor
+                var scale = 1.0f
+                var currentAlpha = config.iconAlpha
+                if (dist < influenceRadiusPx) {
+                    val factor = Math.cos((dist / influenceRadiusPx) * (Math.PI / 2.0)).toFloat()
+                    scale = 1.0f + (config.maxScale - 1.0f) * factor
+                    currentAlpha = config.iconAlpha + (config.fisheyeZoomAlpha - config.iconAlpha) * factor
+                }
+                b.applyScale(scale)
+                b.setIconAlpha(currentAlpha)
             }
-            b.applyScale(scale)
-            b.setIconAlpha(currentAlpha)
         }
 
-        if (closest != null && minDistance < hitDistanceThreshold) {
+        val isSelected = if (useStockRegion) (closest != null) else (closest != null && minDistance < hitDistanceThreshold)
+
+        if (isSelected) {
             if (currentSelectedBubble != closest) {
                 currentSelectedBubble?.setSelectedState(false)
 
-                closest.setSelectedState(true)
+                closest!!.setSelectedState(true)
                 closest.bringToFront()
                 currentSelectedBubble = closest
 
