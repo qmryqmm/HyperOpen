@@ -118,7 +118,7 @@
 ## 📄 相关信息
 
 - **包名**：`io.github.qmryqmm.hyperopen`
-- **当前版本**：`v0.34`
+- **当前版本**：`v0.40`
 - **作者**：[青冥日月](https://www.coolapk.com/u/3268816)
 - **项目地址**：[HyperOpen](https://github.com/qmryqmm/HyperOpen)
 - **UI 框架**：[Miuix KMP](https://github.com/miuix-kotlin-multiplatform/miuix)
