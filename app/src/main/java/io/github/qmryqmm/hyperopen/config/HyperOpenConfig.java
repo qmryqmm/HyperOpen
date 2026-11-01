@@ -49,12 +49,19 @@ public class HyperOpenConfig {
     public static final int PAGE_GESTURE_OFF = 0;
     public static final int PAGE_GESTURE_HORIZONTAL = 1;
 
-    /** 震动模式：0=清脆短震(TICK), 1=标准点按(CLICK), 2=浑厚反馈(HEAVY_CLICK), 3=双脉冲(DOUBLE_CLICK), 4=自定义时长脉冲(CUSTOM) */
+    /** 震动模式：0=清脆短震(TICK), 1=标准点按(CLICK), 2=浑厚反馈(HEAVY_CLICK), 3=双脉冲(DOUBLE_CLICK), 4=自定义时长脉冲(CUSTOM), 5=系统原生触感(STOCK_MIUI) */
     public static final int HAPTIC_MODE_TICK = 0;
     public static final int HAPTIC_MODE_CLICK = 1;
     public static final int HAPTIC_MODE_HEAVY = 2;
     public static final int HAPTIC_MODE_DOUBLE = 3;
     public static final int HAPTIC_MODE_CUSTOM = 4;
+    public static final int HAPTIC_MODE_STOCK = 5;
+
+    /** MIUI 线性马达官方预设波形：0=长按回弹(long_press), 1=网格微动(mesh_normal), 2=轻触颗粒(flick), 3=弹性质感(pop) */
+    public static final int HAPTIC_STOCK_WAVE_LONG_PRESS = 0;
+    public static final int HAPTIC_STOCK_WAVE_MESH_NORMAL = 1;
+    public static final int HAPTIC_STOCK_WAVE_FLICK = 2;
+    public static final int HAPTIC_STOCK_WAVE_POP = 3;
 
     public int materialStyle = MATERIAL_GAUSSIAN_BLUR;
     /** 设置界面风格（仅 App 内生效）：UI_STYLE_MATERIAL / UI_STYLE_MIUIX */
@@ -124,11 +131,24 @@ public class HyperOpenConfig {
     /** 人脸识别成功停留在锁屏时，按指纹进桌面并支持长按唤出快捷方式 (默认开启) */
     public boolean faceUnlockQuickOpen = true;
 
-    /** 震动反馈配置 */
-    public boolean hapticEnabled = true;           // 震动总开关
-    public int hapticStrength = 140;               // 震动强度 (1 ~ 255，默认 140)
-    public int hapticDurationMs = 12;              // 自定义震动时长 (4 ~ 80 ms，默认 12 ms)
-    public int hapticMode = HAPTIC_MODE_CLICK;     // 震动模式/波形 (0~4)
+    /* ===== 震动反馈配置（进入展开与手指滑动完全解耦独立控制） ===== */
+    /** 进入快捷方式展开面板时的震动总开关 */
+    public boolean hapticEnabled = true;
+    public int hapticStrength = 140;               // 展开震动强度 (1 ~ 255，默认 140)
+    public int hapticDurationMs = 24;              // 展开自定义震动时长 (4 ~ 80 ms，默认对齐官方降级 24 ms)
+    public int hapticMode = HAPTIC_MODE_STOCK;     // 展开震动模式 (默认 5 = 系统原生触感)
+    public int hapticStockWaveExpand = HAPTIC_STOCK_WAVE_LONG_PRESS; // 展开系统原生波形 (long_press)
+    public boolean hapticBrakePulse = false;       // 展开反向制动煞停脉冲
+    public int hapticDoubleGapMs = 28;             // 展开双脉冲间隔 (10 ~ 60 ms)
+
+    /** 手指滑动划过气泡时的吸附震动总开关 */
+    public boolean hapticSlideEnabled = true;
+    public int hapticSlideStrength = 100;          // 滑动震动强度 (1 ~ 255，默认 100 偏柔和)
+    public int hapticSlideDurationMs = 12;         // 滑动自定义时长 (4 ~ 80 ms，默认对齐官方降级 12 ms)
+    public int hapticSlideMode = HAPTIC_MODE_STOCK;// 滑动震动模式 (默认 5 = 系统原生触感)
+    public int hapticStockWaveSlide = HAPTIC_STOCK_WAVE_MESH_NORMAL; // 滑动系统原生波形 (mesh_normal)
+    public boolean hapticSlideBrakePulse = false;  // 滑动反向制动煞停脉冲
+    public int hapticSlideDoubleGapMs = 28;        // 滑动双脉冲间隔 (10 ~ 60 ms)
 
     /** 实机 FOD 中心坐标持久化（由 SystemUI 在真实展开时同步写入，供 App 预览 1:1 像素级对齐） */
     public float lastRealFodX = 0f;
@@ -337,8 +357,18 @@ public class HyperOpenConfig {
                     config.faceUnlockQuickOpen = bundle.getBoolean("face_unlock_quick_open", true);
                     config.hapticEnabled = bundle.getBoolean("haptic_enabled", true);
                     config.hapticStrength = bundle.getInt("haptic_strength", 140);
-                    config.hapticDurationMs = bundle.getInt("haptic_duration_ms", 12);
-                    config.hapticMode = bundle.getInt("haptic_mode", HAPTIC_MODE_CLICK);
+                    config.hapticDurationMs = bundle.getInt("haptic_duration_ms", 24);
+                    config.hapticMode = bundle.getInt("haptic_mode", HAPTIC_MODE_STOCK);
+                    config.hapticStockWaveExpand = bundle.getInt("haptic_stock_wave_expand", HAPTIC_STOCK_WAVE_LONG_PRESS);
+                    config.hapticBrakePulse = bundle.getBoolean("haptic_brake_pulse", false);
+                    config.hapticDoubleGapMs = bundle.getInt("haptic_double_gap_ms", 28);
+                    config.hapticSlideEnabled = bundle.getBoolean("haptic_slide_enabled", true);
+                    config.hapticSlideStrength = bundle.getInt("haptic_slide_strength", 100);
+                    config.hapticSlideDurationMs = bundle.getInt("haptic_slide_duration_ms", 12);
+                    config.hapticSlideMode = bundle.getInt("haptic_slide_mode", HAPTIC_MODE_STOCK);
+                    config.hapticStockWaveSlide = bundle.getInt("haptic_stock_wave_slide", HAPTIC_STOCK_WAVE_MESH_NORMAL);
+                    config.hapticSlideBrakePulse = bundle.getBoolean("haptic_slide_brake_pulse", false);
+                    config.hapticSlideDoubleGapMs = bundle.getInt("haptic_slide_double_gap_ms", 28);
                     config.lastRealFodX = bundle.getFloat("last_real_fod_x", 0f);
                     config.lastRealFodY = bundle.getFloat("last_real_fod_y", 0f);
                     config.regionBlurRadius = bundle.getInt("region_blur_radius", 25);
@@ -412,8 +442,18 @@ public class HyperOpenConfig {
         config.faceUnlockQuickOpen = xPrefs.getBoolean("face_unlock_quick_open", true);
         config.hapticEnabled = xPrefs.getBoolean("haptic_enabled", true);
         config.hapticStrength = xPrefs.getInt("haptic_strength", 140);
-        config.hapticDurationMs = xPrefs.getInt("haptic_duration_ms", 12);
-        config.hapticMode = xPrefs.getInt("haptic_mode", HAPTIC_MODE_CLICK);
+        config.hapticDurationMs = xPrefs.getInt("haptic_duration_ms", 24);
+        config.hapticMode = xPrefs.getInt("haptic_mode", HAPTIC_MODE_STOCK);
+        config.hapticStockWaveExpand = xPrefs.getInt("haptic_stock_wave_expand", HAPTIC_STOCK_WAVE_LONG_PRESS);
+        config.hapticBrakePulse = xPrefs.getBoolean("haptic_brake_pulse", false);
+        config.hapticDoubleGapMs = xPrefs.getInt("haptic_double_gap_ms", 28);
+        config.hapticSlideEnabled = xPrefs.getBoolean("haptic_slide_enabled", true);
+        config.hapticSlideStrength = xPrefs.getInt("haptic_slide_strength", 100);
+        config.hapticSlideDurationMs = xPrefs.getInt("haptic_slide_duration_ms", 12);
+        config.hapticSlideMode = xPrefs.getInt("haptic_slide_mode", HAPTIC_MODE_STOCK);
+        config.hapticStockWaveSlide = xPrefs.getInt("haptic_stock_wave_slide", HAPTIC_STOCK_WAVE_MESH_NORMAL);
+        config.hapticSlideBrakePulse = xPrefs.getBoolean("haptic_slide_brake_pulse", false);
+        config.hapticSlideDoubleGapMs = xPrefs.getInt("haptic_slide_double_gap_ms", 28);
         config.lastRealFodX = xPrefs.getFloat("last_real_fod_x", 0f);
         config.lastRealFodY = xPrefs.getFloat("last_real_fod_y", 0f);
         config.regionBlurRadius = xPrefs.getInt("region_blur_radius", 25);
@@ -477,8 +517,18 @@ public class HyperOpenConfig {
         config.faceUnlockQuickOpen = sp.getBoolean("face_unlock_quick_open", true);
         config.hapticEnabled = sp.getBoolean("haptic_enabled", true);
         config.hapticStrength = sp.getInt("haptic_strength", 140);
-        config.hapticDurationMs = sp.getInt("haptic_duration_ms", 12);
-        config.hapticMode = sp.getInt("haptic_mode", HAPTIC_MODE_CLICK);
+        config.hapticDurationMs = sp.getInt("haptic_duration_ms", 24);
+        config.hapticMode = sp.getInt("haptic_mode", HAPTIC_MODE_STOCK);
+        config.hapticStockWaveExpand = sp.getInt("haptic_stock_wave_expand", HAPTIC_STOCK_WAVE_LONG_PRESS);
+        config.hapticBrakePulse = sp.getBoolean("haptic_brake_pulse", false);
+        config.hapticDoubleGapMs = sp.getInt("haptic_double_gap_ms", 28);
+        config.hapticSlideEnabled = sp.getBoolean("haptic_slide_enabled", true);
+        config.hapticSlideStrength = sp.getInt("haptic_slide_strength", 100);
+        config.hapticSlideDurationMs = sp.getInt("haptic_slide_duration_ms", 12);
+        config.hapticSlideMode = sp.getInt("haptic_slide_mode", HAPTIC_MODE_STOCK);
+        config.hapticStockWaveSlide = sp.getInt("haptic_stock_wave_slide", HAPTIC_STOCK_WAVE_MESH_NORMAL);
+        config.hapticSlideBrakePulse = sp.getBoolean("haptic_slide_brake_pulse", false);
+        config.hapticSlideDoubleGapMs = sp.getInt("haptic_slide_double_gap_ms", 28);
         config.lastRealFodX = sp.getFloat("last_real_fod_x", 0f);
         config.lastRealFodY = sp.getFloat("last_real_fod_y", 0f);
         config.regionBlurRadius = sp.getInt("region_blur_radius", 25);
@@ -544,6 +594,16 @@ public class HyperOpenConfig {
             .putInt("haptic_strength", hapticStrength)
             .putInt("haptic_duration_ms", hapticDurationMs)
             .putInt("haptic_mode", hapticMode)
+            .putInt("haptic_stock_wave_expand", hapticStockWaveExpand)
+            .putBoolean("haptic_brake_pulse", hapticBrakePulse)
+            .putInt("haptic_double_gap_ms", hapticDoubleGapMs)
+            .putBoolean("haptic_slide_enabled", hapticSlideEnabled)
+            .putInt("haptic_slide_strength", hapticSlideStrength)
+            .putInt("haptic_slide_duration_ms", hapticSlideDurationMs)
+            .putInt("haptic_slide_mode", hapticSlideMode)
+            .putInt("haptic_stock_wave_slide", hapticStockWaveSlide)
+            .putBoolean("haptic_slide_brake_pulse", hapticSlideBrakePulse)
+            .putInt("haptic_slide_double_gap_ms", hapticSlideDoubleGapMs)
             .putInt("region_blur_radius", regionBlurRadius)
             .putInt("icon_spacing_offset", iconSpacingOffset)
             .putInt("bubble_padding_percent", bubblePaddingPercent)

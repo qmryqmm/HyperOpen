@@ -167,7 +167,11 @@ class HyperOpenPreviewView(
     }
 
     private fun triggerHaptic() {
-        CustomHyperOpenContainer.performConfiguredHaptic(vibrator, config)
+        CustomHyperOpenContainer.performConfiguredHaptic(context, vibrator, config, false)
+    }
+
+    private fun triggerSlideHaptic() {
+        CustomHyperOpenContainer.performConfiguredHaptic(context, vibrator, config, true)
     }
 
     private var lastLayoutW = 0
@@ -1237,7 +1241,7 @@ class HyperOpenPreviewView(
                 // 更新顶部标题（含 hint* 自定义样式：颜色/透明度/投影/描边/字重/字距/显隐）
                 HintTextStyler.apply(headerTitle, closest.item, true)
                 HintTextStyler.apply(headerSubtitle, closest.item, false)
-                triggerHaptic()
+                triggerSlideHaptic()
             }
         } else {
             if (currentSelectedBubble != null) {

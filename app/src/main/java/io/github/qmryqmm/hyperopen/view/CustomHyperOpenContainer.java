@@ -135,50 +135,183 @@ public class CustomHyperOpenContainer extends FrameLayout {
     }
 
     /**
-     * 统一执行自定义震动反馈（支持开关、强弱、波形模式与自定义时长）
+     * 统一执行震动反馈（支持系统原生线性马达波形库、解耦滑动与展开、制动反向脉冲、双脉冲间隔与自定义时长）
      */
     public static void performConfiguredHaptic(Vibrator vibrator, HyperOpenConfig cfg) {
-        if (vibrator == null || !vibrator.hasVibrator()) return;
-        if (cfg != null && !cfg.hapticEnabled) return;
+        performConfiguredHaptic(null, vibrator, cfg, false);
+    }
 
-        int mode = cfg != null ? cfg.hapticMode : HyperOpenConfig.HAPTIC_MODE_CLICK;
-        int strength = cfg != null ? Math.max(1, Math.min(255, cfg.hapticStrength)) : 140;
-        int customDur = cfg != null ? Math.max(4, Math.min(80, cfg.hapticDurationMs)) : 12;
+    public static void performConfiguredHaptic(Context context, Vibrator vibrator, HyperOpenConfig cfg) {
+        performConfiguredHaptic(context, vibrator, cfg, false);
+    }
+
+    /**
+     * 执行震动反馈（进入展开与手指滑动吸附完全解耦独立控制）：
+     * @param isSlideAction true 为手指在展开面板上滑动选中气泡时的吸附震动；false 为唤醒展开/松手确认/测试震动
+     */
+    public static void performConfiguredHaptic(Context context, Vibrator vibrator, HyperOpenConfig cfg, boolean isSlideAction) {
+        if (cfg == null) return;
+        if (!isSlideAction && !cfg.hapticEnabled) return;
+        if (isSlideAction && !cfg.hapticSlideEnabled) return;
+
+        int mode = isSlideAction ? cfg.hapticSlideMode : cfg.hapticMode;
+
+        // 模式 5：优先尝试调用小米官方线性马达系统级触感 (IHapticFeedBack)
+        if (mode == HyperOpenConfig.HAPTIC_MODE_STOCK) {
+            String patternName = isSlideAction ? resolveStockWaveName(cfg.hapticStockWaveSlide) : resolveStockWaveName(cfg.hapticStockWaveExpand);
+            int baseStrength = isSlideAction ? cfg.hapticSlideStrength : cfg.hapticStrength;
+            double intensityRatio = Math.max(0.1, Math.min(2.0, baseStrength / 140.0));
+            if (tryMiuiExtHaptic(context, patternName, intensityRatio)) {
+                return;
+            }
+        }
+
+        if (vibrator == null || !vibrator.hasVibrator()) return;
+
+        int baseStrength = isSlideAction ? cfg.hapticSlideStrength : cfg.hapticStrength;
+        int strength = Math.max(1, Math.min(255, baseStrength));
+        int customDur = isSlideAction ? Math.max(4, Math.min(80, cfg.hapticSlideDurationMs)) : Math.max(4, Math.min(80, cfg.hapticDurationMs));
+        int doubleGap = isSlideAction ? Math.max(10, Math.min(60, cfg.hapticSlideDoubleGapMs)) : Math.max(10, Math.min(60, cfg.hapticDoubleGapMs));
+        boolean brakePulse = isSlideAction ? cfg.hapticSlideBrakePulse : cfg.hapticBrakePulse;
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 VibrationEffect effect;
                 switch (mode) {
+                    case HyperOpenConfig.HAPTIC_MODE_STOCK:
+                        // 降级：对齐小米原生在非线性马达机型上的官方降级参数（展开 24ms，滑动微动 12ms）
+                        int stockDur = isSlideAction ? 12 : 24;
+                        effect = VibrationEffect.createOneShot(stockDur, Math.min(255, (int) (strength * 1.1f)));
+                        break;
                     case HyperOpenConfig.HAPTIC_MODE_TICK:
-                        effect = VibrationEffect.createOneShot(7, Math.max(1, (int) (strength * 0.75f)));
+                        if (brakePulse) {
+                            effect = VibrationEffect.createWaveform(
+                                new long[]{0, 8, 3, 7},
+                                new int[]{0, strength, 0, Math.max(30, (int) (strength * 0.70f))},
+                                -1
+                            );
+                        } else {
+                            effect = VibrationEffect.createOneShot(7, Math.max(1, (int) (strength * 0.75f)));
+                        }
                         break;
                     case HyperOpenConfig.HAPTIC_MODE_HEAVY:
-                        effect = VibrationEffect.createOneShot(22, Math.min(255, (int) (strength * 1.25f)));
+                        if (brakePulse) {
+                            effect = VibrationEffect.createWaveform(
+                                new long[]{0, 24, 4, 14},
+                                new int[]{0, Math.min(255, (int) (strength * 1.25f)), 0, Math.max(40, (int) (strength * 0.75f))},
+                                -1
+                            );
+                        } else {
+                            effect = VibrationEffect.createOneShot(22, Math.min(255, (int) (strength * 1.25f)));
+                        }
                         break;
                     case HyperOpenConfig.HAPTIC_MODE_DOUBLE:
                         effect = VibrationEffect.createWaveform(
-                            new long[]{0, 9, 32, 11},
+                            new long[]{0, 9, doubleGap, 11},
                             new int[]{0, Math.max(1, (int) (strength * 0.8f)), 0, strength},
                             -1
                         );
                         break;
                     case HyperOpenConfig.HAPTIC_MODE_CUSTOM:
-                        effect = VibrationEffect.createOneShot(customDur, strength);
+                        if (brakePulse && customDur >= 12) {
+                            int mainDur = Math.max(6, (int) (customDur * 0.60f));
+                            int brakeDur = Math.max(4, (int) (customDur * 0.35f));
+                            effect = VibrationEffect.createWaveform(
+                                new long[]{0, mainDur, 3, brakeDur},
+                                new int[]{0, strength, 0, Math.max(25, (int) (strength * 0.65f))},
+                                -1
+                            );
+                        } else {
+                            effect = VibrationEffect.createOneShot(customDur, strength);
+                        }
                         break;
                     case HyperOpenConfig.HAPTIC_MODE_CLICK:
                     default:
-                        effect = VibrationEffect.createOneShot(12, strength);
+                        if (brakePulse) {
+                            effect = VibrationEffect.createWaveform(
+                                new long[]{0, 14, 3, 9},
+                                new int[]{0, strength, 0, Math.max(30, (int) (strength * 0.70f))},
+                                -1
+                            );
+                        } else {
+                            effect = VibrationEffect.createOneShot(12, strength);
+                        }
                         break;
                 }
                 vibrator.vibrate(effect);
             } else {
-                vibrator.vibrate(customDur);
+                int dur = mode == HyperOpenConfig.HAPTIC_MODE_STOCK ? (isSlideAction ? 12 : 24) : customDur;
+                vibrator.vibrate(dur);
             }
         } catch (Throwable ignored) {}
     }
 
+    private static String resolveStockWaveName(int waveId) {
+        switch (waveId) {
+            case HyperOpenConfig.HAPTIC_STOCK_WAVE_MESH_NORMAL:
+                return "mesh_normal";
+            case HyperOpenConfig.HAPTIC_STOCK_WAVE_FLICK:
+                return "flick";
+            case HyperOpenConfig.HAPTIC_STOCK_WAVE_POP:
+                return "pop";
+            case HyperOpenConfig.HAPTIC_STOCK_WAVE_LONG_PRESS:
+            default:
+                return "long_press";
+        }
+    }
+
+    /**
+     * 尝试调用小米澎湃OS / MIUI 专有的线性马达 RichTap 触觉引擎 (HapticFeedBackImpl / HapticFeedbackUtil)
+     * 支持动态缩放振幅强度比例 (ratio 0.1 ~ 2.0，基准为 1.0)
+     */
+    public static boolean tryMiuiExtHaptic(Context context, String pattern, double intensityRatio) {
+        if (context == null) return false;
+
+        // 1. 优先尝试系统界面的全局单例 HapticFeedBackImpl (SystemUI 进程)
+        try {
+            ClassLoader cl = context.getClassLoader();
+            Class<?> depClass = Class.forName("com.miui.systemui.MiuiDependency", false, cl);
+            Class<?> ifaceClass = Class.forName("com.miui.interfaces.IHapticFeedBack", false, cl);
+            java.lang.reflect.Method getMethod = depClass.getMethod("get", Class.class);
+            Object impl = getMethod.invoke(null, ifaceClass);
+            if (impl != null) {
+                // 原生签名：extExtHapticFeedback(int, int, String, int, Handler)
+                for (java.lang.reflect.Method m : impl.getClass().getMethods()) {
+                    if ("extExtHapticFeedback".equals(m.getName()) && m.getParameterTypes().length == 5) {
+                        m.invoke(impl, 1, -1, pattern, 0, null);
+                        return true;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        // 2. 若在 App 进程（MainActivity / 整体排版预览），通过 miui.util.HapticFeedbackUtil 驱动
+        // 关键对齐：传入 always=true，保证在应用未获得前台纯物理焦点时，马达也能按系统原汁原味的振幅完整播放，消除强度衰减
+        try {
+            Class<?> utilClass = Class.forName("miui.util.HapticFeedbackUtil");
+            java.lang.reflect.Constructor<?> ctor = utilClass.getConstructor(Context.class, boolean.class);
+            // 传 true 代表 always 模式（不受当前 Window 焦点与 touch event 阻尼压制）
+            Object util = ctor.newInstance(context, true);
+
+            java.lang.reflect.Method perf = utilClass.getMethod("performHapticFeedback", String.class, boolean.class);
+            Object ok = perf.invoke(util, pattern, false);
+            if (Boolean.TRUE.equals(ok)) {
+                return true;
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    public static boolean tryMiuiExtHaptic(Context context, String pattern) {
+        return tryMiuiExtHaptic(context, pattern, 1.0);
+    }
+
     private void triggerHaptic() {
-        performConfiguredHaptic(vibrator, config);
+        performConfiguredHaptic(getContext(), vibrator, config, false);
+    }
+
+    private void triggerSlideHaptic() {
+        performConfiguredHaptic(getContext(), vibrator, config, true);
     }
 
     private void buildHeader() {
@@ -657,7 +790,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 HintTextStyler.apply(headerTitle, closest.item, true);
                 HintTextStyler.apply(headerSubtitle, closest.item, false);
 
-                triggerHaptic();
+                triggerSlideHaptic();
             }
         } else {
             if (currentSelectedBubble != null) {

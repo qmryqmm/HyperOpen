@@ -223,6 +223,16 @@ fun HyperOpenApp(
     var hapticStrength by remember { mutableFloatStateOf(initialConfig.hapticStrength.toFloat()) }
     var hapticDurationMs by remember { mutableFloatStateOf(initialConfig.hapticDurationMs.toFloat()) }
     var hapticMode by remember { mutableIntStateOf(initialConfig.hapticMode) }
+    var hapticSlideEnabled by remember { mutableStateOf(initialConfig.hapticSlideEnabled) }
+    var hapticSlideStrength by remember { mutableFloatStateOf(initialConfig.hapticSlideStrength.toFloat()) }
+    var hapticSlideDurationMs by remember { mutableFloatStateOf(initialConfig.hapticSlideDurationMs.toFloat()) }
+    var hapticSlideMode by remember { mutableIntStateOf(initialConfig.hapticSlideMode) }
+    var hapticStockWaveExpand by remember { mutableIntStateOf(initialConfig.hapticStockWaveExpand) }
+    var hapticStockWaveSlide by remember { mutableIntStateOf(initialConfig.hapticStockWaveSlide) }
+    var hapticBrakePulse by remember { mutableStateOf(initialConfig.hapticBrakePulse) }
+    var hapticDoubleGapMs by remember { mutableFloatStateOf(initialConfig.hapticDoubleGapMs.toFloat()) }
+    var hapticSlideBrakePulse by remember { mutableStateOf(initialConfig.hapticSlideBrakePulse) }
+    var hapticSlideDoubleGapMs by remember { mutableFloatStateOf(initialConfig.hapticSlideDoubleGapMs.toFloat()) }
     var regionBlurRadius by remember { mutableFloatStateOf(initialConfig.regionBlurRadius.toFloat()) }
     var iconSpacingOffset by remember { mutableFloatStateOf(initialConfig.iconSpacingOffset.toFloat()) }
     var bubblePaddingPercent by remember { mutableFloatStateOf(initialConfig.bubblePaddingPercent.toFloat()) }
@@ -354,6 +364,16 @@ fun HyperOpenApp(
         c.hapticStrength = hapticStrength.toInt()
         c.hapticDurationMs = hapticDurationMs.toInt()
         c.hapticMode = hapticMode
+        c.hapticStockWaveExpand = hapticStockWaveExpand
+        c.hapticBrakePulse = hapticBrakePulse
+        c.hapticDoubleGapMs = hapticDoubleGapMs.toInt()
+        c.hapticSlideEnabled = hapticSlideEnabled
+        c.hapticSlideStrength = hapticSlideStrength.toInt()
+        c.hapticSlideDurationMs = hapticSlideDurationMs.toInt()
+        c.hapticSlideMode = hapticSlideMode
+        c.hapticStockWaveSlide = hapticStockWaveSlide
+        c.hapticSlideBrakePulse = hapticSlideBrakePulse
+        c.hapticSlideDoubleGapMs = hapticSlideDoubleGapMs.toInt()
         c.regionBlurRadius = regionBlurRadius.toInt()
         c.iconSpacingOffset = iconSpacingOffset.toInt()
         c.bubblePaddingPercent = bubblePaddingPercent.toInt()
@@ -419,6 +439,16 @@ fun HyperOpenApp(
         hapticStrength = defaults.hapticStrength.toFloat()
         hapticDurationMs = defaults.hapticDurationMs.toFloat()
         hapticMode = defaults.hapticMode
+        hapticStockWaveExpand = defaults.hapticStockWaveExpand
+        hapticBrakePulse = defaults.hapticBrakePulse
+        hapticDoubleGapMs = defaults.hapticDoubleGapMs.toFloat()
+        hapticSlideEnabled = defaults.hapticSlideEnabled
+        hapticSlideStrength = defaults.hapticSlideStrength.toFloat()
+        hapticSlideDurationMs = defaults.hapticSlideDurationMs.toFloat()
+        hapticSlideMode = defaults.hapticSlideMode
+        hapticStockWaveSlide = defaults.hapticStockWaveSlide
+        hapticSlideBrakePulse = defaults.hapticSlideBrakePulse
+        hapticSlideDoubleGapMs = defaults.hapticSlideDoubleGapMs.toFloat()
         regionBlurRadius = defaults.regionBlurRadius.toFloat()
         iconSpacingOffset = defaults.iconSpacingOffset.toFloat()
         bubblePaddingPercent = defaults.bubblePaddingPercent.toFloat()
@@ -948,6 +978,26 @@ fun HyperOpenApp(
                                     onHapticDurationMs = { hapticDurationMs = it; persist() },
                                     hapticMode = hapticMode,
                                     onHapticMode = { hapticMode = it; persist() },
+                                    hapticSlideEnabled = hapticSlideEnabled,
+                                    onHapticSlideEnabled = { hapticSlideEnabled = it; persist() },
+                                    hapticSlideStrength = hapticSlideStrength,
+                                    onHapticSlideStrength = { hapticSlideStrength = it; persist() },
+                                    hapticSlideDurationMs = hapticSlideDurationMs,
+                                    onHapticSlideDurationMs = { hapticSlideDurationMs = it; persist() },
+                                    hapticSlideMode = hapticSlideMode,
+                                    onHapticSlideMode = { hapticSlideMode = it; persist() },
+                                    hapticStockWaveExpand = hapticStockWaveExpand,
+                                    onHapticStockWaveExpand = { hapticStockWaveExpand = it; persist() },
+                                    hapticStockWaveSlide = hapticStockWaveSlide,
+                                    onHapticStockWaveSlide = { hapticStockWaveSlide = it; persist() },
+                                    hapticBrakePulse = hapticBrakePulse,
+                                    onHapticBrakePulse = { hapticBrakePulse = it; persist() },
+                                    hapticDoubleGapMs = hapticDoubleGapMs,
+                                    onHapticDoubleGapMs = { hapticDoubleGapMs = it; persist() },
+                                    hapticSlideBrakePulse = hapticSlideBrakePulse,
+                                    onHapticSlideBrakePulse = { hapticSlideBrakePulse = it; persist() },
+                                    hapticSlideDoubleGapMs = hapticSlideDoubleGapMs,
+                                    onHapticSlideDoubleGapMs = { hapticSlideDoubleGapMs = it; persist() },
                                     regionBlurRadius = regionBlurRadius,
                                     onRegionBlurRadius = { regionBlurRadius = it; persist() },
                                     iconSpacingOffset = iconSpacingOffset,
@@ -1338,6 +1388,16 @@ fun ParamsPage(
     hapticStrength: Float, onHapticStrength: (Float) -> Unit,
     hapticDurationMs: Float, onHapticDurationMs: (Float) -> Unit,
     hapticMode: Int, onHapticMode: (Int) -> Unit,
+    hapticSlideEnabled: Boolean, onHapticSlideEnabled: (Boolean) -> Unit,
+    hapticSlideStrength: Float, onHapticSlideStrength: (Float) -> Unit,
+    hapticSlideDurationMs: Float, onHapticSlideDurationMs: (Float) -> Unit,
+    hapticSlideMode: Int, onHapticSlideMode: (Int) -> Unit,
+    hapticStockWaveExpand: Int, onHapticStockWaveExpand: (Int) -> Unit,
+    hapticStockWaveSlide: Int, onHapticStockWaveSlide: (Int) -> Unit,
+    hapticBrakePulse: Boolean, onHapticBrakePulse: (Boolean) -> Unit,
+    hapticDoubleGapMs: Float, onHapticDoubleGapMs: (Float) -> Unit,
+    hapticSlideBrakePulse: Boolean, onHapticSlideBrakePulse: (Boolean) -> Unit,
+    hapticSlideDoubleGapMs: Float, onHapticSlideDoubleGapMs: (Float) -> Unit,
     regionBlurRadius: Float, onRegionBlurRadius: (Float) -> Unit,
     iconSpacingOffset: Float, onIconSpacingOffset: (Float) -> Unit,
     bubblePaddingPercent: Float, onBubblePaddingPercent: (Float) -> Unit,
@@ -1346,6 +1406,7 @@ fun ParamsPage(
     iconGlowEffect: Boolean, onIconGlowEffect: (Boolean) -> Unit,
 ) {
     val ctx = LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
 
     // 各分区折叠状态（key → 是否已收起），通过 SharedPreferences 记忆持久化
     val uiPrefs = remember { ctx.getSharedPreferences("hyperopen_ui_state", android.content.Context.MODE_PRIVATE) }
@@ -1365,21 +1426,46 @@ fun ParamsPage(
         uiPrefs.edit().putBoolean("section_collapsed_$key", willCollapse).apply()
     }
 
-    fun triggerSampleHaptic(        mode: Int = hapticMode,
+    fun triggerSampleHaptic(
+        mode: Int = hapticMode,
         strength: Int = hapticStrength.toInt(),
         durationMs: Int = hapticDurationMs.toInt(),
         enabled: Boolean = hapticEnabled,
+        isSlide: Boolean = false,
+        stockWave: Int = hapticStockWaveExpand,
+        slideWave: Int = hapticStockWaveSlide,
+        brake: Boolean = hapticBrakePulse,
+        doubleGap: Int = hapticDoubleGapMs.toInt(),
+        slideMode: Int = hapticSlideMode,
+        slideDur: Int = hapticSlideDurationMs.toInt(),
+        slideBrake: Boolean = hapticSlideBrakePulse,
+        slideDoubleGap: Int = hapticSlideDoubleGapMs.toInt(),
     ) {
         try {
-            @Suppress("DEPRECATION")
-            val vibrator = ctx.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
-            val sampleCfg = HyperOpenConfig().apply {
-                this.hapticEnabled = enabled
-                this.hapticMode = mode
-                this.hapticStrength = strength
-                this.hapticDurationMs = durationMs
-            }
-            io.github.qmryqmm.hyperopen.view.CustomHyperOpenContainer.performConfiguredHaptic(vibrator, sampleCfg)
+            // 稍许延时 25ms 执行，彻底避开 Miuix 控件本身在 onClick 瞬间触发的默认按键点击触感（HapticFeedbackConstants.KEYBOARD_TAP），避免双重震动干扰
+            view.postDelayed({
+                try {
+                    @Suppress("DEPRECATION")
+                    val vibrator = ctx.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+                    val sampleCfg = HyperOpenConfig().apply {
+                        this.hapticEnabled = if (isSlide) true else enabled
+                        this.hapticMode = mode
+                        this.hapticStrength = strength
+                        this.hapticDurationMs = durationMs
+                        this.hapticStockWaveExpand = stockWave
+                        this.hapticBrakePulse = brake
+                        this.hapticDoubleGapMs = doubleGap
+                        this.hapticSlideEnabled = if (isSlide) enabled else hapticSlideEnabled
+                        this.hapticSlideStrength = if (isSlide) strength else hapticSlideStrength.toInt()
+                        this.hapticSlideDurationMs = if (isSlide) slideDur else hapticSlideDurationMs.toInt()
+                        this.hapticSlideMode = if (isSlide) slideMode else hapticSlideMode
+                        this.hapticStockWaveSlide = slideWave
+                        this.hapticSlideBrakePulse = if (isSlide) slideBrake else hapticSlideBrakePulse
+                        this.hapticSlideDoubleGapMs = if (isSlide) slideDoubleGap else hapticSlideDoubleGapMs.toInt()
+                    }
+                    io.github.qmryqmm.hyperopen.view.CustomHyperOpenContainer.performConfiguredHaptic(ctx, vibrator, sampleCfg, isSlide)
+                } catch (_: Throwable) {}
+            }, 25L)
         } catch (_: Throwable) {}
     }
 
@@ -1744,9 +1830,10 @@ fun ParamsPage(
                     .padding(horizontal = 12.dp)
                     .fillMaxWidth(),
             ) {
+                SmallTitle(text = "进入快捷方式展开面板震动")
                 SwitchPreference(
-                    title = "启用触觉震动反馈",
-                    summary = "手指滑入或切换快捷方式图标时提供线性马达触觉反馈",
+                    title = "开启进入面板震动",
+                    summary = "长按指纹完成、快捷方式面板完全展开时触发",
                     checked = hapticEnabled,
                     onCheckedChange = {
                         onHapticEnabled(it)
@@ -1754,13 +1841,14 @@ fun ParamsPage(
                     },
                 )
                 if (hapticEnabled) {
-                    SliderPreference(
-                        title = "震动强度",
-                        summary = "调节马达脉冲振幅强弱（1 ~ 255）",
-                        valueText = "${((hapticStrength / 255f) * 100).toInt().coerceIn(1, 100)} % (${hapticStrength.toInt()})",
-                        value = hapticStrength,
-                        valueRange = 1f..255f,
-                        onValueChange = onHapticStrength,
+                    RadioButtonPreference(
+                        title = "系统原生触感 (HyperOS Stock)",
+                        summary = "调用澎湃OS原生线性马达波形库,震动强度跟随系统",
+                        selected = hapticMode == HyperOpenConfig.HAPTIC_MODE_STOCK,
+                        onClick = {
+                            onHapticMode(HyperOpenConfig.HAPTIC_MODE_STOCK)
+                            triggerSampleHaptic(mode = HyperOpenConfig.HAPTIC_MODE_STOCK)
+                        },
                     )
                     RadioButtonPreference(
                         title = "清脆短震 (Tick)",
@@ -1813,16 +1901,259 @@ fun ParamsPage(
                             valueText = "${hapticDurationMs.toInt()} ms",
                             value = hapticDurationMs,
                             valueRange = 4f..80f,
-                            onValueChange = onHapticDurationMs,
+                            onValueChange = {
+                                onHapticDurationMs(it)
+                                triggerSampleHaptic(durationMs = it.toInt())
+                            },
                         )
                     }
-                    ArrowPreference(
-                        title = "点击体验当前震动效果",
-                        summary = "立即触发一次当前配置的触觉反馈",
-                        onClick = { triggerSampleHaptic() },
-                    )
+                    if (hapticMode != HyperOpenConfig.HAPTIC_MODE_STOCK) {
+                        SliderPreference(
+                            title = "震动强度",
+                            summary = "调节马达脉冲振幅强弱",
+                            valueText = "${
+                                ((hapticStrength / 255f) * 100).toInt().coerceIn(1, 100)
+                            } % (${hapticStrength.toInt()})",
+                            value = hapticStrength,
+                            valueRange = 1f..255f,
+                            onValueChange = {
+                                onHapticStrength(it)
+                                triggerSampleHaptic(strength = it.toInt())
+                            },
+                        )
+                    }
+
+                    if (hapticMode == HyperOpenConfig.HAPTIC_MODE_DOUBLE) {
+                        SliderPreference(
+                            title = "双脉冲间隔时间",
+                            summary = "调节两次敲击脉冲之间的停顿间隔",
+                            valueText = "${hapticDoubleGapMs.toInt()} ms",
+                            value = hapticDoubleGapMs,
+                            valueRange = 10f..60f,
+                            onValueChange = {
+                                onHapticDoubleGapMs(it)
+                                triggerSampleHaptic(doubleGap = it.toInt())
+                            },
+                        )
+                    }
+
+                    if (hapticMode != HyperOpenConfig.HAPTIC_MODE_STOCK) {
+                        SwitchPreference(
+                            title = "反向制动脉冲 (Brake Pulse)",
+                            summary = "在主震动末尾施加反向制动微脉冲",
+                            checked = hapticBrakePulse,
+                            onCheckedChange = {
+                                onHapticBrakePulse(it)
+                                triggerSampleHaptic(brake = it)
+                            },
+                        )
+                    }
+
+                    if (hapticMode == HyperOpenConfig.HAPTIC_MODE_STOCK) {
+                        SmallTitle(text = "系统线性马达波形库选择")
+                        RadioButtonPreference(
+                            title = "长按回弹波形 (long_press)",
+                            summary = "系统默认波形，带有充沛饱满的阻尼吸附感",
+                            selected = hapticStockWaveExpand == HyperOpenConfig.HAPTIC_STOCK_WAVE_LONG_PRESS,
+                            onClick = {
+                                onHapticStockWaveExpand(HyperOpenConfig.HAPTIC_STOCK_WAVE_LONG_PRESS)
+                                triggerSampleHaptic(
+                                    mode = HyperOpenConfig.HAPTIC_MODE_STOCK,
+                                    stockWave = HyperOpenConfig.HAPTIC_STOCK_WAVE_LONG_PRESS
+                                )
+                            },
+                        )
+                        RadioButtonPreference(
+                            title = "网格微动波形 (mesh_normal)",
+                            summary = "紧凑细腻的高频颗粒感，轻巧利落",
+                            selected = hapticStockWaveExpand == HyperOpenConfig.HAPTIC_STOCK_WAVE_MESH_NORMAL,
+                            onClick = {
+                                onHapticStockWaveExpand(HyperOpenConfig.HAPTIC_STOCK_WAVE_MESH_NORMAL)
+                                triggerSampleHaptic(
+                                    mode = HyperOpenConfig.HAPTIC_MODE_STOCK,
+                                    stockWave = HyperOpenConfig.HAPTIC_STOCK_WAVE_MESH_NORMAL
+                                )
+                            },
+                        )
+                        RadioButtonPreference(
+                            title = "轻触弹击波形 (flick)",
+                            summary = "如同物理拨动开关的微弹质感",
+                            selected = hapticStockWaveExpand == HyperOpenConfig.HAPTIC_STOCK_WAVE_FLICK,
+                            onClick = {
+                                onHapticStockWaveExpand(HyperOpenConfig.HAPTIC_STOCK_WAVE_FLICK)
+                                triggerSampleHaptic(
+                                    mode = HyperOpenConfig.HAPTIC_MODE_STOCK,
+                                    stockWave = HyperOpenConfig.HAPTIC_STOCK_WAVE_FLICK
+                                )
+                            },
+                        )
+                        RadioButtonPreference(
+                            title = "气泡轻爆波形 (pop)",
+                            summary = "柔和轻快的微泡破裂声学振动",
+                            selected = hapticStockWaveExpand == HyperOpenConfig.HAPTIC_STOCK_WAVE_POP,
+                            onClick = {
+                                onHapticStockWaveExpand(HyperOpenConfig.HAPTIC_STOCK_WAVE_POP)
+                                triggerSampleHaptic(
+                                    mode = HyperOpenConfig.HAPTIC_MODE_STOCK,
+                                    stockWave = HyperOpenConfig.HAPTIC_STOCK_WAVE_POP
+                                )
+                            },
+                        )
+                    }
                 }
-            }
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                    SmallTitle(text = "手势滑动选择图标震动")
+                    SwitchPreference(
+                        title = "开启滑动选择震动",
+                        summary = "手指在各个图标间滑动吸附时提供独立震动反馈",
+                        checked = hapticSlideEnabled,
+                        onCheckedChange = {
+                            onHapticSlideEnabled(it)
+                            if (it) triggerSampleHaptic(isSlide = true, enabled = true)
+                        },
+                    )
+                    if (hapticSlideEnabled) {
+                        RadioButtonPreference(
+                            title = "系统原生触感 (HyperOS Stock)",
+                            summary = "调用澎湃OS原生线性马达波形库,震动强度跟随系统",
+                            selected = hapticSlideMode == HyperOpenConfig.HAPTIC_MODE_STOCK,
+                            onClick = {
+                                onHapticSlideMode(HyperOpenConfig.HAPTIC_MODE_STOCK)
+                                triggerSampleHaptic(isSlide = true, slideMode = HyperOpenConfig.HAPTIC_MODE_STOCK)
+                            },
+                        )
+                        RadioButtonPreference(
+                            title = "清脆短震 (Tick)",
+                            summary = "极短促微动吸附手感",
+                            selected = hapticSlideMode == HyperOpenConfig.HAPTIC_MODE_TICK,
+                            onClick = {
+                                onHapticSlideMode(HyperOpenConfig.HAPTIC_MODE_TICK)
+                                triggerSampleHaptic(isSlide = true, slideMode = HyperOpenConfig.HAPTIC_MODE_TICK)
+                            },
+                        )
+                        RadioButtonPreference(
+                            title = "标准点按 (Click)",
+                            summary = "稳健确认感",
+                            selected = hapticSlideMode == HyperOpenConfig.HAPTIC_MODE_CLICK,
+                            onClick = {
+                                onHapticSlideMode(HyperOpenConfig.HAPTIC_MODE_CLICK)
+                                triggerSampleHaptic(isSlide = true, slideMode = HyperOpenConfig.HAPTIC_MODE_CLICK)
+                            },
+                        )
+                        RadioButtonPreference(
+                            title = "双脉冲震动 (Double)",
+                            summary = "两次轻快微震",
+                            selected = hapticSlideMode == HyperOpenConfig.HAPTIC_MODE_DOUBLE,
+                            onClick = {
+                                onHapticSlideMode(HyperOpenConfig.HAPTIC_MODE_DOUBLE)
+                                triggerSampleHaptic(isSlide = true, slideMode = HyperOpenConfig.HAPTIC_MODE_DOUBLE)
+                            },
+                        )
+                        RadioButtonPreference(
+                            title = "自定义时长脉冲",
+                            summary = "自由设定滑动吸附时长",
+                            selected = hapticSlideMode == HyperOpenConfig.HAPTIC_MODE_CUSTOM,
+                            onClick = {
+                                onHapticSlideMode(HyperOpenConfig.HAPTIC_MODE_CUSTOM)
+                                triggerSampleHaptic(isSlide = true, slideMode = HyperOpenConfig.HAPTIC_MODE_CUSTOM)
+                            },
+                        )
+
+                        if (hapticSlideMode != HyperOpenConfig.HAPTIC_MODE_STOCK) {
+                            SliderPreference(
+                                title = "震动强度",
+                                summary = "调节滑动选择图标时的振幅强弱",
+                                valueText = "${((hapticSlideStrength / 255f) * 100).toInt().coerceIn(1, 100)} % (${hapticSlideStrength.toInt()})",
+                                value = hapticSlideStrength,
+                                valueRange = 1f..255f,
+                                onValueChange = {
+                                    onHapticSlideStrength(it)
+                                    triggerSampleHaptic(isSlide = true, strength = it.toInt())
+                                },
+                            )
+                        }
+
+                        if (hapticSlideMode == HyperOpenConfig.HAPTIC_MODE_CUSTOM) {
+                            SliderPreference(
+                                title = "自定义震动附持续时长",
+                                valueText = "${hapticSlideDurationMs.toInt()} ms",
+                                value = hapticSlideDurationMs,
+                                valueRange = 4f..80f,
+                                onValueChange = {
+                                    onHapticSlideDurationMs(it)
+                                    triggerSampleHaptic(isSlide = true, slideDur = it.toInt())
+                                },
+                            )
+                        }
+
+                        if (hapticSlideMode == HyperOpenConfig.HAPTIC_MODE_DOUBLE) {
+                            SliderPreference(
+                                title = "双脉冲间隔时间",
+                                summary = "调节两次敲击脉冲之间的停顿间隔",
+                                valueText = "${hapticSlideDoubleGapMs.toInt()} ms",
+                                value = hapticSlideDoubleGapMs,
+                                valueRange = 10f..60f,
+                                onValueChange = {
+                                    onHapticSlideDoubleGapMs(it)
+                                    triggerSampleHaptic(isSlide = true, slideDoubleGap = it.toInt())
+                                },
+                            )
+                        }
+
+                        if (hapticSlideMode != HyperOpenConfig.HAPTIC_MODE_STOCK) {
+                            SwitchPreference(
+                                title = "反向制动脉冲 (Brake Pulse)",
+                                summary = "在主震动末尾施加反向制动微脉冲",
+                                checked = hapticSlideBrakePulse,
+                                onCheckedChange = {
+                                    onHapticSlideBrakePulse(it)
+                                    triggerSampleHaptic(isSlide = true, slideBrake = it)
+                                },
+                            )
+                        }
+
+                        if (hapticSlideMode == HyperOpenConfig.HAPTIC_MODE_STOCK) {
+                            SmallTitle(text = "系统线性马达波形库选择")
+                            RadioButtonPreference(
+                                title = "长按回弹波形 (long_press)",
+                                summary = "系统默认波形，带有充沛饱满的阻尼吸附感",
+                                selected = hapticStockWaveSlide == HyperOpenConfig.HAPTIC_STOCK_WAVE_LONG_PRESS,
+                                onClick = {
+                                    onHapticStockWaveSlide(HyperOpenConfig.HAPTIC_STOCK_WAVE_LONG_PRESS)
+                                    triggerSampleHaptic(isSlide = true, slideMode = HyperOpenConfig.HAPTIC_MODE_STOCK, slideWave = HyperOpenConfig.HAPTIC_STOCK_WAVE_LONG_PRESS)
+                                },
+                            )
+                            RadioButtonPreference(
+                                title = "网格微动 (mesh_normal)",
+                                summary = "齿轮滚珠质感",
+                                selected = hapticStockWaveSlide == HyperOpenConfig.HAPTIC_STOCK_WAVE_MESH_NORMAL,
+                                onClick = {
+                                    onHapticStockWaveSlide(HyperOpenConfig.HAPTIC_STOCK_WAVE_MESH_NORMAL)
+                                    triggerSampleHaptic(isSlide = true, slideMode = HyperOpenConfig.HAPTIC_MODE_STOCK, slideWave = HyperOpenConfig.HAPTIC_STOCK_WAVE_MESH_NORMAL)
+                                },
+                            )
+                            RadioButtonPreference(
+                                title = "轻触弹击 (flick)",
+                                summary = "轻拨微弹质感",
+                                selected = hapticStockWaveSlide == HyperOpenConfig.HAPTIC_STOCK_WAVE_FLICK,
+                                onClick = {
+                                    onHapticStockWaveSlide(HyperOpenConfig.HAPTIC_STOCK_WAVE_FLICK)
+                                    triggerSampleHaptic(isSlide = true, slideMode = HyperOpenConfig.HAPTIC_MODE_STOCK, slideWave = HyperOpenConfig.HAPTIC_STOCK_WAVE_FLICK)
+                                },
+                            )
+                            RadioButtonPreference(
+                                title = "气泡轻爆 (pop)",
+                                summary = "轻柔微弹质感",
+                                selected = hapticStockWaveSlide == HyperOpenConfig.HAPTIC_STOCK_WAVE_POP,
+                                onClick = {
+                                    onHapticStockWaveSlide(HyperOpenConfig.HAPTIC_STOCK_WAVE_POP)
+                                    triggerSampleHaptic(isSlide = true, slideMode = HyperOpenConfig.HAPTIC_MODE_STOCK, slideWave = HyperOpenConfig.HAPTIC_STOCK_WAVE_POP)
+                                },
+                            )
+                        }
+                    }
+                }
+
         }
         item { Spacer(Modifier.height(24.dp)) }
     }

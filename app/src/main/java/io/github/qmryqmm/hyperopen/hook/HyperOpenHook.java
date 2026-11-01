@@ -608,7 +608,7 @@ public class HyperOpenHook {
                             if (iconView instanceof View) {
                                 Context ctx = ((View) iconView).getContext();
                                 android.os.Vibrator v = (android.os.Vibrator) ctx.getSystemService(Context.VIBRATOR_SERVICE);
-                                CustomHyperOpenContainer.performConfiguredHaptic(v, cfg);
+                                CustomHyperOpenContainer.performConfiguredHaptic(ctx, v, cfg);
                             }
                         } catch (Throwable ignored) {}
                     }
