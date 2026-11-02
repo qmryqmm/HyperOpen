@@ -252,6 +252,12 @@ fun HyperOpenApp(
     var stockSystemAnim by remember { mutableStateOf(initialConfig.stockSystemAnim) }
     var stockSystemRegion by remember { mutableStateOf(initialConfig.stockSystemRegion) }
     var ringCount by remember { mutableStateOf(initialConfig.ringCount.toFloat()) }
+    var ringSectorMode by remember { mutableStateOf(initialConfig.ringSectorMode) }
+    var sectorLineColor by remember { mutableIntStateOf(initialConfig.sectorLineColor) }
+    var sectorLineAlpha by remember { mutableStateOf(initialConfig.sectorLineAlpha) }
+    var sectorDashLength by remember { mutableStateOf(initialConfig.sectorDashLength.toFloat()) }
+    var sectorDashGap by remember { mutableStateOf(initialConfig.sectorDashGap.toFloat()) }
+    var sectorLineWidth by remember { mutableStateOf(initialConfig.sectorLineWidth) }
     val shortcuts = remember { mutableStateListOf<ShortcutItem>().apply { addAll(initialConfig.shortcuts) } }
     var safetyTick by remember { mutableStateOf(0) }
     var page by remember { mutableStateOf(0) }
@@ -349,6 +355,12 @@ fun HyperOpenApp(
         c.stockSystemAnim = stockSystemAnim
         c.stockSystemRegion = stockSystemRegion
         c.ringCount = ringCount.toInt().coerceIn(1, 4)
+        c.ringSectorMode = ringSectorMode
+        c.sectorLineColor = sectorLineColor
+        c.sectorLineAlpha = sectorLineAlpha
+        c.sectorDashLength = sectorDashLength.toInt()
+        c.sectorDashGap = sectorDashGap.toInt()
+        c.sectorLineWidth = sectorLineWidth
         c.maxScale = maxScale
         c.influenceRadius = influenceRadius.toInt()
         c.iconAlpha = iconAlpha
@@ -424,6 +436,12 @@ fun HyperOpenApp(
         stockSystemAnim = defaults.stockSystemAnim
         stockSystemRegion = defaults.stockSystemRegion
         ringCount = defaults.ringCount.toFloat()
+        ringSectorMode = defaults.ringSectorMode
+        sectorLineColor = defaults.sectorLineColor
+        sectorLineAlpha = defaults.sectorLineAlpha
+        sectorDashLength = defaults.sectorDashLength.toFloat()
+        sectorDashGap = defaults.sectorDashGap.toFloat()
+        sectorLineWidth = defaults.sectorLineWidth
         maxScale = defaults.maxScale
         influenceRadius = defaults.influenceRadius.toFloat()
         iconAlpha = defaults.iconAlpha
@@ -639,12 +657,24 @@ fun HyperOpenApp(
                             this.maxIconCount = maxIconCount.toInt()
                             this.layoutStyle = layoutStyle
                             this.ringCount = ringCount.toInt().coerceIn(1, 4)
+                            this.ringSectorMode = ringSectorMode
+                            this.sectorLineColor = sectorLineColor
+                            this.sectorLineAlpha = sectorLineAlpha
+                            this.sectorDashLength = sectorDashLength.toInt()
+                            this.sectorDashGap = sectorDashGap.toInt()
+                            this.sectorLineWidth = sectorLineWidth
                             this.maxScale = maxScale
                             this.influenceRadius = influenceRadius.toInt()
                             this.layoutStyle = layoutStyle
                             this.stockSystemAnim = stockSystemAnim
                             this.stockSystemRegion = stockSystemRegion
                             this.ringCount = ringCount.toInt()
+                            this.ringSectorMode = ringSectorMode
+                            this.sectorLineColor = sectorLineColor
+                            this.sectorLineAlpha = sectorLineAlpha
+                            this.sectorDashLength = sectorDashLength.toInt()
+                            this.sectorDashGap = sectorDashGap.toInt()
+                            this.sectorLineWidth = sectorLineWidth
                             this.iconAlpha = iconAlpha
                             this.fisheyeZoomAlpha = fisheyeZoomAlpha
                             this.fullscreenBlurMaskAlpha = fullscreenBlurMaskAlpha
@@ -948,6 +978,18 @@ fun HyperOpenApp(
                                     onStockSystemRegion = { stockSystemRegion = it; persist() },
                                     ringCount = ringCount,
                                     onRingCount = { ringCount = it; clampIconCountToCapacity(); persist() },
+                                    ringSectorMode = ringSectorMode,
+                                    onRingSectorMode = { ringSectorMode = it; persist() },
+                                    sectorLineColor = sectorLineColor,
+                                    onSectorLineColor = { sectorLineColor = it; persist() },
+                                    sectorLineAlpha = sectorLineAlpha,
+                                    onSectorLineAlpha = { sectorLineAlpha = it; persist() },
+                                    sectorDashLength = sectorDashLength,
+                                    onSectorDashLength = { sectorDashLength = it; persist() },
+                                    sectorDashGap = sectorDashGap,
+                                    onSectorDashGap = { sectorDashGap = it; persist() },
+                                    sectorLineWidth = sectorLineWidth,
+                                    onSectorLineWidth = { sectorLineWidth = it; persist() },
                                     maxScale = maxScale,
                                     onMaxScale = { maxScale = it; persist() },
                                     influenceRadius = influenceRadius,
@@ -1373,6 +1415,12 @@ fun ParamsPage(
     stockSystemAnim: Boolean, onStockSystemAnim: (Boolean) -> Unit,
     stockSystemRegion: Boolean, onStockSystemRegion: (Boolean) -> Unit,
     ringCount: Float, onRingCount: (Float) -> Unit,
+    ringSectorMode: Boolean, onRingSectorMode: (Boolean) -> Unit,
+    sectorLineColor: Int, onSectorLineColor: (Int) -> Unit,
+    sectorLineAlpha: Float, onSectorLineAlpha: (Float) -> Unit,
+    sectorDashLength: Float, onSectorDashLength: (Float) -> Unit,
+    sectorDashGap: Float, onSectorDashGap: (Float) -> Unit,
+    sectorLineWidth: Float, onSectorLineWidth: (Float) -> Unit,
     maxScale: Float, onMaxScale: (Float) -> Unit,
     influenceRadius: Float, onInfluenceRadius: (Float) -> Unit,
     iconAlpha: Float, onIconAlpha: (Float) -> Unit,
@@ -1590,9 +1638,199 @@ fun ParamsPage(
                     )
                 }
                 if (layoutStyle == HyperOpenConfig.LAYOUT_RING) {
+                    SwitchPreference(
+                        title = "扇区触发模式",
+                        summary = when {
+                            !ringSectorMode -> "开启后：快捷方式 1~6 个时，图标沿圆周均分，中心圆内为取消区，圆外按图标数量均分为扇形（虚线分隔），滑入扇区即选中；该模式下禁止自定义排版"
+                            enabledShortcutsCount in 1..6 -> "已生效（当前 $enabledShortcutsCount 个快捷方式）：中心圆内松手取消，圆外 $enabledShortcutsCount 个扇区各对应一个图标；自定义排版已禁用"
+                            else -> "快捷方式达到 7 个及以上时自动回退为常规同心圆环布局（当前 $enabledShortcutsCount 个）"
+                        },
+                        checked = ringSectorMode,
+                        onCheckedChange = onRingSectorMode,
+                    )
+                    if (ringSectorMode) {
+                        SwitchPreference(
+                            title = "显示圆形视界背景",
+                            summary = if (showRegionBg)
+                                "当前显示毛玻璃底衬与圆形边框；关闭后屏上只保留分隔虚线与图标（若仍有全屏模糊，请同时关闭上方【全屏模糊遮罩】）"
+                            else
+                                "已关闭底衬与边框：扇区模式下屏上只剩分隔虚线与图标（全屏模糊遮罩另由上方参数控制）",
+                            checked = showRegionBg,
+                            onCheckedChange = onShowRegionBg,
+                        )
+                        var sectorHexInput by remember {
+                            mutableStateOf(String.format("#%06X", sectorLineColor and 0xFFFFFF))
+                        }
+                        fun parseSectorHex(text: String): Int? {
+                            val t = text.trim().removePrefix("#").removePrefix("0x").removePrefix("0X")
+                            if (t.length != 6) return null
+                            return try {
+                                (0xFF shl 24) or t.toLong(16).toInt()
+                            } catch (_: Throwable) {
+                                null
+                            }
+                        }
+                        fun syncSectorHex(color: Int) {
+                            sectorHexInput = String.format("#%06X", color and 0xFFFFFF)
+                        }
+
+                        Text(
+                            text = "扇区分隔线样式",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MiuixTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 6.dp),
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        Color(0xFF000000.toInt() or (sectorLineColor and 0xFFFFFF))
+                                            .copy(alpha = sectorLineAlpha.coerceIn(0f, 1f))
+                                    ),
+                            )
+                            TextField(
+                                value = sectorHexInput,
+                                onValueChange = { s ->
+                                    sectorHexInput = s
+                                    parseSectorHex(s)?.let { onSectorLineColor(it) }
+                                },
+                                label = "分隔线颜色 (#RRGGBB)",
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+
+                        val sectorPresets = listOf(
+                            "淡灰" to 0xFFBFBFBF.toInt(),
+                            "白色" to 0xFFFFFFFF.toInt(),
+                            "黑色" to 0xFF000000.toInt(),
+                            "青色" to 0xFF5DCAA5.toInt(),
+                            "蓝色" to 0xFF378ADD.toInt(),
+                            "橙色" to 0xFFEF9F27.toInt(),
+                            "红色" to 0xFFE24B4A.toInt(),
+                            "紫色" to 0xFF7F77DD.toInt(),
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            sectorPresets.forEach { (_, colorValue) ->
+                                val selected = (sectorLineColor and 0xFFFFFF) == (colorValue and 0xFFFFFF)
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(colorValue))
+                                        .clickable {
+                                            onSectorLineColor((0xFF shl 24) or (colorValue and 0xFFFFFF))
+                                            syncSectorHex(colorValue)
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (selected) {
+                                        Text(
+                                            "✓",
+                                            color = if ((colorValue and 0xFFFFFF) == 0xFFFFFF) Color.Black else Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        SliderPreference(
+                            title = "红色分量",
+                            summary = "分隔线颜色的红色通道 (R)",
+                            valueText = "${(sectorLineColor shr 16) and 0xFF}",
+                            value = ((sectorLineColor shr 16) and 0xFF).toFloat(),
+                            valueRange = 0f..255f,
+                            onValueChange = { r ->
+                                onSectorLineColor(
+                                    (0xFF shl 24) or ((r.toInt() and 0xFF) shl 16) or
+                                        (sectorLineColor and 0xFF00) or (sectorLineColor and 0xFF)
+                                )
+                                syncSectorHex(
+                                    (0xFF shl 24) or ((r.toInt() and 0xFF) shl 16) or
+                                        (sectorLineColor and 0xFF00) or (sectorLineColor and 0xFF)
+                                )
+                            },
+                        )
+                        SliderPreference(
+                            title = "绿色分量",
+                            summary = "分隔线颜色的绿色通道 (G)",
+                            valueText = "${(sectorLineColor shr 8) and 0xFF}",
+                            value = ((sectorLineColor shr 8) and 0xFF).toFloat(),
+                            valueRange = 0f..255f,
+                            onValueChange = { g ->
+                                val newColor = (0xFF shl 24) or (sectorLineColor and 0xFF0000) or
+                                    ((g.toInt() and 0xFF) shl 8) or (sectorLineColor and 0xFF)
+                                onSectorLineColor(newColor)
+                                syncSectorHex(newColor)
+                            },
+                        )
+                        SliderPreference(
+                            title = "蓝色分量",
+                            summary = "分隔线颜色的蓝色通道 (B)",
+                            valueText = "${sectorLineColor and 0xFF}",
+                            value = (sectorLineColor and 0xFF).toFloat(),
+                            valueRange = 0f..255f,
+                            onValueChange = { b ->
+                                val newColor = (0xFF shl 24) or (sectorLineColor and 0xFF0000) or
+                                    (sectorLineColor and 0xFF00) or (b.toInt() and 0xFF)
+                                onSectorLineColor(newColor)
+                                syncSectorHex(newColor)
+                            },
+                        )
+                        SliderPreference(
+                            title = "分隔线透明度",
+                            summary = "虚线的整体不透明度，0% 完全隐藏分隔线",
+                            valueText = "${kotlin.math.round(sectorLineAlpha * 100f).toInt()} %",
+                            value = sectorLineAlpha * 100f,
+                            valueRange = 0f..100f,
+                            onValueChange = { onSectorLineAlpha(it / 100f) },
+                        )
+                        SliderPreference(
+                            title = "虚线实线段长度",
+                            summary = "每一段虚线的长度，越大线条越接近实线",
+                            valueText = "${sectorDashLength.toInt()} dp",
+                            value = sectorDashLength,
+                            valueRange = 2f..20f,
+                            onValueChange = onSectorDashLength,
+                        )
+                        SliderPreference(
+                            title = "虚线间隔长度",
+                            summary = "相邻虚线段之间的空隙，越大越稀疏",
+                            valueText = "${sectorDashGap.toInt()} dp",
+                            value = sectorDashGap,
+                            valueRange = 2f..20f,
+                            onValueChange = onSectorDashGap,
+                        )
+                        SliderPreference(
+                            title = "分隔线粗细",
+                            summary = "虚线线宽，细线更含蓄，粗线更醒目",
+                            valueText = String.format("%.1f dp", sectorLineWidth),
+                            value = sectorLineWidth,
+                            valueRange = 0.5f..4f,
+                            onValueChange = onSectorLineWidth,
+                        )
+                    }
                     SliderPreference(
                         title = "同心圆环圈数",
-                        summary = "中心留空，图标分布在 N 圈同心环上",
+                        summary = if (ringSectorMode && enabledShortcutsCount in 1..6)
+                            "扇区触发模式下图标固定排布在单圈圆周上，圈数暂不生效" else "中心留空，图标分布在 N 圈同心环上",
                         valueText = "${ringCount.toInt()} 圈",
                         value = ringCount,
                         valueRange = 1f..4f,
@@ -1601,9 +1839,10 @@ fun ParamsPage(
                 }
                 SliderPreference(
                     title = "图标数量",
-                    summary = when (layoutStyle) {
-                        HyperOpenConfig.LAYOUT_SYSTEM_STOCK -> "系统经典扇形建议 3~5 项（最多支持 $iconCapacity 项）；已启用 $enabledShortcutsCount 项"
-                        HyperOpenConfig.LAYOUT_ARC -> "弧形扇面布局不设几何上限；已启用 $enabledShortcutsCount 项"
+                    summary = when {
+                        layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK -> "系统经典扇形建议 3~5 项（最多支持 $iconCapacity 项）；已启用 $enabledShortcutsCount 项"
+                        layoutStyle == HyperOpenConfig.LAYOUT_ARC -> "弧形扇面布局不设几何上限；已启用 $enabledShortcutsCount 项"
+                        layoutStyle == HyperOpenConfig.LAYOUT_RING && ringSectorMode -> "扇区触发模式支持 1~6 个，7 个及以上自动回退常规圆环；当前参数最多容纳 $iconCapacity 个，已启用 $enabledShortcutsCount 项"
                         else -> "当前参数下最多容纳 $iconCapacity 个；已启用 $enabledShortcutsCount 项，超出上限的启用项不显示"
                     },
                     valueText = if (maxIconCount.toInt() <= 0) "全部显示" else "${maxIconCount.toInt()} 个",
