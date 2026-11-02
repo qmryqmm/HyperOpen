@@ -5920,9 +5920,6 @@ fun SettingsPage(
                 )
             }
         }
-                )
-            }
-        }
 
         // ── 关于 ──
         item(key = "about_title") { SmallTitle("关于") }
