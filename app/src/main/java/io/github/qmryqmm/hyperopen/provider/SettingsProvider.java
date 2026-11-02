@@ -184,6 +184,12 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putBoolean("stock_system_anim", sp.getBoolean("stock_system_anim", true));
                 bundle.putBoolean("stock_system_region", sp.getBoolean("stock_system_region", true));
                 bundle.putInt("ring_count", sp.getInt("ring_count", 2));
+                bundle.putBoolean("ring_sector_mode", sp.getBoolean("ring_sector_mode", true));
+                bundle.putInt("sector_line_color", sp.getInt("sector_line_color", 0xFFBFBFBF));
+                bundle.putFloat("sector_line_alpha", sp.getFloat("sector_line_alpha", 0.4f));
+                bundle.putInt("sector_dash_length", sp.getInt("sector_dash_length", 6));
+                bundle.putInt("sector_dash_gap", sp.getInt("sector_dash_gap", 5));
+                bundle.putFloat("sector_line_width", sp.getFloat("sector_line_width", 1.2f));
                 bundle.putFloat("max_scale", sp.getFloat("max_scale", 1.40f));
                 bundle.putInt("influence_radius", sp.getInt("influence_radius", 70));
                 bundle.putFloat("icon_alpha", sp.getFloat("icon_alpha", 1.0f));

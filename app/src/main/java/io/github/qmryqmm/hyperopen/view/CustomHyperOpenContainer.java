@@ -22,6 +22,7 @@ import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory;
 import io.github.qmryqmm.hyperopen.layout.CircularHoneycombPacking;
 import io.github.qmryqmm.hyperopen.layout.ArcFanPacking;
 import io.github.qmryqmm.hyperopen.layout.HollowRingPacking;
+import io.github.qmryqmm.hyperopen.layout.RingSectorPacking;
 import io.github.qmryqmm.hyperopen.layout.StockFanPacking;
 import io.github.qmryqmm.hyperopen.model.ShortcutItem;
 
@@ -47,9 +48,13 @@ public class CustomHyperOpenContainer extends FrameLayout {
     private TextView headerSubtitle;
 
     private CircularRegionBackdropView regionBackdrop;
+    /** 全屏扇区分隔虚线覆盖层（独立于圆形底衬，虚线可延伸出屏幕） */
+    private SectorOverlayView sectorOverlay;
     private FrameLayout bubblesContainer;
     private final List<CircularBubbleView> bubbles = new ArrayList<>();
     private final List<StockFanPacking.StockItemSpec> stockSpecs = new ArrayList<>();
+    /** 空心圆环扇区触发模式的几何规格（非扇区模式时为 null） */
+    private RingSectorPacking.Result ringSectorSpec = null;
     private CircularBubbleView currentSelectedBubble = null;
 
     private Vibrator vibrator;
@@ -89,6 +94,10 @@ public class CustomHyperOpenContainer extends FrameLayout {
         }
         addView(regionBackdrop);
 
+        // 扇区分隔虚线覆盖层：全屏铺设，虚线一直延伸到屏幕外；关闭底衬后只剩虚线与图标
+        sectorOverlay = new SectorOverlayView(getContext());
+        addView(sectorOverlay);
+
         // 图标容器 (允许子 View 放大溢出，不被矩形容器拦截)
         bubblesContainer = new FrameLayout(getContext());
         bubblesContainer.setClipChildren(false);
@@ -104,11 +113,25 @@ public class CustomHyperOpenContainer extends FrameLayout {
             if (config.layoutStyle != HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
                 stockSpecs.clear();
             }
+            if (config.layoutStyle != HyperOpenConfig.LAYOUT_RING || !config.ringSectorMode) {
+                ringSectorSpec = null;
+            }
             this.resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(getContext(), config.materialStyle);
             if (regionBackdrop != null) {
                 regionBackdrop.setStyle(resolvedStyle);
-                regionBackdrop.setBlurRadius(config.regionBlurRadius);
-                regionBackdrop.setDimAlpha(config.regionDimAlpha);
+                regionBackdrop.setBlurRadius(config.showRegionBg ? config.regionBlurRadius : 0);
+                regionBackdrop.setDimAlpha(config.showRegionBg ? config.regionDimAlpha : 0f);
+                // 扇区分隔线样式（颜色/透明度/虚线规格）热生效
+                if (ringSectorSpec != null) {
+                    float liveCenterY = fodCenterY - dpToPx(config.offsetY);
+                    sectorOverlay.update(true, ringSectorSpec.count,
+                            fodCenterX, liveCenterY,
+                            ringSectorSpec.cancelRadius, ringSectorSpec.startAngleDeg,
+                            config.sectorLineColor, config.sectorLineAlpha,
+                            config.sectorDashLength, config.sectorDashGap, config.sectorLineWidth);
+                } else {
+                    sectorOverlay.clear();
+                }
             }
             // 顶部提示参数（位置、文字大小、居中、模糊与背景）热生效
             applyHeaderPillStyleAndLayout();
@@ -504,11 +527,27 @@ public class CustomHyperOpenContainer extends FrameLayout {
         float iconSizePx = dpToPx(config.iconSize);
         int iconSizeInt = (int) iconSizePx;
 
-        // 更新底衬大小与位置
+        // 筛选启用的快捷项（提前计算：扇区触发模式需要按数量决定底衬与命中策略）
+        List<ShortcutItem> activeItems = new ArrayList<>(config.shortcuts.size());
+        for (ShortcutItem item : config.shortcuts) {
+            if (item.enabled) activeItems.add(item);
+        }
+        // 按「图标数量」上限截取排序最前的 N 个启用项（0 = 显示全部）
+        if (config.maxIconCount > 0 && activeItems.size() > config.maxIconCount) {
+            activeItems = new ArrayList<>(activeItems.subList(0, config.maxIconCount));
+        }
+
+        // 空心圆环扇区触发模式：圆环布局 + 开关开启 + 快捷方式少于 6 个时生效
+        boolean sectorMode = config.layoutStyle == HyperOpenConfig.LAYOUT_RING
+                && config.ringSectorMode
+                && !activeItems.isEmpty()
+                && activeItems.size() < RingSectorPacking.MAX_SECTOR_COUNT_EXCLUSIVE;
+
+        // 更新底衬大小与位置：完全跟随「显示圆形区域底衬」开关（分隔虚线由全屏覆盖层独立绘制）
         regionBackdrop.setVisibility(config.showRegionBg ? View.VISIBLE : View.GONE);
         regionBackdrop.setStyle(resolvedStyle);
         regionBackdrop.setBlurRadius(config.regionBlurRadius);
-                regionBackdrop.setDimAlpha(config.regionDimAlpha);
+        regionBackdrop.setDimAlpha(config.regionDimAlpha);
         regionBackdrop.updateGeometry(regionRadiusPx);
 
         ViewGroup.LayoutParams existingRLp = regionBackdrop.getLayoutParams();
@@ -521,21 +560,12 @@ public class CustomHyperOpenContainer extends FrameLayout {
         rLp.topMargin = (int) (regionCenterY - regionRadiusPx);
         regionBackdrop.setLayoutParams(rLp);
 
-        // 筛选启用的快捷项
-        List<ShortcutItem> activeItems = new ArrayList<>(config.shortcuts.size());
-        for (ShortcutItem item : config.shortcuts) {
-            if (item.enabled) activeItems.add(item);
-        }
-
-        // 按「图标数量」上限截取排序最前的 N 个启用项（0 = 显示全部）
-        if (config.maxIconCount > 0 && activeItems.size() > config.maxIconCount) {
-            activeItems = new ArrayList<>(activeItems.subList(0, config.maxIconCount));
-        }
-
         // 计算布局坐标（紧凑度偏移量对蜂窝、空心圆环与弧形扇面通用）
         float spacingOffsetPx = dpToPx(config.iconSpacingOffset);
         List<PointF> points;
         stockSpecs.clear();
+        // 每次重建先清空扇区几何，仅扇区模式分支重新赋值（防止切换布局后残留旧判定）
+        ringSectorSpec = null;
 
         if (config.layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
             // 系统经典扇形布局：直接调用 StockFanPacking（对齐小米系统 45°/60° 扇面与 Region 扇区多边形判定）
@@ -554,16 +584,30 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 points.add(spec.center);
             }
         } else if (config.layoutStyle == HyperOpenConfig.LAYOUT_RING) {
-            // 空心同心圆环布局：中心留空，图标排布在 ringCount 圈同心环上
-            points = HollowRingPacking.calculatePoints(
-                activeItems.size(),
-                fodCenterX,
-                regionCenterY,
-                regionRadiusPx,
-                iconSizePx,
-                spacingOffsetPx,
-                config.ringCount
-            );
+            if (sectorMode) {
+                // 扇区触发：图标沿圆周均分排布，圆内取消、圆外按数量均分为扇形
+                ringSectorSpec = RingSectorPacking.calculate(
+                    activeItems.size(),
+                    fodCenterX,
+                    regionCenterY,
+                    regionRadiusPx,
+                    iconSizePx,
+                    spacingOffsetPx
+                );
+                points = ringSectorSpec != null ? ringSectorSpec.points : new ArrayList<PointF>();
+            } else {
+                // 空心同心圆环布局：中心留空，图标排布在 ringCount 圈同心环上
+                ringSectorSpec = null;
+                points = HollowRingPacking.calculatePoints(
+                    activeItems.size(),
+                    fodCenterX,
+                    regionCenterY,
+                    regionRadiusPx,
+                    iconSizePx,
+                    spacingOffsetPx,
+                    config.ringCount
+                );
+            }
         } else if (config.layoutStyle == HyperOpenConfig.LAYOUT_ARC) {
             // 弧形扇面布局：图标沿 150° 弧带排布，单弧放不下自动转双弧
             points = ArcFanPacking.calculatePoints(
@@ -590,14 +634,26 @@ public class CustomHyperOpenContainer extends FrameLayout {
             activeItems = new ArrayList<>(activeItems.subList(0, points.size()));
         }
 
+        // 扇区分隔虚线：全屏覆盖层绘制取消区小圆 + N 条射出屏幕的径向虚线（与底衬解耦）
+        if (sectorMode && ringSectorSpec != null && ringSectorSpec.count == activeItems.size()) {
+            sectorOverlay.update(true, ringSectorSpec.count,
+                    fodCenterX, regionCenterY,
+                    ringSectorSpec.cancelRadius, ringSectorSpec.startAngleDeg,
+                    config.sectorLineColor, config.sectorLineAlpha,
+                    config.sectorDashLength, config.sectorDashGap, config.sectorLineWidth);
+        } else {
+            sectorOverlay.clear();
+        }
+
         if (canReuseExistingBubbles(activeItems, iconSizeInt)) {
             // 复用已有气泡实例：仅更新目标坐标、Margin 与模糊通道，消除展开时的 View 树重建开销
             for (int i = 0; i < points.size(); i++) {
                 CircularBubbleView bubble = bubbles.get(i);
                 PointF pt = points.get(i);
                 ShortcutItem item = activeItems.get(i);
-                float finalX = pt.x + dpToPx(item.customOffsetX);
-                float finalY = pt.y + dpToPx(item.customOffsetY);
+                // 扇区触发模式下图标位置由扇区几何决定，忽略自定义偏移（禁止自定义排版）
+                float finalX = sectorMode ? pt.x : pt.x + dpToPx(item.customOffsetX);
+                float finalY = sectorMode ? pt.y : pt.y + dpToPx(item.customOffsetY);
                 bubble.targetX = finalX;
                 bubble.targetY = finalY;
                 bubble.setMaterialStyle(resolvedStyle);
@@ -627,8 +683,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
             for (int i = 0; i < points.size(); i++) {
                 ShortcutItem item = activeItems.get(i);
                 PointF pt = points.get(i);
-                float finalX = pt.x + dpToPx(item.customOffsetX);
-                float finalY = pt.y + dpToPx(item.customOffsetY);
+                // 扇区触发模式下图标位置由扇区几何决定，忽略自定义偏移（禁止自定义排版）
+                float finalX = sectorMode ? pt.x : pt.x + dpToPx(item.customOffsetX);
+                float finalY = sectorMode ? pt.y : pt.y + dpToPx(item.customOffsetY);
 
                 CircularBubbleView bubble = new CircularBubbleView(
                     getContext(), item, resolvedStyle, iconSizeInt, systemuiClassLoader, config
@@ -735,7 +792,25 @@ public class CustomHyperOpenContainer extends FrameLayout {
         CircularBubbleView closest = null;
         float minDistance = Float.MAX_VALUE;
 
-        if (useStockRegion && !stockSpecs.isEmpty()) {
+        boolean useRingSector = ringSectorSpec != null
+                && config.layoutStyle == HyperOpenConfig.LAYOUT_RING
+                && config.ringSectorMode;
+
+        if (useRingSector) {
+            // 空心圆环扇区触发：中心圆内取消，圆外按角度均分扇区命中，不做距离鱼眼
+            float regionCenterY = fodCenterY - dpToPx(config.offsetY);
+            int hitIndex = RingSectorPacking.findTouchedIndex(
+                    ringSectorSpec, touchX, touchY, fodCenterX, regionCenterY);
+            if (hitIndex >= 0 && hitIndex < bubbles.size()) {
+                closest = bubbles.get(hitIndex);
+                minDistance = 0f;
+            }
+            for (int i = 0, n = bubbles.size(); i < n; i++) {
+                CircularBubbleView b = bubbles.get(i);
+                b.applyScale(b == closest ? config.selectedIconScale : 1.0f);
+                b.setIconAlpha(config.iconAlpha);
+            }
+        } else if (useStockRegion && !stockSpecs.isEmpty()) {
             // 系统原生 Region 扇形多边形判定模式
             int hitIndex = StockFanPacking.findTouchedIndex(stockSpecs, touchX, touchY, fodCenterX, fodCenterY);
             if (hitIndex >= 0 && hitIndex < bubbles.size()) {
@@ -775,7 +850,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
         }
 
         // 判定选中项
-        boolean isSelected = (useStockRegion ? (closest != null) : (closest != null && minDistance < hitDistanceThreshold));
+        boolean isSelected = (useRingSector || useStockRegion)
+                ? (closest != null)
+                : (closest != null && minDistance < hitDistanceThreshold);
         if (isSelected) {
             if (currentSelectedBubble != closest) {
                 if (currentSelectedBubble != null) {
