@@ -14,6 +14,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class MainHook implements IXposedHookLoadPackage {
     private static final String TAG = "HyperOpen";
     public static final String TARGET_PACKAGE = "com.android.systemui";
+    public static final String MODULE_PACKAGE = "io.github.qmryqmm.hyperopen";
 
     /** 是否已得出明确结论（允许安装 / 明确拒绝）。只有「未决」才允许后续重试与解锁补装 */
     private static volatile boolean concluded = false;
@@ -30,6 +31,21 @@ public class MainHook implements IXposedHookLoadPackage {
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
+        if (MODULE_PACKAGE.equals(lpparam.packageName)) {
+            try {
+                XposedHelpers.findAndHookMethod(
+                    "io.github.qmryqmm.hyperopen.safety.ModuleStatus",
+                    lpparam.classLoader,
+                    "isModuleActivated",
+                    de.robv.android.xposed.XC_MethodReplacement.returnConstant(Boolean.TRUE)
+                );
+                Log.i(TAG, "已成功激活模块自身进程自检 Hook: " + lpparam.processName);
+            } catch (Throwable t) {
+                Log.w(TAG, "自检 Hook 挂载失败", t);
+            }
+            return;
+        }
+
         if (!TARGET_PACKAGE.equals(lpparam.packageName)) {
             return;
         }
@@ -101,6 +117,7 @@ public class MainHook implements IXposedHookLoadPackage {
                 }
             });
             HyperOpenHook.hook(lpparam);
+            HyperOpenHook.reportInjectedStatus(ctx);
             Log.i(TAG, "Hook 部署流程结束");
         } catch (Throwable t) {
             Log.e(TAG, "Hook 部署发生未预期异常", t);

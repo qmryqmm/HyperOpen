@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.github.qmryqmm.hyperopen.BuildConfig
+import io.github.qmryqmm.hyperopen.safety.ModuleStatus
 import io.github.qmryqmm.hyperopen.safety.SafetyStore
 import io.github.qmryqmm.hyperopen.util.LauncherIcon
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -147,8 +148,8 @@ fun SettingsPage(
             }
         }
 
-        // ── 安全模式与崩溃保护 ──
-        item(key = "safety_title") { SmallTitle("安全模式与崩溃保护") }
+        // ── 模块运行状态与安全保护 ──
+        item(key = "safety_title") { SmallTitle("模块运行状态与安全保护") }
         item(key = "safety_card") {
             SafetyCard(tick = safetyTick, onRequestRefresh = onSafetyRefresh)
         }
@@ -360,32 +361,56 @@ fun AboutLine(label: String, value: String, url: String? = null) {
 private fun android.graphics.Bitmap.toComposeImageBitmap(): androidx.compose.ui.graphics.ImageBitmap = this.asImageBitmap()
 
 // ─────────────────────────────────────────────────────────────────────
-// 安全模式卡片
+// 模块运行状态与安全模式卡片
 // ─────────────────────────────────────────────────────────────────────
 
 @Composable
 fun SafetyCard(tick: Int, onRequestRefresh: () -> Unit) {
     val ctx = LocalContext.current
 
-    val state = remember(tick) { SafetyStore.getState(ctx) }
-    val safeMode = state.getBoolean("safe_mode", false)
-    val hookEnabled = state.getBoolean("hook_enabled", true)
-    val crashCount = state.getInt("crash_count", 0)
-    val threshold = state.getInt("threshold", SafetyStore.CRASH_THRESHOLD)
-    val total = state.getInt("total_crash", 0)
-    val lastTs = state.getLong("last_crash_ts", 0L)
-    val sessionHealthy = state.getBoolean("session_healthy", true)
-    val log = state.getString("crash_log", "") ?: ""
-
-    val statusText = when {
-        safeMode -> "安全模式已激活 · Hook 已停用"
-        !hookEnabled -> "Hook 总开关已关闭 · 不安装任何 Hook"
-        else -> "运行正常 · Hook 已启用"
+    // 进入页面时主动触发一次 SystemUI 探活广播，促使 SystemUI 刷新 PID 与时间戳
+    LaunchedEffect(tick) {
+        ModuleStatus.pingSystemUi(ctx)
     }
-    val statusColor = when {
-        safeMode -> Color(0xFFE94634)
-        !hookEnabled -> MiuixTheme.colorScheme.onSurfaceVariantSummary
-        else -> Color(0xFF07C160)
+
+    val live = remember(tick) { ModuleStatus.getLiveStatus(ctx) }
+
+    val lspBadgeText = when {
+        live.lsposedActive -> "LSPosed: 已激活运行"
+        live.lsposedConfigEnabled -> "LSPosed: 框架已开启 (需重启生效)"
+        else -> "LSPosed: 未启用"
+    }
+    val lspBadgeColor = when {
+        live.lsposedActive -> Color(0xFF07C160)
+        live.lsposedConfigEnabled -> Color(0xFFFAAD14)
+        else -> Color(0xFFE94634)
+    }
+    val lspBadgeBg = when {
+        live.lsposedActive -> Color(0x1F07C160)
+        live.lsposedConfigEnabled -> Color(0x1FFAAD14)
+        else -> Color(0x1FE94634)
+    }
+
+    val hookBadgeText = when {
+        live.safeMode -> "Hook: 安全模式保护 (已停用)"
+        !live.hookEnabled -> "Hook: 总开关已关闭"
+        live.hookInjected -> "SystemUI: 已注入运行 (PID ${live.systemUiPid})"
+        !live.lsposedActive && !live.lsposedConfigEnabled -> "SystemUI: 未注入 (模块未激活)"
+        else -> "SystemUI: 未注入 (等待生效/未勾选作用域)"
+    }
+    val hookBadgeColor = when {
+        live.safeMode -> Color(0xFFE94634)
+        !live.hookEnabled -> MiuixTheme.colorScheme.onSurfaceVariantSummary
+        live.hookInjected -> Color(0xFF07C160)
+        !live.lsposedActive && !live.lsposedConfigEnabled -> Color(0xFFE94634)
+        else -> Color(0xFFFAAD14)
+    }
+    val hookBadgeBg = when {
+        live.safeMode -> Color(0x1FE94634)
+        !live.hookEnabled -> Color(0x15888888)
+        live.hookInjected -> Color(0x1F07C160)
+        !live.lsposedActive && !live.lsposedConfigEnabled -> Color(0x1FE94634)
+        else -> Color(0x1FFAAD14)
     }
 
     Card(
@@ -393,18 +418,70 @@ fun SafetyCard(tick: Int, onRequestRefresh: () -> Unit) {
             .padding(horizontal = 12.dp)
             .fillMaxWidth(),
     ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text(statusText, color = statusColor, fontSize = 15.sp)
-            Spacer(Modifier.height(6.dp))
-            InfoLine("连续崩溃计数：$crashCount / $threshold")
-            InfoLine("历史累计崩溃：$total 次")
-            InfoLine("上次会话存活确认：${if (sessionHealthy) "已确认" else "未确认（疑似崩溃）"}")
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            // 实时状态指示胶囊
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(lspBadgeBg)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                ) {
+                    Text(lspBadgeText, color = lspBadgeColor, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(hookBadgeBg)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                ) {
+                    Text(hookBadgeText, color = hookBadgeColor, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // 状态异常排查指引
+            if (!live.lsposedActive && live.lsposedConfigEnabled) {
+                Text(
+                    "⚡ 检测到 LSPosed 管理器中已开启本模块，由于 Android 虚拟机的注入机制，需要冷重启本软件才能完成 Hook 加载。请点击下方「重启本软件」即可立即生效。",
+                    color = Color(0xFFFAAD14),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+            } else if (!live.lsposedConfigEnabled) {
+                Text(
+                    "⚠️ 未检测到 LSPosed 开启本模块：请在 LSPosed 管理器中启用 HyperOpen 并勾选作用域「系统界面 (com.android.systemui)」，然后重启本软件或系统界面。",
+                    color = Color(0xFFE94634),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+            } else if (!live.hookInjected && live.hookEnabled && !live.safeMode) {
+                Text(
+                    "⚠️ 模块已激活但 SystemUI 尚未成功挂载：请确认在 LSPosed 中已勾选「系统界面」作用域，并点击下方「重启系统界面」重新挂载。",
+                    color = Color(0xFFFAAD14),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+            }
+
+            InfoLine("目标进程：com.android.systemui${if (live.systemUiPid > 0) " (PID: ${live.systemUiPid})" else ""}")
             InfoLine(
-                if (lastTs > 0L) {
-                    val fmt = java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(lastTs))
-                    "最近一次崩溃：$fmt"
-                } else "最近一次崩溃：无",
+                if (live.lastInjectedTime > 0L) {
+                    val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(live.lastInjectedTime))
+                    "最近注入确认：$fmt"
+                } else "最近注入确认：尚未注入",
             )
+            InfoLine("连续崩溃保护：${live.crashCount} / ${live.crashThreshold}")
+            InfoLine("历史累计崩溃：${live.totalCrash} 次")
+            InfoLine("上次会话存活确认：${if (live.sessionHealthy) "已确认" else "未确认（疑似崩溃）"}")
+
             Spacer(Modifier.height(8.dp))
             Text(
                 "崩溃记录",
@@ -412,7 +489,7 @@ fun SafetyCard(tick: Int, onRequestRefresh: () -> Unit) {
                 fontSize = 13.sp,
             )
             Text(
-                if (log.isBlank()) "暂无崩溃记录。" else log,
+                if (live.crashLog.isBlank()) "暂无崩溃记录。" else live.crashLog,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 fontSize = 12.sp,
                 lineHeight = 17.sp,
@@ -420,39 +497,72 @@ fun SafetyCard(tick: Int, onRequestRefresh: () -> Unit) {
                     .padding(top = 4.dp)
                     .basicMarquee(iterations = Int.MAX_VALUE),
             )
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+
+            Spacer(Modifier.height(12.dp))
+
+            // 操作按钮
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 TextButton(
-                    text = "退出安全模式",
+                    text = "刷新状态",
                     onClick = {
-                        SafetyStore.exitSafeMode(ctx)
-                        Toast.makeText(ctx, "已退出安全模式，重启 SystemUI 后 Hook 恢复生效", Toast.LENGTH_LONG).show()
+                        ModuleStatus.pingSystemUi(ctx)
                         onRequestRefresh()
+                        Toast.makeText(ctx, "已刷新模块状态", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(
-                    text = "清空崩溃记录",
+                    text = "重启本软件",
                     onClick = {
-                        SafetyStore.clearCrash(ctx)
-                        Toast.makeText(ctx, "崩溃记录已清空", Toast.LENGTH_SHORT).show()
-                        onRequestRefresh()
+                        ModuleStatus.restartSelf(ctx)
                     },
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = "重启系统界面",
+                    onClick = { restartSystemUi(ctx) },
                     modifier = Modifier.weight(1f),
                 )
             }
+
+            if (live.safeMode || live.crashCount > 0 || live.crashLog.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    if (live.safeMode) {
+                        TextButton(
+                            text = "退出安全模式",
+                            onClick = {
+                                SafetyStore.exitSafeMode(ctx)
+                                Toast.makeText(ctx, "已退出安全模式，重启 SystemUI 后 Hook 恢复生效", Toast.LENGTH_LONG).show()
+                                onRequestRefresh()
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    TextButton(
+                        text = "清空崩溃记录",
+                        onClick = {
+                            SafetyStore.clearCrash(ctx)
+                            Toast.makeText(ctx, "崩溃记录已清空", Toast.LENGTH_SHORT).show()
+                            onRequestRefresh()
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+
             Spacer(Modifier.height(8.dp))
             SwitchPreference(
                 title = "启用指纹快捷方式增强 (Hook 总开关)",
-                checked = hookEnabled && !safeMode,
+                checked = live.hookEnabled && !live.safeMode,
                 onCheckedChange = { checked ->
                     SafetyStore.setHookEnabled(ctx, checked)
+                    onRequestRefresh()
                     Toast.makeText(
                         ctx,
                         if (checked) "Hook 已启用，重启 SystemUI 后生效" else "Hook 已停用，重启 SystemUI 后生效",
                         Toast.LENGTH_LONG,
                     ).show()
-                    onRequestRefresh()
                 },
                 modifier = Modifier.fillMaxWidth(),
             )

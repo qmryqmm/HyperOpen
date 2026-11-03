@@ -46,6 +46,8 @@ public class SettingsProvider extends ContentProvider {
     public static final String METHOD_SAFETY_SET_ENABLED = "safety_set_enabled";
     /** 安全模式：把本次 SystemUI 会话登记为「已安装 Hook」，其异常退出才计入崩溃队列 */
     public static final String METHOD_SAFETY_MARK_HOOKED = "safety_mark_hooked";
+    /** 安全模式：SystemUI 上报实时 Hook 注入成功与运行状态 */
+    public static final String METHOD_SAFETY_REPORT_INJECTED = "safety_report_injected";
 
     @Override
     public boolean onCreate() {
@@ -106,6 +108,13 @@ public class SettingsProvider extends ContentProvider {
                 }
                 if (METHOD_SAFETY_MARK_HOOKED.equals(method)) {
                     return wrap(SafetyStore.markSessionHooked(sctx));
+                }
+                if (METHOD_SAFETY_REPORT_INJECTED.equals(method)) {
+                    int pid = extras != null ? extras.getInt("pid", 0) : 0;
+                    boolean active = extras == null || extras.getBoolean("active", true);
+                    int hookCount = extras != null ? extras.getInt("hook_count", 0) : 0;
+                    String version = extras != null ? extras.getString("version", "") : "";
+                    return wrap(SafetyStore.reportHookInjected(sctx, pid, active, hookCount, version));
                 }
             } catch (Throwable t) {
                 Log.e(TAG, "安全模式方法 " + method + " 执行异常，返回保守结果", t);
@@ -274,7 +283,8 @@ public class SettingsProvider extends ContentProvider {
             || METHOD_SAFETY_EXIT.equals(method)
             || METHOD_SAFETY_CLEAR.equals(method)
             || METHOD_SAFETY_SET_ENABLED.equals(method)
-            || METHOD_SAFETY_MARK_HOOKED.equals(method);
+            || METHOD_SAFETY_MARK_HOOKED.equals(method)
+            || METHOD_SAFETY_REPORT_INJECTED.equals(method);
     }
 
     /**

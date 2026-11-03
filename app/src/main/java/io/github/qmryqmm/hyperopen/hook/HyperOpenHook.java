@@ -1047,11 +1047,17 @@ public class HyperOpenHook {
             @Override
             public void onReceive(Context c, Intent intent) {
                 if (!active) return;
+                String act = intent != null ? intent.getAction() : null;
+                if (io.github.qmryqmm.hyperopen.safety.ModuleStatus.ACTION_PING_HOOK.equals(act)) {
+                    reportInjectedStatus(c);
+                    return;
+                }
                 Log.i(TAG, "收到模块配置变更广播，后台异步热重载！");
                 try {
                     io.github.qmryqmm.hyperopen.safety.SafetyGuard.refresh();
                 } catch (Throwable ignored) {}
                 HyperOpenConfig.refreshAsync(c);
+                reportInjectedStatus(c);
             }
         };
         BroadcastReceiver screen = new BroadcastReceiver() {
@@ -1064,7 +1070,9 @@ public class HyperOpenHook {
         };
 
         try {
-            IntentFilter f = new IntentFilter(HyperOpenConfig.ACTION_CONFIG_CHANGED);
+            IntentFilter f = new IntentFilter();
+            f.addAction(HyperOpenConfig.ACTION_CONFIG_CHANGED);
+            f.addAction(io.github.qmryqmm.hyperopen.safety.ModuleStatus.ACTION_PING_HOOK);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 ctx.registerReceiver(cfg, f, Context.RECEIVER_EXPORTED);
             } else {
@@ -1224,7 +1232,33 @@ public class HyperOpenHook {
         }
 
         Log.e(TAG, "安全模式已停用全部 Hook，共卸载 " + removed + " 个回调，SystemUI 已恢复原生行为");
+        reportInjectedStatus(receiverContext);
         return removed;
+    }
+
+    /**
+     * 异步上报当前 SystemUI Hook 注入状态给模块 Provider
+     */
+    public static void reportInjectedStatus(Context context) {
+        if (context == null) return;
+        final Context appCtx = context.getApplicationContext() != null ? context.getApplicationContext() : context;
+        final int pid = android.os.Process.myPid();
+        final int hookCount = HANDLES.size();
+        final String ver = hostVersionName(appCtx);
+        final boolean isAct = active;
+        io.github.qmryqmm.hyperopen.util.IpcExecutor.runAsync(() -> {
+            try {
+                android.os.Bundle extras = new android.os.Bundle();
+                extras.putInt("pid", pid);
+                extras.putBoolean("active", isAct);
+                extras.putInt("hook_count", hookCount);
+                extras.putString("version", ver);
+                appCtx.getContentResolver().call(
+                    android.net.Uri.parse("content://io.github.qmryqmm.hyperopen.provider"),
+                    "safety_report_injected", null, extras
+                );
+            } catch (Throwable ignored) {}
+        });
     }
 
     /**

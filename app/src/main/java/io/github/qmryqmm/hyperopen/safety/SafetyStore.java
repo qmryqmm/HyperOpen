@@ -67,6 +67,13 @@ public final class SafetyStore {
      */
     public static final String KEY_SESSION_HOOKED  = "safety_session_hooked";
 
+    /** 实时 Hook 注入状态字段 */
+    public static final String KEY_HOOK_INJECTED_TIME = "hook_injected_time";
+    public static final String KEY_HOOK_INJECTED_PID  = "hook_injected_pid";
+    public static final String KEY_HOOK_ACTIVE        = "hook_active";
+    public static final String KEY_HOOK_METHOD_COUNT  = "hook_method_count";
+    public static final String KEY_HOOK_SYSUI_VERSION = "hook_sysui_version";
+
     /** 连续崩溃阈值：连续 2 次即进入安全模式 */
     public static final int CRASH_THRESHOLD = 2;
     /** 连续崩溃判定窗口：5 分钟内的崩溃才算「连续」 */
@@ -168,6 +175,27 @@ public final class SafetyStore {
                 .apply();
             applyWorldReadable(ctx);
             Log.i(TAG, "本次 SystemUI 会话已登记为 Hook 会话");
+            return getStateLocked(p);
+        }
+    }
+
+    /**
+     * 由 SystemUI 在 Hook 安装成功或收到探活广播时调用，更新实时注入状态。
+     */
+    public static Bundle reportHookInjected(Context ctx, int pid, boolean active, int hookCount, String version) {
+        synchronized (LOCK) {
+            SharedPreferences p = prefs(ctx);
+            long now = System.currentTimeMillis();
+            p.edit()
+                .putLong(KEY_HOOK_INJECTED_TIME, now)
+                .putInt(KEY_HOOK_INJECTED_PID, pid)
+                .putBoolean(KEY_HOOK_ACTIVE, active)
+                .putInt(KEY_HOOK_METHOD_COUNT, hookCount)
+                .putString(KEY_HOOK_SYSUI_VERSION, version != null ? version : "")
+                .putBoolean(KEY_SESSION_HOOKED, true)
+                .apply();
+            applyWorldReadable(ctx);
+            Log.i(TAG, "已更新 SystemUI Hook 实时注入状态: pid=" + pid + ", hooks=" + hookCount + ", active=" + active);
             return getStateLocked(p);
         }
     }
@@ -343,6 +371,11 @@ public final class SafetyStore {
         b.putLong("last_crash_ts", times.isEmpty() ? 0L : times.get(times.size() - 1));
         b.putString("crash_log", joinLog(log));
         b.putBoolean("session_healthy", p.getBoolean(KEY_SESSION_HEALTHY, true));
+        b.putLong(KEY_HOOK_INJECTED_TIME, p.getLong(KEY_HOOK_INJECTED_TIME, 0L));
+        b.putInt(KEY_HOOK_INJECTED_PID, p.getInt(KEY_HOOK_INJECTED_PID, 0));
+        b.putBoolean(KEY_HOOK_ACTIVE, p.getBoolean(KEY_HOOK_ACTIVE, false));
+        b.putInt(KEY_HOOK_METHOD_COUNT, p.getInt(KEY_HOOK_METHOD_COUNT, 0));
+        b.putString(KEY_HOOK_SYSUI_VERSION, p.getString(KEY_HOOK_SYSUI_VERSION, ""));
         return b;
     }
 
