@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -89,6 +90,7 @@ object LiveWallpaperLoader {
                 try {
                     context.unregisterReceiver(receiver)
                 } catch (_: Throwable) {}
+                scope.cancel()
             }
         }
 
@@ -100,17 +102,29 @@ object LiveWallpaperLoader {
      */
     fun fetchLiveWallpaperDirectly(context: Context): Bitmap? {
         // ── 途径 1：利用 Root 管道直接以内存流解码当前系统桌面最新壁纸 (/data/system/users/0/wallpaper) ──
+        var process: Process? = null
         try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /data/system/users/0/wallpaper"))
+            process = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /data/system/users/0/wallpaper"))
             val input: InputStream = process.inputStream
-            val bmp = BitmapFactory.decodeStream(input)
-            process.waitFor()
+            val bmp = input.use { BitmapFactory.decodeStream(it) }
+            val finished = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
+            } else {
+                true
+            }
+            if (!finished) {
+                process.destroyForcibly()
+            }
             if (bmp != null && bmp.width > 0 && bmp.height > 0) {
                 Log.i(TAG, "成功由 Root 管道毫秒级实时读取系统桌面壁纸: ${bmp.width}x${bmp.height}")
                 return bmp
             }
         } catch (t: Throwable) {
             Log.d(TAG, "Root 管道直读壁纸跳过或不可用: ${t.message}")
+        } finally {
+            if (process != null) {
+                try { process.destroy() } catch (_: Throwable) {}
+            }
         }
 
         // ── 途径 2：通过系统 WallpaperManager 原生文件流获取 ──

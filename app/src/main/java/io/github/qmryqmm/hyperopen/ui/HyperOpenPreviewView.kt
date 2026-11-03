@@ -798,7 +798,8 @@ class HyperOpenPreviewView(
         }
 
         // 实例化气泡（预览界面禁用底层窗口级 BackgroundBlur，由 Compose 的 textureBlur 渲染实时壁纸模糊，确保样式与真实锁屏 1:1 对齐且无双层叠加闪烁）
-        for (i in 0 until points.size) {
+        val bubbleCount = minOf(points.size, activeShortcuts.size)
+        for (i in 0 until bubbleCount) {
             val item = activeShortcuts[i]
             val pt = points[i]
             // 扇区触发模式下图标位置由扇区几何决定，忽略自定义偏移（禁止自定义排版）

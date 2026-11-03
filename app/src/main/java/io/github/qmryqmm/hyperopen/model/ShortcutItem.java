@@ -16,6 +16,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.DataOutputStream;
+import java.io.InputStream;
 
 import io.github.qmryqmm.hyperopen.util.IpcExecutor;
 
@@ -576,26 +577,12 @@ public class ShortcutItem {
      * 仅限 ownApp 调用——SystemUI 进程 su 授权弹窗不可见会挂起，那里必须走异步桥接。
      */
     private static boolean runRootCommandSync(String cmd, long timeoutMs) {
-        Process p = null;
-        try {
-            p = Runtime.getRuntime().exec("su");
-            DataOutputStream os = new DataOutputStream(p.getOutputStream());
-            os.writeBytes(cmd + "\nexit\n");
-            os.flush();
-            os.close();
-            if (!p.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
-                Log.w(TAG, "root 命令超时(" + timeoutMs + "ms): " + cmd);
-                return false;
-            }
-            int code = p.exitValue();
-            if (code != 0) Log.w(TAG, "root 命令 exit=" + code + ": " + cmd);
-            return code == 0;
-        } catch (Throwable t) {
-            Log.w(TAG, "root 命令执行失败: " + cmd, t);
-            return false;
-        } finally {
-            if (p != null) p.destroy();
+        // 先尝试 su -mm，若不支持或执行失败则降级到普通 su
+        boolean ok = executeShellProcess("su -mm", cmd, timeoutMs);
+        if (!ok) {
+            ok = executeShellProcess("su", cmd, timeoutMs);
         }
+        return ok;
     }
 
     /** 读取当前勿扰过滤器；被权限拒绝等异常时返回 -1 */
@@ -844,34 +831,81 @@ public class ShortcutItem {
     }
 
     private static void runShellBinary(String shell, String cmd) {
-        IpcExecutor.runAsync(() -> {
-            DataOutputStream os = null;
-            Process p = null;
+        // 走独立的守护线程执行，绝不霸占 IpcExecutor 单线程 HandlerThread 造成 SystemUI IPC 阻塞
+        Thread runner = new Thread(() -> {
             try {
-                // 优化执行：对于 root 命令，优先直接以 su -mm (隔离挂载命名空间，穿透各 Android 版本的 SELinux 与多用户限制)
-                // 若失败则依次降级执行，超时自动销毁防止后台死锁
-                String execTarget = "su".equals(shell) ? "su -mm" : shell;
-                try {
-                    p = Runtime.getRuntime().exec(execTarget);
-                } catch (Throwable fallback) {
-                    p = Runtime.getRuntime().exec(shell);
+                if ("su".equals(shell)) {
+                    // 优化执行：对于 root 命令，优先以 su -mm 执行，失败则无缝降级到普通 su
+                    boolean ok = executeShellProcess("su -mm", cmd, 15000L);
+                    if (!ok) {
+                        executeShellProcess("su", cmd, 15000L);
+                    }
+                } else {
+                    executeShellProcess(shell, cmd, 15000L);
                 }
-                os = new DataOutputStream(p.getOutputStream());
-                os.writeBytes(cmd + "\n");
-                os.writeBytes("exit\n");
-                os.flush();
-                p.waitFor();
             } catch (Throwable t) {
-                Log.e(TAG, ("su".equals(shell) ? "Root" : "Shell") + " 命令执行失败: " + cmd, t);
-            } finally {
-                if (os != null) {
-                    try { os.close(); } catch (Throwable ignored) {}
-                }
-                if (p != null) {
-                    try { p.destroy(); } catch (Throwable ignored) {}
-                }
+                Log.e(TAG, ("su".equals(shell) ? "Root" : "Shell") + " 命令执行异常: " + cmd, t);
             }
-        });
+        }, "HyperOpen-ShellRunner");
+        runner.setDaemon(true);
+        runner.start();
+    }
+
+    private static boolean executeShellProcess(String shellBin, String cmd, long timeoutMs) {
+        Process p = null;
+        DataOutputStream os = null;
+        try {
+            p = Runtime.getRuntime().exec(shellBin);
+            final InputStream in = p.getInputStream();
+            final InputStream err = p.getErrorStream();
+            Thread drainIn = new Thread(() -> drainStream(in), "HyperOpen-DrainIn");
+            Thread drainErr = new Thread(() -> drainStream(err), "HyperOpen-DrainErr");
+            drainIn.setDaemon(true);
+            drainErr.setDaemon(true);
+            drainIn.start();
+            drainErr.start();
+
+            os = new DataOutputStream(p.getOutputStream());
+            os.writeBytes(cmd + "\nexit\n");
+            os.flush();
+            os.close();
+            os = null;
+
+            boolean finished = p.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (!finished) {
+                Log.w(TAG, shellBin + " 命令执行超时(" + timeoutMs + "ms): " + cmd);
+                p.destroyForcibly();
+                return false;
+            }
+            int code = p.exitValue();
+            if (code != 0) {
+                Log.w(TAG, shellBin + " 命令 exit=" + code + ": " + cmd);
+            }
+            return code == 0;
+        } catch (Throwable t) {
+            Log.w(TAG, shellBin + " 执行异常: " + t.getMessage());
+            return false;
+        } finally {
+            if (os != null) {
+                try { os.close(); } catch (Throwable ignored) {}
+            }
+            if (p != null) {
+                try { p.destroy(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
+    private static void drainStream(InputStream stream) {
+        if (stream == null) return;
+        try {
+            byte[] buf = new byte[1024];
+            while (stream.read(buf) != -1) {
+                // discard
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            try { stream.close(); } catch (Throwable ignored) {}
+        }
     }
 
     private static void showToast(Context context, String msg) {

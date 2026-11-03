@@ -45,7 +45,7 @@ public final class IconGlyphFactory {
     private static final String TAG = "HyperOpen_IconGlyph";
     public static final String CUSTOM_IMAGE_PREFIX = "base64:";
 
-    private static final Map<String, Drawable> ICON_CACHE = new HashMap<>();
+    private static final Map<String, Drawable.ConstantState> ICON_CACHE = new HashMap<>();
 
     /**
      * 已裁切成圆形的图标缓存（key = 包名/自定义标识 + 裁切模式）。
@@ -83,11 +83,11 @@ public final class IconGlyphFactory {
         String key = "custom|" + spec.hashCode() + "|" + spec.length() + "|" + cropMode;
         synchronized (PROCESSED_CACHE) {
             Drawable.ConstantState cs = PROCESSED_CACHE.get(key);
-            if (cs != null) return cs.newDrawable();
+            if (cs != null) return cs.newDrawable(ctx.getResources());
         }
         Drawable raw = decodeCustomImageDrawable(ctx, spec);
         if (raw == null) return null;
-        Drawable out = AppIconCropProcessor.process(raw, cropMode);
+        Drawable out = AppIconCropProcessor.process(raw, cropMode, ctx.getResources());
         if (out == null) out = raw;
         Drawable.ConstantState cs = out.getConstantState();
         if (cs != null) {
@@ -95,7 +95,7 @@ public final class IconGlyphFactory {
                 if (PROCESSED_CACHE.size() > 48) PROCESSED_CACHE.clear();
                 PROCESSED_CACHE.put(key, cs);
             }
-            return cs.newDrawable();
+            return cs.newDrawable(ctx.getResources());
         }
         return out;
     }
@@ -109,11 +109,11 @@ public final class IconGlyphFactory {
         String key = pkg + "|" + cropMode;
         synchronized (PROCESSED_CACHE) {
             Drawable.ConstantState cs = PROCESSED_CACHE.get(key);
-            if (cs != null) return cs.newDrawable();
+            if (cs != null) return cs.newDrawable(ctx.getResources());
         }
         Drawable raw = appIcon(ctx, pkg);
         if (raw == null) return null;
-        Drawable out = AppIconCropProcessor.process(raw, cropMode);
+        Drawable out = AppIconCropProcessor.process(raw, cropMode, ctx.getResources());
         if (out == null) return null;
         Drawable.ConstantState cs = out.getConstantState();
         if (cs != null) {
@@ -121,7 +121,7 @@ public final class IconGlyphFactory {
                 if (PROCESSED_CACHE.size() > 48) PROCESSED_CACHE.clear();
                 PROCESSED_CACHE.put(key, cs);
             }
-            return cs.newDrawable();
+            return cs.newDrawable(ctx.getResources());
         }
         return out;
     }
@@ -322,15 +322,19 @@ public final class IconGlyphFactory {
             return decodeCustomImageDrawable(ctx, pkg);
         }
         synchronized (ICON_CACHE) {
-            Drawable hit = ICON_CACHE.get(pkg);
-            if (hit != null) return hit;
+            Drawable.ConstantState hit = ICON_CACHE.get(pkg);
+            if (hit != null) return hit.newDrawable(ctx.getResources());
         }
         try {
             Drawable d = ctx.getPackageManager().getApplicationIcon(pkg);
             if (d != null) {
-                synchronized (ICON_CACHE) {
-                    if (ICON_CACHE.size() > 48) ICON_CACHE.clear();
-                    ICON_CACHE.put(pkg, d);
+                Drawable.ConstantState cs = d.getConstantState();
+                if (cs != null) {
+                    synchronized (ICON_CACHE) {
+                        if (ICON_CACHE.size() > 48) ICON_CACHE.clear();
+                        ICON_CACHE.put(pkg, cs);
+                    }
+                    return cs.newDrawable(ctx.getResources());
                 }
                 return d;
             }

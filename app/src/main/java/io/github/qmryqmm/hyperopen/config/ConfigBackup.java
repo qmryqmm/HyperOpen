@@ -293,10 +293,8 @@ public final class ConfigBackup {
                         items.add(ShortcutItem.fromJson(obj));
                     }
                 }
-                if (!items.isEmpty()) {
-                    editor.putString("shortcuts_json", HyperOpenConfig.serializeShortcutsJson(items));
-                    shortcutCount = items.size();
-                }
+                editor.putString("shortcuts_json", HyperOpenConfig.serializeShortcutsJson(items));
+                shortcutCount = items.size();
             }
 
             editor.apply();

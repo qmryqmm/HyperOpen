@@ -1,5 +1,6 @@
 package io.github.qmryqmm.hyperopen.view
 
+import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.Canvas
@@ -23,14 +24,15 @@ object AppIconCropProcessor {
      * 根据全局裁切模式对应用图标进行圆形处理
      */
     @JvmStatic
-    fun process(src: Drawable?, cropMode: Int): Drawable? {
+    @JvmOverloads
+    fun process(src: Drawable?, cropMode: Int, res: Resources? = null): Drawable? {
         if (src == null) return null
 
         return try {
             when (cropMode) {
-                HyperOpenConfig.CROP_BITMAP_CIRCLE -> createStandardCircle(src)
-                HyperOpenConfig.CROP_ADAPTIVE_EXPAND -> createAdaptiveExpandedCircle(src)
-                else -> createAdaptiveExpandedCircle(src)
+                HyperOpenConfig.CROP_BITMAP_CIRCLE -> createStandardCircle(src, res)
+                HyperOpenConfig.CROP_ADAPTIVE_EXPAND -> createAdaptiveExpandedCircle(src, res)
+                else -> createAdaptiveExpandedCircle(src, res)
             }
         } catch (t: Throwable) {
             src
@@ -40,18 +42,18 @@ object AppIconCropProcessor {
     /**
      * 标准抗锯齿圆形裁切 (BitmapShader)
      */
-    private fun createStandardCircle(drawable: Drawable): Drawable {
-        return renderCircularIcon(drawable, expandAdaptive = false)
+    private fun createStandardCircle(drawable: Drawable, res: Resources?): Drawable {
+        return renderCircularIcon(drawable, expandAdaptive = false, res = res)
     }
 
     /**
      * 自适应留白外扩并圆形满铺裁切 (专为 AdaptiveIcon 和带白底的应用打造)
      */
-    private fun createAdaptiveExpandedCircle(drawable: Drawable): Drawable {
-        return renderCircularIcon(drawable, expandAdaptive = true)
+    private fun createAdaptiveExpandedCircle(drawable: Drawable, res: Resources?): Drawable {
+        return renderCircularIcon(drawable, expandAdaptive = true, res = res)
     }
 
-    private fun renderCircularIcon(drawable: Drawable, expandAdaptive: Boolean): Drawable {
+    private fun renderCircularIcon(drawable: Drawable, expandAdaptive: Boolean, res: Resources?): Drawable {
         val size = BITMAP_SIZE
         val srcBmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val srcCanvas = Canvas(srcBmp)
@@ -99,6 +101,8 @@ object AppIconCropProcessor {
             } else {
                 srcCanvas.drawBitmap(rawBmp, 0f, 0f, null)
             }
+            // 及时回收临时位图，减轻 GC 压力
+            rawBmp.recycle()
         }
 
         val outBmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
@@ -121,7 +125,7 @@ object AppIconCropProcessor {
         // 中间位图仅用于本次绘制，立即回收，避免每次呼出面板都在 SystemUI 堆上遗留数百 KB 垃圾触发 GC
         srcBmp.recycle()
 
-        return BitmapDrawable(null, outBmp)
+        return BitmapDrawable(res ?: Resources.getSystem(), outBmp)
     }
 
     /**

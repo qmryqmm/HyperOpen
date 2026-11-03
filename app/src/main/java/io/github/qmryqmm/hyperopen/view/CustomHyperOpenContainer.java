@@ -645,9 +645,11 @@ public class CustomHyperOpenContainer extends FrameLayout {
             sectorOverlay.clear();
         }
 
+        int targetCount = Math.min(points.size(), activeItems.size());
         if (canReuseExistingBubbles(activeItems, iconSizeInt)) {
             // 复用已有气泡实例：仅更新目标坐标、Margin 与模糊通道，消除展开时的 View 树重建开销
-            for (int i = 0; i < points.size(); i++) {
+            int reuseCount = Math.min(targetCount, bubbles.size());
+            for (int i = 0; i < reuseCount; i++) {
                 CircularBubbleView bubble = bubbles.get(i);
                 PointF pt = points.get(i);
                 ShortcutItem item = activeItems.get(i);
@@ -680,7 +682,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
             lastBuiltIconSizePx = iconSizeInt;
 
             // 实例化圆形气泡
-            for (int i = 0; i < points.size(); i++) {
+            for (int i = 0; i < targetCount; i++) {
                 ShortcutItem item = activeItems.get(i);
                 PointF pt = points.get(i);
                 // 扇区触发模式下图标位置由扇区几何决定，忽略自定义偏移（禁止自定义排版）
