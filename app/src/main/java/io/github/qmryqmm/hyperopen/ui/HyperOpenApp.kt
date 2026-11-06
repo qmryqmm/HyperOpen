@@ -270,7 +270,14 @@ fun HyperOpenApp(
 
     // ── 页面滚动位置记忆：状态提升到 HyperOpenApp 顶层，跨底部导航切换与二级页进出持续存活，
     //    返回页面时停在上次滚动位置而不是回到顶部 ──
-    val paramsListState = rememberLazyListState()
+    // 参数页按 Tab 分成 4 页，每页各自记住滚动位置，切 Tab 不会把别页的进度带过去
+    val paramsListStates = listOf(
+        rememberLazyListState(),
+        rememberLazyListState(),
+        rememberLazyListState(),
+        rememberLazyListState(),
+    )
+    var paramsTab by remember { mutableIntStateOf(0) }
     val shortcutsListState = rememberLazyListState()
     val settingsListState = rememberLazyListState()
     val themeListState = rememberLazyListState()
@@ -551,23 +558,35 @@ fun HyperOpenApp(
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             topBar = {
-                if (subPage != 3) {
-                    TopAppBar(
-                        title = title,
-                        scrollBehavior = topAppBarScrollBehavior,
-                        navigationIcon = {
-                            if (subPage != 0) {
-                                BackNavigationIcon(onClick = {
-                                    if (subPage == 2) {
-                                        requestEditBackTrigger++
-                                    } else {
-                                        subPage = 0
-                                        editingItem = null
-                                    }
-                                })
-                            }
-                        },
-                    )
+                Column {
+                    if (subPage != 3) {
+                        TopAppBar(
+                            title = title,
+                            scrollBehavior = topAppBarScrollBehavior,
+                            navigationIcon = {
+                                if (subPage != 0) {
+                                    BackNavigationIcon(onClick = {
+                                        if (subPage == 2) {
+                                            requestEditBackTrigger++
+                                        } else {
+                                            subPage = 0
+                                            editingItem = null
+                                        }
+                                    })
+                                }
+                            },
+                        )
+                    }
+                    // 参数页分页 Tab：跟着顶栏一起折叠上移，所以放在 topBar 里而不是内容区。
+                    // 不用 Miuix 的 TabRow —— 它的 backgroundColor 是「每个 Tab 药丸」的颜色
+                    // （带 selected 参数），整条容器底色不可控，会留下一条与标题栏不同色的白带。
+                    // 这里自绘分段控件，视觉与应用其它白色卡片 + 主色强调保持一致。
+                    if (subPage == 0 && page == 0) {
+                        ParamsTabBar(
+                            selectedIndex = paramsTab,
+                            onSelected = { paramsTab = it },
+                        )
+                    }
                 }
             },
             bottomBar = {
@@ -945,7 +964,8 @@ fun HyperOpenApp(
                             0 -> {
                                 ParamsPage(
                                     contentPadding = innerPadding,
-                                    lazyListState = paramsListState,
+                                    lazyListState = paramsListStates[paramsTab.coerceIn(0, paramsListStates.lastIndex)],
+                                    selectedTab = paramsTab,
                                     materialStyle = materialStyle,
                                     onMaterialStyle = { materialStyle = it; persist() },
                                     offsetY = offsetY,
@@ -1436,6 +1456,57 @@ private fun AppBottomBar(
                     onClick = { onPageSelect(index) },
                     icon = item.icon,
                     label = item.label,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 参数页的分段式分页控件。
+ *
+ * 刻意不用 Miuix 的 [TabRow]：它的 `backgroundColor` 是按 Tab 逐项求值（带 selected 参数）
+ * 的药丸底色，整条容器底色无法覆盖，会和折叠后的标题栏拼出一条深浅不一的白带。
+ * 这里自绘：页面底色（与标题栏同色）铺底 + 白色圆角轨道 + 主色浅底选中块，
+ * 与应用里「白色卡片落在浅灰页面上」的整体风格一致。
+ */
+@Composable
+private fun ParamsTabBar(
+    selectedIndex: Int,
+    onSelected: (Int) -> Unit,
+) {
+    val labels = listOf("布局", "外观", "图标", "震动")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MiuixTheme.colorScheme.background)
+            // 左右留 12dp，与下方 Card 的 horizontal padding 对齐，避免轨道比卡片窄一圈
+            .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 8.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(MiuixTheme.colorScheme.surface)
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        labels.forEachIndexed { index, label ->
+            val active = index == selectedIndex
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        if (active) MiuixTheme.colorScheme.primary.copy(alpha = 0.12f)
+                        else Color.Transparent
+                    )
+                    .clickable { onSelected(index) }
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    fontSize = 14.sp,
+                    fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
+                    color = if (active) MiuixTheme.colorScheme.primary
+                    else MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
         }

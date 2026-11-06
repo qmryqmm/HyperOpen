@@ -2,7 +2,7 @@ package io.github.qmryqmm.hyperopen.ui.components
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,12 +51,14 @@ fun BackNavigationIcon(
 }
 
 /**
- * 折叠分区标题栏，包含标题文字和“展开/收起”指示器。
+ * 折叠分区标题栏，包含标题文字和"展开/收起"指示器。
+ * @param summary 收起时也能看到的关键参数摘要，让长设置页在不展开的情况下可被扫读
  */
 @Composable
 fun CollapsibleSectionTitle(
     title: String,
     expanded: Boolean,
+    summary: String? = null,
     onToggle: () -> Unit,
 ) {
     Row(
@@ -64,7 +67,19 @@ fun CollapsibleSectionTitle(
             .clickable { onToggle() },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(modifier = Modifier.weight(1f)) { SmallTitle(title) }
+        Column(modifier = Modifier.weight(1f)) {
+            SmallTitle(title)
+            if (!summary.isNullOrBlank()) {
+                Text(
+                    text = summary,
+                    fontSize = 11.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 24.dp, end = 12.dp, bottom = 4.dp),
+                )
+            }
+        }
         Text(
             text = if (expanded) "收起 ▲" else "展开 ▼",
             fontSize = 12.sp,

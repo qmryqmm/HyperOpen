@@ -455,7 +455,7 @@ fun SafetyCard(tick: Int, onRequestRefresh: () -> Unit) {
                 )
             } else if (!live.lsposedConfigEnabled) {
                 Text(
-                    "⚠️ 未检测到 LSPosed 开启本模块：请在 LSPosed 管理器中启用 HyperOpen 并勾选作用域「系统界面 (com.android.systemui)」，然后重启本软件或系统界面。",
+                    "⚠️ 未检测到 LSPosed 开启本模块：请在 LSPosed 管理器中启用 HyperOpen 并勾选作用域「系统界面 (com.android.systemui)」，然后重启本软件和系统界面。",
                     color = Color(0xFFE94634),
                     fontSize = 12.sp,
                     lineHeight = 16.sp,
@@ -512,15 +512,10 @@ fun SafetyCard(tick: Int, onRequestRefresh: () -> Unit) {
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(
-                    text = "重启本软件",
+                    text = "重启软件",
                     onClick = {
                         ModuleStatus.restartSelf(ctx)
                     },
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(
-                    text = "重启系统界面",
-                    onClick = { restartSystemUi(ctx) },
                     modifier = Modifier.weight(1f),
                 )
             }

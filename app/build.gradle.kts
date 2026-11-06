@@ -12,8 +12,8 @@ android {
         applicationId = "io.github.qmryqmm.hyperopen"
         minSdk = 29
         targetSdk = 35
-        versionCode = 44
-        versionName = "0.44"
+        versionCode = 50
+        versionName = "0.50"
     }
 
     buildFeatures {
