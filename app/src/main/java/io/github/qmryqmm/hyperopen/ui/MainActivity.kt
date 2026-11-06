@@ -2246,7 +2246,7 @@ fun ParamsPage(
                 title = "图标与鱼眼",
                 expanded = isOpen("icon"),
                 onToggle = { toggle("icon") },
-                summary = "尺寸 ${iconSize.toInt()} dp · 鱼眼 %.2f× · 辐射 %d dp".format(maxScale, influenceRadius.toInt()),
+                summary = "尺寸 ${iconSize.toInt()} dp · 鱼眼 ${"%.2f".format(maxScale)}× · 辐射 ${influenceRadius.toInt()} dp",
             )
         }
         if (isOpen("icon")) item(key = "icon_card") {
@@ -2314,7 +2314,7 @@ fun ParamsPage(
                 title = "气泡与动效",
                 expanded = isOpen("bubble"),
                 onToggle = { toggle("bubble") },
-                summary = "留白 ${bubblePaddingPercent.toInt()}% · 选中 %.2f×".format(selectedIconScale) +
+                summary = "留白 ${bubblePaddingPercent.toInt()}% · 选中 ${"%.2f".format(selectedIconScale)}×" +
                     (if (iconGlowEffect) " · 辉光开" else " · 辉光关"),
             )
         }
