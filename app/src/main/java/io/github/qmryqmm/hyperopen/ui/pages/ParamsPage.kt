@@ -283,8 +283,8 @@ fun ParamsPage(
                         SwitchPreference(
                             title = "扇区触发模式",
                             summary = when {
-                                !ringSectorMode -> "开启后：快捷方式 1~6 个时，图标沿圆周均分，中心圆内为取消区，圆外按图标数量均分为扇形（虚线分隔），滑入扇区即选中；该模式下禁止自定义排版"
-                                enabledShortcutsCount in 1..6 -> "已生效（当前 $enabledShortcutsCount 个快捷方式）：中心圆内松手取消，圆外 $enabledShortcutsCount 个扇区各对应一个图标；自定义排版已禁用"
+                                !ringSectorMode -> "开启后：快捷方式 1~6 个时，图标沿圆周均分，中心圆内为取消区，圆外按图标数量均分为扇形（虚线分隔），滑入扇区即选中；该模式下强制开启图标吸附"
+                                enabledShortcutsCount in 1..6 -> "已生效（当前 $enabledShortcutsCount 个快捷方式）：中心圆内松手取消，圆外 $enabledShortcutsCount 个扇区各对应一个图标；图标吸附已锁定开启"
                                 else -> "快捷方式达到 7 个及以上时自动回退为常规同心圆环布局（当前 $enabledShortcutsCount 个）"
                             },
                             checked = ringSectorMode,

@@ -115,8 +115,8 @@ class HyperOpenPreviewView(
     private var isDraggingActive = false
     private val longPressRunnable = Runnable {
         val target = pendingPressBubble
-        // 扇区触发模式下禁止自定义排版：图标位置由扇区几何决定，长按不进入拖拽编辑
-        if (target != null && !isEditMode && !isDraggingActive && !isRingSectorActive()) {
+        // 扇区触发模式下允许自定义排版，但自动禁用图标吸附开关
+        if (target != null && !isEditMode && !isDraggingActive) {
             currentSelectedBubble?.setSelectedState(false)
             currentSelectedBubble = null
             enterEditMode(target)
@@ -256,7 +256,11 @@ class HyperOpenPreviewView(
         floatingBackButton = backBtn
     }
 
-    private fun snapToggleText(): String = if (snapEnabled) "图标吸附：开" else "图标吸附：关"
+    private fun snapToggleText(): String = when {
+        isRingSectorActive() -> "图标吸附：已锁定"
+        snapEnabled -> "图标吸附：开"
+        else -> "图标吸附：关"
+    }
 
     private fun buildSnapToggleButton() {
         val btn = TextView(context).apply {
@@ -280,6 +284,11 @@ class HyperOpenPreviewView(
             isFocusable = true
             visibility = View.GONE
             setOnClickListener {
+                if (isRingSectorActive()) {
+                    // 扇区触发模式下禁止关闭图标吸附
+                    triggerHaptic()
+                    return@setOnClickListener
+                }
                 snapEnabled = !snapEnabled
                 persistSnapEnabled()
                 text = snapToggleText()
@@ -802,9 +811,8 @@ class HyperOpenPreviewView(
         for (i in 0 until bubbleCount) {
             val item = activeShortcuts[i]
             val pt = points[i]
-            // 扇区触发模式下图标位置由扇区几何决定，忽略自定义偏移（禁止自定义排版）
-            val finalX = if (sectorMode) pt.x else pt.x + dpToPx(item.customOffsetX)
-            val finalY = if (sectorMode) pt.y else pt.y + dpToPx(item.customOffsetY)
+            val finalX = pt.x + dpToPx(item.customOffsetX)
+            val finalY = pt.y + dpToPx(item.customOffsetY)
 
             val bubble = CircularBubbleView(
                 context, item, resolvedStyle, iconSizePx.toInt(), context.classLoader, config
@@ -978,7 +986,7 @@ class HyperOpenPreviewView(
         return best
     }
 
-    /** 当前是否处于空心圆环扇区触发模式（该模式禁止自定义排版） */
+    /** 当前是否处于空心圆环扇区触发模式（该模式禁用图标吸附开关） */
     fun isRingSectorActive(): Boolean = ringSectorSpec != null &&
         config.layoutStyle == HyperOpenConfig.LAYOUT_RING &&
         config.ringSectorMode
@@ -989,6 +997,11 @@ class HyperOpenPreviewView(
     fun enterEditMode(initialTarget: CircularBubbleView? = null) {
         if (isEditMode) return
         isEditMode = true
+        // 扇区触发模式下强制开启图标吸附，禁止关闭
+        if (isRingSectorActive() && !snapEnabled) {
+            snapEnabled = true
+            persistSnapEnabled()
+        }
         triggerHaptic()
 
         editBanner.visibility = View.VISIBLE
@@ -999,7 +1012,9 @@ class HyperOpenPreviewView(
             it.text = snapToggleText()
             it.alpha = 0f
             it.visibility = View.VISIBLE
-            it.animate().alpha(1f).setDuration(200).start()
+            // 扇区模式下视觉禁用吸附按钮
+            it.alpha = if (isRingSectorActive()) 0.5f else 1f
+            it.animate().alpha(if (isRingSectorActive()) 0.5f else 1f).setDuration(200).start()
         }
 
         HintTextStyler.reset(headerTitle, true)

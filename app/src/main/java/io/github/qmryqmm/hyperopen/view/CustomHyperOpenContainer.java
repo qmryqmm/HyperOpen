@@ -653,9 +653,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 CircularBubbleView bubble = bubbles.get(i);
                 PointF pt = points.get(i);
                 ShortcutItem item = activeItems.get(i);
-                // 扇区触发模式下图标位置由扇区几何决定，忽略自定义偏移（禁止自定义排版）
-                float finalX = sectorMode ? pt.x : pt.x + dpToPx(item.customOffsetX);
-                float finalY = sectorMode ? pt.y : pt.y + dpToPx(item.customOffsetY);
+                float finalX = pt.x + dpToPx(item.customOffsetX);
+                float finalY = pt.y + dpToPx(item.customOffsetY);
                 bubble.targetX = finalX;
                 bubble.targetY = finalY;
                 bubble.setMaterialStyle(resolvedStyle);
@@ -685,9 +684,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
             for (int i = 0; i < targetCount; i++) {
                 ShortcutItem item = activeItems.get(i);
                 PointF pt = points.get(i);
-                // 扇区触发模式下图标位置由扇区几何决定，忽略自定义偏移（禁止自定义排版）
-                float finalX = sectorMode ? pt.x : pt.x + dpToPx(item.customOffsetX);
-                float finalY = sectorMode ? pt.y : pt.y + dpToPx(item.customOffsetY);
+                float finalX = pt.x + dpToPx(item.customOffsetX);
+                float finalY = pt.y + dpToPx(item.customOffsetY);
 
                 CircularBubbleView bubble = new CircularBubbleView(
                     getContext(), item, resolvedStyle, iconSizeInt, systemuiClassLoader, config

@@ -115,7 +115,7 @@ public class HyperOpenConfig {
     /**
      * 空心圆环「扇区触发」模式：开启且快捷方式少于 6 个时，
      * 图标沿圆周均分排布，圆内为中心取消区，圆外按图标数量均分为扇形，
-     * 每个扇形触发对应图标；该模式下禁止自定义排版（拖拽排序与单个图标偏移不生效）。
+     * 每个扇形触发对应图标；该模式下强制开启图标吸附（禁止关闭吸附）。
      */
     public boolean ringSectorMode = true;
     /** 扇区分隔线颜色 (ARGB，透明度由 sectorLineAlpha 独立控制，默认淡灰 #FFBFBFBF) */
