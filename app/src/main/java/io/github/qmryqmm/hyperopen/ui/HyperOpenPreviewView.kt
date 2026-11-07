@@ -126,6 +126,9 @@ class HyperOpenPreviewView(
     private var isDraggingActive = false
     private val longPressRunnable = Runnable {
         val target = pendingPressBubble
+        removeCallbacks(folderHoverRunnable)
+        pendingFolderBubble = null
+        dismissFolderSubBubbles()
         // 扇区触发模式下允许自定义排版，但自动禁用图标吸附开关
         if (target != null && !isEditMode && !isDraggingActive) {
             currentSelectedBubble?.setSelectedState(false)
@@ -930,7 +933,10 @@ class HyperOpenPreviewView(
 
                 if (pendingPressBubble != null) {
                     if (isEditMode) {
-                        // 编辑模式下直接抓取拖拽
+                        // 编辑模式下直接抓取拖拽，绝不触发文件夹二级展开
+                        removeCallbacks(folderHoverRunnable)
+                        pendingFolderBubble = null
+                        dismissFolderSubBubbles()
                         startDragging(pendingPressBubble!!, x, y)
                     } else {
                         // 准备长按识别 (450ms 进入自定义排版)，同时立即展现按压鱼眼放大反馈
@@ -948,6 +954,7 @@ class HyperOpenPreviewView(
                 val distFromDown = Math.hypot((x - dragTouchStartX).toDouble(), (y - dragTouchStartY).toDouble()).toFloat()
                 if (distFromDown > dpToPx(12f) && !isDraggingActive) {
                     removeCallbacks(longPressRunnable)
+                    pendingPressBubble = null
                 }
 
                 if (isDraggingActive && draggingBubble != null) {
@@ -971,6 +978,8 @@ class HyperOpenPreviewView(
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 isTouching = false
                 removeCallbacks(longPressRunnable)
+                removeCallbacks(folderHoverRunnable)
+                pendingFolderBubble = null
 
                 if (isDraggingActive && draggingBubble != null) {
                     // 结束拖拽：吸附回最终目标槽位
@@ -1012,6 +1021,9 @@ class HyperOpenPreviewView(
      */
     fun enterEditMode(initialTarget: CircularBubbleView? = null) {
         if (isEditMode) return
+        removeCallbacks(folderHoverRunnable)
+        pendingFolderBubble = null
+        dismissFolderSubBubbles()
         isEditMode = true
         // 扇区触发模式下强制开启图标吸附，禁止关闭
         if (isRingSectorActive() && !snapEnabled) {
@@ -1056,6 +1068,9 @@ class HyperOpenPreviewView(
     /** 退出排版编辑模式（仅 UI 状态复位，不提交保存；保存走 commitLayoutChanges()，由返回键确认弹窗触发） */
     fun exitEditMode() {
         if (!isEditMode) return
+        removeCallbacks(folderHoverRunnable)
+        pendingFolderBubble = null
+        dismissFolderSubBubbles()
         isEditMode = false
         triggerHaptic()
 
@@ -1419,9 +1434,10 @@ class HyperOpenPreviewView(
                 closest.bringToFront()
                 currentSelectedBubble = closest
 
-                // 文件夹二级菜单检测：若当前选中项是文件夹气泡，启动悬停展开计时器
+                // 文件夹二级菜单检测：若当前选中项是文件夹气泡，且当前非长按排版等待中
                 removeCallbacks(folderHoverRunnable)
-                if (ShortcutItem.ACTION_FOLDER.equals(closest.item.actionType)) {
+                if (ShortcutItem.ACTION_FOLDER.equals(closest.item.actionType)
+                    && !isEditMode && !isDraggingActive && pendingPressBubble == null) {
                     pendingFolderBubble = closest
                     val delay = Math.max(100, config.folderHoverDelayMs).toLong()
                     postDelayed(folderHoverRunnable, delay)
