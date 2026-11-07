@@ -211,6 +211,7 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putFloat("region_dim_alpha", sp.getFloat("region_dim_alpha", 0f));
                 bundle.putFloat("bubble_dim_alpha", sp.getFloat("bubble_dim_alpha", 0f));
                 bundle.putInt("show_delay_ms", sp.getInt("show_delay_ms", 500));
+                bundle.putBoolean("disable_system_enter_anim", sp.getBoolean("disable_system_enter_anim", false));
                 bundle.putBoolean("face_unlock_quick_open", sp.getBoolean("face_unlock_quick_open", true));
                 bundle.putBoolean("haptic_enabled", sp.getBoolean("haptic_enabled", true));
                 bundle.putInt("haptic_strength", sp.getInt("haptic_strength", 140));

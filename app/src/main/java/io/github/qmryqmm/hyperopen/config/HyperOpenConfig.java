@@ -148,6 +148,8 @@ public class HyperOpenConfig {
     public float bubbleDimAlpha = 0f;   // 图标气泡留白区域压暗 (0.0 ~ 1.0)
     /** 指纹解锁后进入快捷方式面板的等待阈值 (0 ~ 2000 ms，默认 500 = 系统默认不干预，0 = 立即弹出) */
     public int showDelayMs = 500;
+    /** 关闭系统界面进入指纹快捷方式时的 600ms 圆环加载过渡动画 (默认 false = 保持系统默认加载圆环) */
+    public boolean disableSystemEnterAnim = false;
     /** 人脸识别成功停留在锁屏时，按指纹进桌面并支持长按唤出快捷方式 (默认开启) */
     public boolean faceUnlockQuickOpen = true;
 
@@ -382,6 +384,7 @@ public class HyperOpenConfig {
                     config.regionDimAlpha = bundle.getFloat("region_dim_alpha", 0f);
                     config.bubbleDimAlpha = bundle.getFloat("bubble_dim_alpha", 0f);
                     config.showDelayMs = bundle.getInt("show_delay_ms", 500);
+                    config.disableSystemEnterAnim = bundle.getBoolean("disable_system_enter_anim", false);
                     config.faceUnlockQuickOpen = bundle.getBoolean("face_unlock_quick_open", true);
                     config.hapticEnabled = bundle.getBoolean("haptic_enabled", true);
                     config.hapticStrength = bundle.getInt("haptic_strength", 140);
@@ -475,6 +478,7 @@ public class HyperOpenConfig {
         config.regionDimAlpha = xPrefs.getFloat("region_dim_alpha", 0f);
         config.bubbleDimAlpha = xPrefs.getFloat("bubble_dim_alpha", 0f);
         config.showDelayMs = xPrefs.getInt("show_delay_ms", 500);
+        config.disableSystemEnterAnim = xPrefs.getBoolean("disable_system_enter_anim", false);
         config.faceUnlockQuickOpen = xPrefs.getBoolean("face_unlock_quick_open", true);
         config.hapticEnabled = xPrefs.getBoolean("haptic_enabled", true);
         config.hapticStrength = xPrefs.getInt("haptic_strength", 140);
@@ -558,6 +562,7 @@ public class HyperOpenConfig {
         config.regionDimAlpha = sp.getFloat("region_dim_alpha", 0f);
         config.bubbleDimAlpha = sp.getFloat("bubble_dim_alpha", 0f);
         config.showDelayMs = sp.getInt("show_delay_ms", 500);
+        config.disableSystemEnterAnim = sp.getBoolean("disable_system_enter_anim", false);
         config.faceUnlockQuickOpen = sp.getBoolean("face_unlock_quick_open", true);
         config.hapticEnabled = sp.getBoolean("haptic_enabled", true);
         config.hapticStrength = sp.getInt("haptic_strength", 140);
@@ -641,6 +646,7 @@ public class HyperOpenConfig {
             .putFloat("region_dim_alpha", regionDimAlpha)
             .putFloat("bubble_dim_alpha", bubbleDimAlpha)
             .putInt("show_delay_ms", showDelayMs)
+            .putBoolean("disable_system_enter_anim", disableSystemEnterAnim)
             .putBoolean("face_unlock_quick_open", faceUnlockQuickOpen)
             .putBoolean("haptic_enabled", hapticEnabled)
             .putInt("haptic_strength", hapticStrength)

@@ -168,6 +168,7 @@ fun HyperOpenApp(
     var regionDimAlpha by remember { mutableFloatStateOf(initialConfig.regionDimAlpha) }
     var bubbleDimAlpha by remember { mutableFloatStateOf(initialConfig.bubbleDimAlpha) }
     var showDelayMs by remember { mutableFloatStateOf(initialConfig.showDelayMs.toFloat()) }
+    var disableSystemEnterAnim by remember { mutableStateOf(initialConfig.disableSystemEnterAnim) }
     var faceUnlockQuickOpen by remember { mutableStateOf(initialConfig.faceUnlockQuickOpen) }
     var hapticEnabled by remember { mutableStateOf(initialConfig.hapticEnabled) }
     var hapticStrength by remember { mutableFloatStateOf(initialConfig.hapticStrength.toFloat()) }
@@ -386,6 +387,7 @@ fun HyperOpenApp(
         c.regionDimAlpha = regionDimAlpha
         c.bubbleDimAlpha = bubbleDimAlpha
         c.showDelayMs = showDelayMs.toInt()
+        c.disableSystemEnterAnim = disableSystemEnterAnim
         c.faceUnlockQuickOpen = faceUnlockQuickOpen
         c.hapticEnabled = hapticEnabled
         c.hapticStrength = hapticStrength.toInt()
@@ -469,6 +471,7 @@ fun HyperOpenApp(
         regionDimAlpha = defaults.regionDimAlpha
         bubbleDimAlpha = defaults.bubbleDimAlpha
         showDelayMs = defaults.showDelayMs.toFloat()
+        disableSystemEnterAnim = defaults.disableSystemEnterAnim
         faceUnlockQuickOpen = defaults.faceUnlockQuickOpen
         hapticEnabled = defaults.hapticEnabled
         hapticStrength = defaults.hapticStrength.toFloat()
@@ -714,6 +717,7 @@ fun HyperOpenApp(
                             this.regionDimAlpha = regionDimAlpha
                             this.bubbleDimAlpha = bubbleDimAlpha
                             this.showDelayMs = showDelayMs.toInt()
+                            this.disableSystemEnterAnim = disableSystemEnterAnim
                             this.faceUnlockQuickOpen = faceUnlockQuickOpen
                             this.hapticEnabled = hapticEnabled
                             this.hapticStrength = hapticStrength.toInt()
@@ -1049,6 +1053,8 @@ fun HyperOpenApp(
                                     onBubbleDimAlpha = { bubbleDimAlpha = it; persist() },
                                     showDelayMs = showDelayMs,
                                     onShowDelayMs = { showDelayMs = it; persist() },
+                                    disableSystemEnterAnim = disableSystemEnterAnim,
+                                    onDisableSystemEnterAnim = { disableSystemEnterAnim = it; persist() },
                                     faceUnlockQuickOpen = faceUnlockQuickOpen,
                                     onFaceUnlockQuickOpen = { faceUnlockQuickOpen = it; persist() },
                                     hapticEnabled = hapticEnabled,

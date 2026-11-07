@@ -618,6 +618,133 @@ public class HyperOpenHook {
         } catch (Throwable t) {
             Log.w(TAG, "Hook MiuiGxzwIconView$1 失败", t);
         }
+
+        // 8. Hook MiuiGxzwQuickOpenView$1$$ExternalSyntheticLambda0.run()：
+        //    支持关闭系统界面进入指纹快捷方式时的 600ms 原生圆环加载动画 (mQuickLoadingView / mLoadingAnimator)。
+        //    经逆向核对 17.03.260226.r、20250121.0、20240808.0 三个版本系统界面：
+        //    mShowRunnable (MiuiGxzwQuickOpenView$1, classId=0) 执行后会 postDelayed(MiuiGxzwQuickOpenView$1$$ExternalSyntheticLambda0, 1L)，
+        //    在其中创建 MiuiGxzwQuickLoadingView 并启动 600ms 的 mLoadingAnimator，动画结束后才调用 startShowQuickOpenItemAnimation()。
+        //    开启「关闭系统进入快捷方式动画」后，直接跳过 600ms 加载圆环并立即触发 startShowQuickOpenItemAnimation()。
+        try {
+            Class<?> loadingLambdaClass = XposedHelpers.findClass(
+                "com.miui.keyguard.biometrics.fod.MiuiGxzwQuickOpenView$1$$ExternalSyntheticLambda0", cl
+            );
+            record(XposedHelpers.findAndHookMethod(
+                loadingLambdaClass, "run", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (!active) return;
+                        HyperOpenConfig cfg = HyperOpenConfig.getCached();
+                        if (cfg == null || !cfg.disableSystemEnterAnim) return;
+                        Object quickOpenView = resolveQuickOpenViewFromLoadingLambda(param.thisObject);
+                        if (quickOpenView != null && skipLoadingAnimAndExpand(quickOpenView)) {
+                            param.setResult(null);
+                        }
+                    }
+                }
+            ));
+            Log.i(TAG, "已成功安装 MiuiGxzwQuickOpenView$1$$ExternalSyntheticLambda0.run 跳过系统进入动画 Hook（三版本通用）！");
+        } catch (Throwable t) {
+            Log.w(TAG, "未找到 MiuiGxzwQuickOpenView$1$$ExternalSyntheticLambda0，尝试降级 Hook startLoadingAnimation", t);
+            try {
+                Class<?> qovClass = XposedHelpers.findClass(
+                    "com.miui.keyguard.biometrics.fod.MiuiGxzwQuickOpenView", cl
+                );
+                record(XposedHelpers.findAndHookMethod(
+                    qovClass, "startLoadingAnimation", new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                            if (!active) return;
+                            HyperOpenConfig cfg = HyperOpenConfig.getCached();
+                            if (cfg == null || !cfg.disableSystemEnterAnim) return;
+                            if (skipLoadingAnimAndExpand(param.thisObject)) {
+                                param.setResult(null);
+                            }
+                        }
+                    }
+                ));
+                Log.i(TAG, "已成功安装 MiuiGxzwQuickOpenView#startLoadingAnimation 降级 Hook！");
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    /**
+     * 从 MiuiGxzwQuickOpenView$1$$ExternalSyntheticLambda0 实例跨版本解析宿主 MiuiGxzwQuickOpenView：
+     * 17.03.260226.r / 20250121.0 / 20240808.0 均为 lambda.f$0 (MiuiGxzwQuickOpenView$1) -> this$0 (MiuiGxzwQuickOpenView)。
+     */
+    private static Object resolveQuickOpenViewFromLoadingLambda(Object lambda) {
+        if (lambda == null) return null;
+        try {
+            Object runnable1 = tryGetField(lambda, "f$0");
+            if (runnable1 == null) {
+                for (Field f : lambda.getClass().getDeclaredFields()) {
+                    f.setAccessible(true);
+                    Object v = f.get(lambda);
+                    if (v != null) {
+                        runnable1 = v;
+                        break;
+                    }
+                }
+            }
+            if (runnable1 instanceof FrameLayout) {
+                return runnable1;
+            }
+            if (runnable1 != null) {
+                Object qov = tryGetField(runnable1, "this$0");
+                if (qov instanceof FrameLayout) return qov;
+                for (Field f : runnable1.getClass().getDeclaredFields()) {
+                    f.setAccessible(true);
+                    Object v = f.get(runnable1);
+                    if (v instanceof FrameLayout) return v;
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "解析 LoadingLambda 宿主失败", t);
+        }
+        return null;
+    }
+
+    /**
+     * 跳过系统 600ms 圆环加载动画 (MiuiGxzwQuickLoadingView / mLoadingAnimator)，
+     * 清理加载态并直接触发 startShowQuickOpenItemAnimation()。
+     */
+    private static boolean skipLoadingAnimAndExpand(Object quickOpenView) {
+        if (!(quickOpenView instanceof ViewGroup)) return false;
+        try {
+            ViewGroup vg = (ViewGroup) quickOpenView;
+            try {
+                Object loadingView = XposedHelpers.getObjectField(quickOpenView, "mQuickLoadingView");
+                if (loadingView instanceof View) {
+                    vg.removeView((View) loadingView);
+                    XposedHelpers.setObjectField(quickOpenView, "mQuickLoadingView", null);
+                }
+            } catch (Throwable ignored) {}
+
+            try {
+                Object loadingAnim = XposedHelpers.getObjectField(quickOpenView, "mLoadingAnimator");
+                if (loadingAnim instanceof android.animation.Animator) {
+                    ((android.animation.Animator) loadingAnim).cancel();
+                    XposedHelpers.setObjectField(quickOpenView, "mLoadingAnimator", null);
+                }
+            } catch (Throwable ignored) {}
+
+            try {
+                XposedHelpers.setBooleanField(quickOpenView, "mLoading", false);
+            } catch (Throwable ignored) {}
+
+            boolean showed = true;
+            try {
+                showed = XposedHelpers.getBooleanField(quickOpenView, "mShowed");
+            } catch (Throwable ignored) {}
+
+            if (showed) {
+                XposedHelpers.callMethod(quickOpenView, "startShowQuickOpenItemAnimation");
+            }
+            return true;
+        } catch (Throwable t) {
+            Log.w(TAG, "跳过系统进入快捷方式加载动画失败", t);
+            return false;
+        }
     }
 
     /**

@@ -109,6 +109,7 @@ fun ParamsPage(
     regionDimAlpha: Float, onRegionDimAlpha: (Float) -> Unit,
     bubbleDimAlpha: Float, onBubbleDimAlpha: (Float) -> Unit,
     showDelayMs: Float, onShowDelayMs: (Float) -> Unit,
+    disableSystemEnterAnim: Boolean, onDisableSystemEnterAnim: (Boolean) -> Unit,
     faceUnlockQuickOpen: Boolean, onFaceUnlockQuickOpen: (Boolean) -> Unit,
     hapticEnabled: Boolean, onHapticEnabled: (Boolean) -> Unit,
     hapticStrength: Float, onHapticStrength: (Float) -> Unit,
@@ -540,7 +541,8 @@ fun ParamsPage(
                         showDelayMs.toInt() <= 0 -> "指纹解锁后立即弹出"
                         showDelayMs.toInt() == 500 -> "等待 500 ms（系统默认）"
                         else -> "等待 ${showDelayMs.toInt()} ms"
-                    } + (if (faceUnlockQuickOpen) " · 人脸解锁可长按" else ""),
+                    } + (if (disableSystemEnterAnim) " · 已跳过系统进入动画" else "") +
+                        (if (faceUnlockQuickOpen) " · 人脸解锁可长按" else ""),
                 )
             }
             if (isOpen("trigger")) item(key = "trigger_card") {
@@ -560,6 +562,12 @@ fun ParamsPage(
                         value = showDelayMs,
                         valueRange = 0f..2000f,
                         onValueChange = onShowDelayMs,
+                    )
+                    SwitchPreference(
+                        title = "关闭系统进入快捷方式动画",
+                        summary = "跳过系统界面进入快捷方式前的 600ms 原生圆环扩散加载动画，达到等待时间后立即展开面板",
+                        checked = disableSystemEnterAnim,
+                        onCheckedChange = onDisableSystemEnterAnim,
                     )
                     SwitchPreference(
                         title = "人脸解锁后长按快捷方式",
