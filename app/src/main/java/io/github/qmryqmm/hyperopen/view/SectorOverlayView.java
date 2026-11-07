@@ -39,6 +39,13 @@ public class SectorOverlayView extends View {
     private float lineWidthDp = 1.2f;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint highlightPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final android.graphics.Path highlightPath = new android.graphics.Path();
+    private final android.graphics.RectF highlightArcBounds = new android.graphics.RectF();
+    private int highlightIndex = -1;
+    private int highlightColor = 0;
+    private boolean highlightEnabled = true;
+
     private int dashLenPx = -1;
     private int dashGapPx = -1;
     private int strokeW100 = -1;
@@ -49,6 +56,8 @@ public class SectorOverlayView extends View {
         super(context);
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeCap(Paint.Cap.ROUND);
+        highlightPaint.setStyle(Paint.Style.FILL);
+        highlightPaint.setAntiAlias(true);
         // 纯装饰层：不吃触摸、不参与点击
         setClickable(false);
         setFocusable(false);
@@ -98,8 +107,26 @@ public class SectorOverlayView extends View {
         }
     }
 
+    /**
+     * 更新当前高亮扇区索引与高亮颜色
+     * @param index 0 ~ count-1 为选中扇区，-1 为取消/不绘制高光
+     * @param color 高光基准色 (通常为选中图标底色或主题色，0 为使用默认淡白色)
+     * @param enableHighlight 全局是否允许扇区高光反馈
+     */
+    public void setHighlight(int index, int color, boolean enableHighlight) {
+        if (this.highlightIndex != index || this.highlightColor != color || this.highlightEnabled != enableHighlight) {
+            this.highlightIndex = index;
+            this.highlightColor = color;
+            this.highlightEnabled = enableHighlight;
+            if (enabled && count > 0) {
+                invalidate();
+            }
+        }
+    }
+
     /** 关闭扇区绘制（切换布局、退出扇区模式时调用） */
     public void clear() {
+        highlightIndex = -1;
         if (enabled || count != 0) {
             enabled = false;
             count = 0;
@@ -130,6 +157,36 @@ public class SectorOverlayView extends View {
         int alphaByte = Math.max(0, Math.min(255, Math.round(lineAlpha * 255f)));
         if (alphaByte == 0) return; // 透明度 0% 等价于完全隐藏
         if (getWidth() <= 0 || getHeight() <= 0) return;
+
+        // 0. 当前选中扇区的径向淡雅高光反馈
+        if (highlightEnabled && highlightIndex >= 0 && highlightIndex < count && count > 1) {
+            float stepDeg = 360f / count;
+            float boundaryStart = startAngleDeg - stepDeg / 2f;
+            float arcStart = boundaryStart + highlightIndex * stepDeg;
+            float reach = Math.max(getWidth(), getHeight()) * 1.2f;
+
+            highlightPath.reset();
+            highlightPath.moveTo(centerX, centerY);
+            highlightArcBounds.set(centerX - reach, centerY - reach, centerX + reach, centerY + reach);
+            highlightPath.arcTo(highlightArcBounds, arcStart, stepDeg);
+            highlightPath.close();
+
+            int baseCol = (highlightColor != 0) ? highlightColor : 0xFFFFFFFF;
+            int r = Color.red(baseCol);
+            int g = Color.green(baseCol);
+            int b = Color.blue(baseCol);
+            int innerColor = Color.argb(45, r, g, b);
+            int outerColor = Color.argb(0, r, g, b);
+            float innerStop = Math.min(0.5f, Math.max(0.05f, cancelRadiusPx / reach));
+
+            highlightPaint.setShader(new android.graphics.RadialGradient(
+                centerX, centerY, reach,
+                new int[]{innerColor, innerColor, outerColor},
+                new float[]{0f, innerStop, 1f},
+                android.graphics.Shader.TileMode.CLAMP
+            ));
+            canvas.drawPath(highlightPath, highlightPaint);
+        }
 
         applyPaintStyle();
 

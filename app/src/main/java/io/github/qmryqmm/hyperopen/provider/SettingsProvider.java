@@ -199,6 +199,16 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putInt("sector_dash_length", sp.getInt("sector_dash_length", 6));
                 bundle.putInt("sector_dash_gap", sp.getInt("sector_dash_gap", 5));
                 bundle.putFloat("sector_line_width", sp.getFloat("sector_line_width", 1.2f));
+                bundle.putBoolean("sector_highlight_enabled", sp.getBoolean("sector_highlight_enabled", true));
+                bundle.putInt("anim_duration_ms", sp.getInt("anim_duration_ms", 320));
+                bundle.putBoolean("dismiss_anim_enabled", sp.getBoolean("dismiss_anim_enabled", true));
+                bundle.putInt("global_hint_color_mode", sp.getInt("global_hint_color_mode", HyperOpenConfig.HINT_COLOR_MODE_AUTO));
+                bundle.putInt("global_hint_custom_color", sp.getInt("global_hint_custom_color", 0xFFFFFFFF));
+                bundle.putInt("default_hint_text_stroke", sp.getInt("default_hint_text_stroke", 0));
+                bundle.putInt("default_hint_text_shadow", sp.getInt("default_hint_text_shadow", 0));
+                bundle.putInt("default_hint_text_weight", sp.getInt("default_hint_text_weight", 3));
+                bundle.putFloat("default_hint_text_letter_spacing", sp.getFloat("default_hint_text_letter_spacing", 0f));
+                bundle.putInt("folder_hover_delay_ms", sp.getInt("folder_hover_delay_ms", 250));
                 bundle.putFloat("max_scale", sp.getFloat("max_scale", 1.40f));
                 bundle.putInt("influence_radius", sp.getInt("influence_radius", 70));
                 bundle.putFloat("icon_alpha", sp.getFloat("icon_alpha", 1.0f));

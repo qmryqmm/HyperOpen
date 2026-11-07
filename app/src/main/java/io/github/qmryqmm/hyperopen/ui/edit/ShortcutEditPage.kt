@@ -980,8 +980,8 @@ fun ShortcutEditPage(
                     modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
                 )
                 SwitchPreference(
-                    title = "标题颜色跟随图标主题色",
-                    summary = "开启 = 使用图标底色，关闭可自定义提示标题颜色",
+                    title = "标题颜色跟随图标底色（推荐）",
+                    summary = "开启 = 智能提取该图标底垫色或主题色，关闭可自定义单项覆盖色",
                     checked = hintTextColor == 0,
                     onCheckedChange = { follow ->
                         hintTextColor = if (follow) 0
@@ -1248,6 +1248,12 @@ fun ShortcutEditPage(
                     onClick = { actionType = ShortcutItem.ACTION_CAMERA },
                 )
                 RadioButtonPreference(
+                    title = "文件夹 / 聚合分组 (FOLDER)",
+                    summary = "手指滑到该气泡上悬停就地展开多项子快捷方式，兼顾面板简洁与大容量",
+                    selected = actionType == ShortcutItem.ACTION_FOLDER,
+                    onClick = { actionType = ShortcutItem.ACTION_FOLDER },
+                )
+                RadioButtonPreference(
                     title = "打开应用 (APP)",
                     summary = "启动手机安装的目标应用程序",
                     selected = actionType == ShortcutItem.ACTION_APP,
@@ -1503,6 +1509,7 @@ fun ShortcutEditPage(
                                     label = when (actionType) {
                                         ShortcutItem.ACTION_APP -> "应用包名（例如 com.tencent.mm）"
                                         ShortcutItem.ACTION_INTENT_URI -> "Intent URI 字符串"
+                                        ShortcutItem.ACTION_FOLDER -> "子快捷方式 JSON 数据（由预设或批量添加生成）"
                                         ShortcutItem.ACTION_SHELL -> "Shell 脚本命令"
                                         ShortcutItem.ACTION_BROADCAST -> "广播 Action"
                                         else -> "参数详情"

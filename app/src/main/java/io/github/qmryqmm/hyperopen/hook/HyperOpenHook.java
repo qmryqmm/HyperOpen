@@ -373,6 +373,17 @@ public class HyperOpenHook {
                 record(XposedHelpers.findAndHookMethod(quickOpenViewClass, "dismiss", dismissResetHook));
             }
 
+            // Hook onConfigurationChanged：当系统主题、深浅色模式或显示缩放变化时，及时清空图标缓存
+            try {
+                record(XposedHelpers.findAndHookMethod(quickOpenViewClass, "onConfigurationChanged",
+                    android.content.res.Configuration.class, new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                            io.github.qmryqmm.hyperopen.view.IconGlyphFactory.clearCache();
+                        }
+                    }));
+            } catch (Throwable ignored) {}
+
             Log.i(TAG, "已成功安装 MiuiGxzwQuickOpenView 核心生命周期接管 Hook！");
 
         } catch (Throwable t) {
@@ -434,16 +445,23 @@ public class HyperOpenHook {
                                         container.resetBubbles();
                                     }
 
-                                    // 优先在主线程立刻关闭并移除悬浮面板窗口，随后在后台 IPC 线程异步发起应用启动：
-                                    // 即使 system_server 因其他模块阻塞 startActivity，也绝不卡住 SystemUI 手势收尾与窗口销毁
-                                    try {
-                                        dismissCompat(quickOpenView);
-                                    } catch (Throwable t) {
-                                        Log.e(TAG, "调用 dismiss 异常", t);
-                                    }
+                                    final ShortcutItem finalSelected = selected;
+                                    Runnable doDismiss = () -> {
+                                        try {
+                                            dismissCompat(quickOpenView);
+                                        } catch (Throwable t) {
+                                            Log.e(TAG, "调用 dismiss 异常", t);
+                                        }
+                                        if (finalSelected != null) {
+                                            finalSelected.executeAsync(frameLayout.getContext());
+                                        }
+                                    };
 
-                                    if (selected != null) {
-                                        selected.executeAsync(frameLayout.getContext());
+                                    HyperOpenConfig cfg = HyperOpenConfig.getCached();
+                                    if (cfg != null && cfg.dismissAnimEnabled) {
+                                        container.playDismissAnimation(doDismiss);
+                                    } else {
+                                        doDismiss.run();
                                     }
                                 }
                             };

@@ -57,6 +57,22 @@ public final class IconGlyphFactory {
     /** Intent URI → 目标包名（避免每次重新 parseUri + resolveActivity 这类 PackageManager 跨进程调用） */
     private static final Map<String, String> INTENT_PKG_CACHE = new HashMap<>();
 
+    /**
+     * 清理图标缓存：当系统主题、浅/深色模式或分辨率 DPI 变更时调用，确保图标实时刷新
+     */
+    public static void clearCache() {
+        synchronized (ICON_CACHE) {
+            ICON_CACHE.clear();
+        }
+        synchronized (PROCESSED_CACHE) {
+            PROCESSED_CACHE.clear();
+        }
+        synchronized (INTENT_PKG_CACHE) {
+            INTENT_PKG_CACHE.clear();
+        }
+        Log.i(TAG, "已清空图标解析与位图裁切缓存");
+    }
+
     public static boolean isCustomImage(@Nullable String s) {
         return s != null && s.startsWith(CUSTOM_IMAGE_PREFIX) && s.length() > CUSTOM_IMAGE_PREFIX.length();
     }
@@ -218,6 +234,11 @@ public final class IconGlyphFactory {
                     .fromJson(item.actionPayload).resolvePackage();
             Drawable d = processedAppIcon(ctx, pkg, cropMode, cornerRadiusPercent);
             if (d != null) return d;
+        }
+
+        // 4c) 动作默认行为：FOLDER 文件夹气泡（优先使用内置 folder 图标）
+        if (ShortcutItem.ACTION_FOLDER.equals(item.actionType)) {
+            return resolveMiuixIcon("remix:folder-fill", item.tintColor, item.glyphPadEnabled, item.glyphPadColor, item.glyphPadMode, cornerRadiusPercent);
         }
 
         // 5) 关键词匹配内置符号兜底

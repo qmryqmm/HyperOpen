@@ -126,8 +126,34 @@ public class HyperOpenConfig {
     public int sectorDashLength = 6;
     /** 虚线间隔长度 (2 ~ 20 dp，默认 5) */
     public int sectorDashGap = 5;
-    /** 分隔线粗细 (0.5 ~ 4.0 dp，默认 1.2) */
+    /** 扇区分隔线粗细 (0.5 ~ 4.0 dp，默认 1.2) */
     public float sectorLineWidth = 1.2f;
+    /** 空心圆环扇区触发模式下是否高亮当前选中扇区 */
+    public boolean sectorHighlightEnabled = true;
+
+    /** 展开动画时长 (0 ~ 500 ms，默认 320 ms，0 为无动画瞬显) */
+    public int animDurationMs = 320;
+    /** 松手时是否启用向心收拢/弹跳动效 */
+    public boolean dismissAnimEnabled = true;
+
+    /** 全局提示文字颜色模式：0=智能跟随图标底色/主题色(默认), 1=纯白高对比, 2=自定义统一色 */
+    public static final int HINT_COLOR_MODE_AUTO = 0;
+    public static final int HINT_COLOR_MODE_WHITE = 1;
+    public static final int HINT_COLOR_MODE_CUSTOM = 2;
+    public int globalHintColorMode = HINT_COLOR_MODE_AUTO;
+    public int globalHintCustomColor = 0xFFFFFFFF;
+    /** 全局默认提示文字描边宽度 (0 ~ 4 dp，默认 0) */
+    public int defaultHintTextStroke = 0;
+    /** 全局默认提示文字投影强度 (0 ~ 100，默认 0) */
+    public int defaultHintTextShadow = 0;
+    /** 全局默认标题字重 (0=Light, 1=Regular, 2=Medium, 3=Bold，默认 3) */
+    public int defaultHintTextWeight = 3;
+    /** 全局默认字间距 (-2 ~ +6，默认 0) */
+    public float defaultHintTextLetterSpacing = 0f;
+
+    /** 文件夹二级气泡悬停展开延迟 (100 ~ 600 ms，默认 250 ms) */
+    public int folderHoverDelayMs = 250;
+
     public float maxScale = 1.40f;
     public int influenceRadius = 70;  // dp
 
@@ -370,6 +396,16 @@ public class HyperOpenConfig {
                     config.sectorDashLength = bundle.getInt("sector_dash_length", 6);
                     config.sectorDashGap = bundle.getInt("sector_dash_gap", 5);
                     config.sectorLineWidth = bundle.getFloat("sector_line_width", 1.2f);
+                    config.sectorHighlightEnabled = bundle.getBoolean("sector_highlight_enabled", true);
+                    config.animDurationMs = bundle.getInt("anim_duration_ms", 320);
+                    config.dismissAnimEnabled = bundle.getBoolean("dismiss_anim_enabled", true);
+                    config.globalHintColorMode = bundle.getInt("global_hint_color_mode", HINT_COLOR_MODE_AUTO);
+                    config.globalHintCustomColor = bundle.getInt("global_hint_custom_color", 0xFFFFFFFF);
+                    config.defaultHintTextStroke = bundle.getInt("default_hint_text_stroke", 0);
+                    config.defaultHintTextShadow = bundle.getInt("default_hint_text_shadow", 0);
+                    config.defaultHintTextWeight = bundle.getInt("default_hint_text_weight", 3);
+                    config.defaultHintTextLetterSpacing = bundle.getFloat("default_hint_text_letter_spacing", 0f);
+                    config.folderHoverDelayMs = bundle.getInt("folder_hover_delay_ms", 250);
                     config.stockSystemRegion = bundle.getBoolean("stock_system_region", true);
                     config.ringCount = bundle.getInt("ring_count", 2);
                     config.maxScale = bundle.getFloat("max_scale", 1.40f);
@@ -464,6 +500,16 @@ public class HyperOpenConfig {
         config.sectorDashLength = xPrefs.getInt("sector_dash_length", 6);
         config.sectorDashGap = xPrefs.getInt("sector_dash_gap", 5);
         config.sectorLineWidth = xPrefs.getFloat("sector_line_width", 1.2f);
+        config.sectorHighlightEnabled = xPrefs.getBoolean("sector_highlight_enabled", true);
+        config.animDurationMs = xPrefs.getInt("anim_duration_ms", 320);
+        config.dismissAnimEnabled = xPrefs.getBoolean("dismiss_anim_enabled", true);
+        config.globalHintColorMode = xPrefs.getInt("global_hint_color_mode", HINT_COLOR_MODE_AUTO);
+        config.globalHintCustomColor = xPrefs.getInt("global_hint_custom_color", 0xFFFFFFFF);
+        config.defaultHintTextStroke = xPrefs.getInt("default_hint_text_stroke", 0);
+        config.defaultHintTextShadow = xPrefs.getInt("default_hint_text_shadow", 0);
+        config.defaultHintTextWeight = xPrefs.getInt("default_hint_text_weight", 3);
+        config.defaultHintTextLetterSpacing = xPrefs.getFloat("default_hint_text_letter_spacing", 0f);
+        config.folderHoverDelayMs = xPrefs.getInt("folder_hover_delay_ms", 250);
         config.stockSystemRegion = xPrefs.getBoolean("stock_system_region", true);
         config.ringCount = xPrefs.getInt("ring_count", 2);
         config.maxScale = xPrefs.getFloat("max_scale", 1.40f);
@@ -548,6 +594,16 @@ public class HyperOpenConfig {
         config.sectorDashLength = sp.getInt("sector_dash_length", 6);
         config.sectorDashGap = sp.getInt("sector_dash_gap", 5);
         config.sectorLineWidth = sp.getFloat("sector_line_width", 1.2f);
+        config.sectorHighlightEnabled = sp.getBoolean("sector_highlight_enabled", true);
+        config.animDurationMs = sp.getInt("anim_duration_ms", 320);
+        config.dismissAnimEnabled = sp.getBoolean("dismiss_anim_enabled", true);
+        config.globalHintColorMode = sp.getInt("global_hint_color_mode", HINT_COLOR_MODE_AUTO);
+        config.globalHintCustomColor = sp.getInt("global_hint_custom_color", 0xFFFFFFFF);
+        config.defaultHintTextStroke = sp.getInt("default_hint_text_stroke", 0);
+        config.defaultHintTextShadow = sp.getInt("default_hint_text_shadow", 0);
+        config.defaultHintTextWeight = sp.getInt("default_hint_text_weight", 3);
+        config.defaultHintTextLetterSpacing = sp.getFloat("default_hint_text_letter_spacing", 0f);
+        config.folderHoverDelayMs = sp.getInt("folder_hover_delay_ms", 250);
         config.stockSystemRegion = sp.getBoolean("stock_system_region", true);
         config.ringCount = sp.getInt("ring_count", 2);
         config.maxScale = sp.getFloat("max_scale", 1.40f);
@@ -633,6 +689,16 @@ public class HyperOpenConfig {
             .putInt("sector_dash_length", sectorDashLength)
             .putInt("sector_dash_gap", sectorDashGap)
             .putFloat("sector_line_width", sectorLineWidth)
+            .putBoolean("sector_highlight_enabled", sectorHighlightEnabled)
+            .putInt("anim_duration_ms", animDurationMs)
+            .putBoolean("dismiss_anim_enabled", dismissAnimEnabled)
+            .putInt("global_hint_color_mode", globalHintColorMode)
+            .putInt("global_hint_custom_color", globalHintCustomColor)
+            .putInt("default_hint_text_stroke", defaultHintTextStroke)
+            .putInt("default_hint_text_shadow", defaultHintTextShadow)
+            .putInt("default_hint_text_weight", defaultHintTextWeight)
+            .putFloat("default_hint_text_letter_spacing", defaultHintTextLetterSpacing)
+            .putInt("folder_hover_delay_ms", folderHoverDelayMs)
             .putInt("ring_count", ringCount)
             .putFloat("max_scale", maxScale)
             .putInt("influence_radius", influenceRadius)

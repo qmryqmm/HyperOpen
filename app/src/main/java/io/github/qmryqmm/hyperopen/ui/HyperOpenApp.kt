@@ -209,6 +209,16 @@ fun HyperOpenApp(
     var sectorDashLength by remember { mutableStateOf(initialConfig.sectorDashLength.toFloat()) }
     var sectorDashGap by remember { mutableStateOf(initialConfig.sectorDashGap.toFloat()) }
     var sectorLineWidth by remember { mutableStateOf(initialConfig.sectorLineWidth) }
+    var sectorHighlightEnabled by remember { mutableStateOf(initialConfig.sectorHighlightEnabled) }
+    var animDurationMs by remember { mutableFloatStateOf(initialConfig.animDurationMs.toFloat()) }
+    var dismissAnimEnabled by remember { mutableStateOf(initialConfig.dismissAnimEnabled) }
+    var globalHintColorMode by remember { mutableIntStateOf(initialConfig.globalHintColorMode) }
+    var globalHintCustomColor by remember { mutableIntStateOf(initialConfig.globalHintCustomColor) }
+    var defaultHintTextStroke by remember { mutableFloatStateOf(initialConfig.defaultHintTextStroke.toFloat()) }
+    var defaultHintTextShadow by remember { mutableFloatStateOf(initialConfig.defaultHintTextShadow.toFloat()) }
+    var defaultHintTextWeight by remember { mutableIntStateOf(initialConfig.defaultHintTextWeight) }
+    var defaultHintTextLetterSpacing by remember { mutableFloatStateOf(initialConfig.defaultHintTextLetterSpacing) }
+    var folderHoverDelayMs by remember { mutableFloatStateOf(initialConfig.folderHoverDelayMs.toFloat()) }
     val shortcuts = remember { mutableStateListOf<ShortcutItem>().apply { addAll(initialConfig.shortcuts) } }
     var safetyTick by remember { mutableStateOf(0) }
     var page by remember { mutableStateOf(0) }
@@ -375,6 +385,16 @@ fun HyperOpenApp(
         c.sectorDashLength = sectorDashLength.toInt()
         c.sectorDashGap = sectorDashGap.toInt()
         c.sectorLineWidth = sectorLineWidth
+        c.sectorHighlightEnabled = sectorHighlightEnabled
+        c.animDurationMs = animDurationMs.toInt()
+        c.dismissAnimEnabled = dismissAnimEnabled
+        c.globalHintColorMode = globalHintColorMode
+        c.globalHintCustomColor = globalHintCustomColor
+        c.defaultHintTextStroke = defaultHintTextStroke.toInt()
+        c.defaultHintTextShadow = defaultHintTextShadow.toInt()
+        c.defaultHintTextWeight = defaultHintTextWeight
+        c.defaultHintTextLetterSpacing = defaultHintTextLetterSpacing
+        c.folderHoverDelayMs = folderHoverDelayMs.toInt()
         c.maxScale = maxScale
         c.influenceRadius = influenceRadius.toInt()
         c.iconAlpha = iconAlpha
@@ -459,6 +479,16 @@ fun HyperOpenApp(
         sectorDashLength = defaults.sectorDashLength.toFloat()
         sectorDashGap = defaults.sectorDashGap.toFloat()
         sectorLineWidth = defaults.sectorLineWidth
+        sectorHighlightEnabled = defaults.sectorHighlightEnabled
+        animDurationMs = defaults.animDurationMs.toFloat()
+        dismissAnimEnabled = defaults.dismissAnimEnabled
+        globalHintColorMode = defaults.globalHintColorMode
+        globalHintCustomColor = defaults.globalHintCustomColor
+        defaultHintTextStroke = defaults.defaultHintTextStroke.toFloat()
+        defaultHintTextShadow = defaults.defaultHintTextShadow.toFloat()
+        defaultHintTextWeight = defaults.defaultHintTextWeight
+        defaultHintTextLetterSpacing = defaults.defaultHintTextLetterSpacing
+        folderHoverDelayMs = defaults.folderHoverDelayMs.toFloat()
         maxScale = defaults.maxScale
         influenceRadius = defaults.influenceRadius.toFloat()
         iconAlpha = defaults.iconAlpha
@@ -695,6 +725,16 @@ fun HyperOpenApp(
                             this.sectorDashLength = sectorDashLength.toInt()
                             this.sectorDashGap = sectorDashGap.toInt()
                             this.sectorLineWidth = sectorLineWidth
+                            this.sectorHighlightEnabled = sectorHighlightEnabled
+                            this.animDurationMs = animDurationMs.toInt()
+                            this.dismissAnimEnabled = dismissAnimEnabled
+                            this.globalHintColorMode = globalHintColorMode
+                            this.globalHintCustomColor = globalHintCustomColor
+                            this.defaultHintTextStroke = defaultHintTextStroke.toInt()
+                            this.defaultHintTextShadow = defaultHintTextShadow.toInt()
+                            this.defaultHintTextWeight = defaultHintTextWeight
+                            this.defaultHintTextLetterSpacing = defaultHintTextLetterSpacing
+                            this.folderHoverDelayMs = folderHoverDelayMs.toInt()
                             this.maxScale = maxScale
                             this.influenceRadius = influenceRadius.toInt()
                             this.layoutStyle = layoutStyle
@@ -1029,6 +1069,26 @@ fun HyperOpenApp(
                                     onSectorDashGap = { sectorDashGap = it; persist() },
                                     sectorLineWidth = sectorLineWidth,
                                     onSectorLineWidth = { sectorLineWidth = it; persist() },
+                                    sectorHighlightEnabled = sectorHighlightEnabled,
+                                    onSectorHighlightEnabled = { sectorHighlightEnabled = it; persist() },
+                                    animDurationMs = animDurationMs,
+                                    onAnimDurationMs = { animDurationMs = it; persist() },
+                                    dismissAnimEnabled = dismissAnimEnabled,
+                                    onDismissAnimEnabled = { dismissAnimEnabled = it; persist() },
+                                    globalHintColorMode = globalHintColorMode,
+                                    onGlobalHintColorMode = { globalHintColorMode = it; persist() },
+                                    globalHintCustomColor = globalHintCustomColor,
+                                    onGlobalHintCustomColor = { globalHintCustomColor = it; persist() },
+                                    defaultHintTextStroke = defaultHintTextStroke,
+                                    onDefaultHintTextStroke = { defaultHintTextStroke = it; persist() },
+                                    defaultHintTextShadow = defaultHintTextShadow,
+                                    onDefaultHintTextShadow = { defaultHintTextShadow = it; persist() },
+                                    defaultHintTextWeight = defaultHintTextWeight,
+                                    onDefaultHintTextWeight = { defaultHintTextWeight = it; persist() },
+                                    defaultHintTextLetterSpacing = defaultHintTextLetterSpacing,
+                                    onDefaultHintTextLetterSpacing = { defaultHintTextLetterSpacing = it; persist() },
+                                    folderHoverDelayMs = folderHoverDelayMs,
+                                    onFolderHoverDelayMs = { folderHoverDelayMs = it; persist() },
                                     maxScale = maxScale,
                                     onMaxScale = { maxScale = it; persist() },
                                     influenceRadius = influenceRadius,

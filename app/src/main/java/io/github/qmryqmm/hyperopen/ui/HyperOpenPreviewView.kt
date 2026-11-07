@@ -102,6 +102,17 @@ class HyperOpenPreviewView(
     private var lastRegionDiameterPx = 0f
 
     private var currentSelectedBubble: CircularBubbleView? = null
+    private var pendingFolderBubble: CircularBubbleView? = null
+    private var activeFolderBubble: CircularBubbleView? = null
+    private val folderSubBubbles = mutableListOf<CircularBubbleView>()
+    private var currentSelectedSubBubble: CircularBubbleView? = null
+
+    private val folderHoverRunnable = Runnable {
+        val target = pendingFolderBubble
+        if (target != null && target == currentSelectedBubble && !isEditMode && !isDraggingActive) {
+            expandFolder(target)
+        }
+    }
     /** 空心圆环扇区触发模式的几何规格（非扇区模式时为 null） */
     private var ringSectorSpec: RingSectorPacking.Result? = null
 
@@ -1295,6 +1306,11 @@ class HyperOpenPreviewView(
      * 模拟指纹滑动物理动力学
      */
     private fun handleFingerHover(touchX: Float, touchY: Float) {
+        if (activeFolderBubble != null && folderSubBubbles.isNotEmpty()) {
+            handleFolderSubBubbleMove(touchX, touchY)
+            return
+        }
+
         val isStockSystem = (config.layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK)
         val useStockRegion = isStockSystem && config.stockSystemRegion
 
@@ -1321,6 +1337,9 @@ class HyperOpenPreviewView(
                 closest = bubbleViews[hitIndex]
                 minDistance = 0f
             }
+            val hlIdx = if (closest != null) bubbleViews.indexOf(closest) else -1
+            val hlCol = closest?.item?.resolveIconPrimaryColor() ?: 0
+            sectorOverlay.setHighlight(hlIdx, hlCol, config.sectorHighlightEnabled)
             for (b in bubbleViews) {
                 b.applyScale(if (b == closest) config.selectedIconScale else 1.0f)
                 if (closest != null) {
@@ -1330,6 +1349,7 @@ class HyperOpenPreviewView(
                 }
             }
         } else if (useStockRegion && stockSpecs.isNotEmpty()) {
+            sectorOverlay.setHighlight(-1, 0, false)
             val hitIndex = StockFanPacking.findTouchedIndex(stockSpecs, touchX, touchY, lastFodX, lastFodY)
             if (hitIndex >= 0 && hitIndex < bubbleViews.size) {
                 closest = bubbleViews[hitIndex]
@@ -1345,6 +1365,7 @@ class HyperOpenPreviewView(
                 }
             }
         } else {
+            sectorOverlay.setHighlight(-1, 0, false)
             for (b in bubbleViews) {
                 val dist = Math.hypot((touchX - b.targetX).toDouble(), (touchY - b.targetY).toDouble()).toFloat()
                 if (dist < minDistance) {
@@ -1398,12 +1419,24 @@ class HyperOpenPreviewView(
                 closest.bringToFront()
                 currentSelectedBubble = closest
 
+                // 文件夹二级菜单检测：若当前选中项是文件夹气泡，启动悬停展开计时器
+                removeCallbacks(folderHoverRunnable)
+                if (ShortcutItem.ACTION_FOLDER.equals(closest.item.actionType)) {
+                    pendingFolderBubble = closest
+                    val delay = Math.max(100, config.folderHoverDelayMs).toLong()
+                    postDelayed(folderHoverRunnable, delay)
+                } else {
+                    pendingFolderBubble = null
+                }
+
                 // 更新顶部标题（含 hint* 自定义样式：颜色/透明度/投影/描边/字重/字距/显隐）
-                HintTextStyler.apply(headerTitle, closest.item, true)
-                HintTextStyler.apply(headerSubtitle, closest.item, false)
+                HintTextStyler.apply(headerTitle, closest.item, true, config)
+                HintTextStyler.apply(headerSubtitle, closest.item, false, config)
                 triggerSlideHaptic()
             }
         } else {
+            removeCallbacks(folderHoverRunnable)
+            pendingFolderBubble = null
             if (currentSelectedBubble != null) {
                 currentSelectedBubble?.setSelectedState(false)
                 currentSelectedBubble = null
@@ -1417,6 +1450,9 @@ class HyperOpenPreviewView(
     }
 
     private fun resetHoverSelection() {
+        removeCallbacks(folderHoverRunnable)
+        pendingFolderBubble = null
+        dismissFolderSubBubbles()
         currentSelectedBubble?.setSelectedState(false)
         currentSelectedBubble = null
         for (b in bubbleViews) {
@@ -1427,13 +1463,143 @@ class HyperOpenPreviewView(
         HintTextStyler.reset(headerSubtitle, false)
         headerTitle.text = "滑动选择快捷方式"
         headerSubtitle.text = "移至目标图标后松手直接打开"
+        sectorOverlay.setHighlight(-1, 0, false)
+        notifyBlurSceneChanged()
+    }
+
+    private fun expandFolder(folderBubble: CircularBubbleView) {
+        val children = folderBubble.item?.parseFolderChildren() ?: return
+        if (children.isEmpty()) return
+
+        dismissFolderSubBubbles()
+        activeFolderBubble = folderBubble
+        triggerSlideHaptic()
+
+        for (b in bubbleViews) {
+            if (b != folderBubble) {
+                b.setIconAlpha(0.25f)
+            }
+        }
+
+        val count = children.size
+        val iconSizePx = dpToPx(config.iconSize.toFloat())
+        val iconSizeInt = iconSizePx.toInt()
+        val subRadius = iconSizePx * 1.35f
+
+        val baseAngle = Math.atan2((folderBubble.targetY - lastFodY).toDouble(), (folderBubble.targetX - lastFodX).toDouble())
+        val angleStep = if (count > 1) (Math.PI * 0.85 / (count - 1)) else 0.0
+        val startAngle = if (count > 1) (baseAngle - Math.PI * 0.425) else baseAngle
+
+        for (i in 0 until count) {
+            val childItem = children[i]
+            val angle = if (count == 1) baseAngle else (startAngle + i * angleStep)
+            val targetX = (folderBubble.targetX + subRadius * Math.cos(angle)).toFloat()
+            val targetY = (folderBubble.targetY + subRadius * Math.sin(angle)).toFloat()
+
+            val sub = CircularBubbleView(
+                context, childItem, resolvedStyle, iconSizeInt, context.classLoader, config
+            ).apply {
+                setSystemBlurEnabled(false)
+                this.targetX = targetX
+                this.targetY = targetY
+                setOnScaleChangedListener { notifyBlurSceneChanged() }
+            }
+
+            val lp = LayoutParams(iconSizeInt, iconSizeInt).apply {
+                leftMargin = (targetX - iconSizePx / 2f).toInt()
+                topMargin = (targetY - iconSizePx / 2f).toInt()
+            }
+            sub.layoutParams = lp
+            sub.translationX = folderBubble.targetX - targetX
+            sub.translationY = folderBubble.targetY - targetY
+            sub.scaleX = 0.1f
+            sub.scaleY = 0.1f
+            sub.alpha = 0f
+
+            bubblesContainer.addView(sub)
+            folderSubBubbles.add(sub)
+
+            sub.animate()
+                .translationX(0f)
+                .translationY(0f)
+                .scaleX(1.0f)
+                .scaleY(1.0f)
+                .alpha(1.0f)
+                .setInterpolator(android.view.animation.OvershootInterpolator(1.2f))
+                .setDuration(180)
+                .setStartDelay(i * 15L)
+                .start()
+        }
+        notifyBlurSceneChanged()
+    }
+
+    private fun handleFolderSubBubbleMove(touchX: Float, touchY: Float) {
+        val iconSizePx = dpToPx(config.iconSize.toFloat())
+        val threshold = iconSizePx * 1.1f
+        var closestSub: CircularBubbleView? = null
+        var minDist = Float.MAX_VALUE
+
+        for (sub in folderSubBubbles) {
+            val dist = Math.hypot((touchX - sub.targetX).toDouble(), (touchY - sub.targetY).toDouble()).toFloat()
+            if (dist < minDist) {
+                minDist = dist
+                closestSub = sub
+            }
+        }
+
+        val hitSub = (closestSub != null && minDist < threshold)
+        if (hitSub) {
+            if (currentSelectedSubBubble != closestSub) {
+                currentSelectedSubBubble?.setSelectedState(false)
+                currentSelectedSubBubble?.applyScale(1.0f)
+
+                closestSub!!.setSelectedState(true)
+                closestSub.applyScale(config.selectedIconScale)
+                closestSub.bringToFront()
+                currentSelectedSubBubble = closestSub
+
+                HintTextStyler.apply(headerTitle, closestSub.item, true, config)
+                HintTextStyler.apply(headerSubtitle, closestSub.item, false, config)
+                triggerSlideHaptic()
+            }
+        } else {
+            if (currentSelectedSubBubble != null) {
+                currentSelectedSubBubble?.setSelectedState(false)
+                currentSelectedSubBubble?.applyScale(1.0f)
+                currentSelectedSubBubble = null
+            }
+            val folder = activeFolderBubble
+            val distFromFolder = if (folder != null) {
+                Math.hypot((touchX - folder.targetX).toDouble(), (touchY - folder.targetY).toDouble()).toFloat()
+            } else Float.MAX_VALUE
+
+            if (distFromFolder > iconSizePx * 2.8f) {
+                dismissFolderSubBubbles()
+            }
+        }
+        notifyBlurSceneChanged()
+    }
+
+    private fun dismissFolderSubBubbles() {
+        if (folderSubBubbles.isEmpty()) return
+        for (sub in folderSubBubbles) {
+            sub.animate().cancel()
+            bubblesContainer.removeView(sub)
+        }
+        folderSubBubbles.clear()
+        currentSelectedSubBubble = null
+        activeFolderBubble = null
+
+        for (b in bubbleViews) {
+            b.setIconAlpha(config.iconAlpha)
+        }
         notifyBlurSceneChanged()
     }
 
     private fun notifyBlurSceneChanged() {
         val listener = onBlurSceneChanged ?: return
         val iconSizePx = dpToPx(config.iconSize.toFloat())
-        val spots = ArrayList<BubbleBlurSpot>(bubbleViews.size)
+        val spots = ArrayList<BubbleBlurSpot>(bubbleViews.size + folderSubBubbles.size)
         for (b in bubbleViews) {
             val lp = b.layoutParams as? LayoutParams
             val cx = if (lp != null) lp.leftMargin + iconSizePx / 2f + b.translationX else b.targetX
@@ -1448,6 +1614,22 @@ class HyperOpenPreviewView(
                     centerY = cy,
                     diameterPx = effectiveDiameter,
                     alpha = b.iconAlpha,
+                )
+            )
+        }
+        for (sub in folderSubBubbles) {
+            val lp = sub.layoutParams as? LayoutParams
+            val cx = if (lp != null) lp.leftMargin + iconSizePx / 2f + sub.translationX else sub.targetX
+            val cy = if (lp != null) lp.topMargin + iconSizePx / 2f + sub.translationY else sub.targetY
+            val scale = sub.currentScale.coerceAtLeast(0.1f)
+            val effectiveDiameter = (iconSizePx - 6f).coerceAtLeast(1f) * scale
+            spots.add(
+                BubbleBlurSpot(
+                    id = "sub_" + sub.item.id,
+                    centerX = cx,
+                    centerY = cy,
+                    diameterPx = effectiveDiameter,
+                    alpha = sub.iconAlpha,
                 )
             )
         }

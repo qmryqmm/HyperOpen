@@ -97,6 +97,16 @@ fun ParamsPage(
     sectorDashLength: Float, onSectorDashLength: (Float) -> Unit,
     sectorDashGap: Float, onSectorDashGap: (Float) -> Unit,
     sectorLineWidth: Float, onSectorLineWidth: (Float) -> Unit,
+    sectorHighlightEnabled: Boolean, onSectorHighlightEnabled: (Boolean) -> Unit,
+    animDurationMs: Float, onAnimDurationMs: (Float) -> Unit,
+    dismissAnimEnabled: Boolean, onDismissAnimEnabled: (Boolean) -> Unit,
+    globalHintColorMode: Int, onGlobalHintColorMode: (Int) -> Unit,
+    globalHintCustomColor: Int, onGlobalHintCustomColor: (Int) -> Unit,
+    defaultHintTextStroke: Float, onDefaultHintTextStroke: (Float) -> Unit,
+    defaultHintTextShadow: Float, onDefaultHintTextShadow: (Float) -> Unit,
+    defaultHintTextWeight: Int, onDefaultHintTextWeight: (Int) -> Unit,
+    defaultHintTextLetterSpacing: Float, onDefaultHintTextLetterSpacing: (Float) -> Unit,
+    folderHoverDelayMs: Float, onFolderHoverDelayMs: (Float) -> Unit,
     maxScale: Float, onMaxScale: (Float) -> Unit,
     influenceRadius: Float, onInfluenceRadius: (Float) -> Unit,
     iconAlpha: Float, onIconAlpha: (Float) -> Unit,
@@ -527,6 +537,12 @@ fun ParamsPage(
                             valueRange = 0.5f..4f,
                             onValueChange = onSectorLineWidth,
                         )
+                        SwitchPreference(
+                            title = "扇区选中动态高光反馈",
+                            summary = "滑入扇区时在该扇区投射柔和径向渐变光晕，大幅强化方位视觉感知",
+                            checked = sectorHighlightEnabled,
+                            onCheckedChange = onSectorHighlightEnabled,
+                        )
                     }
                 }
             }
@@ -574,6 +590,28 @@ fun ParamsPage(
                         summary = "人脸识别成功停留在锁屏时，长按指纹进入桌面并继续唤出快捷方式（短按轻触仅进入桌面）",
                         checked = faceUnlockQuickOpen,
                         onCheckedChange = onFaceUnlockQuickOpen,
+                    )
+                    SliderPreference(
+                        title = "面板展开动画时长",
+                        summary = "快捷方式气泡展开的动画速度，0 ms 为无动画瞬显",
+                        valueText = if (animDurationMs.toInt() <= 0) "瞬显 (0 ms)" else "${animDurationMs.toInt()} ms",
+                        value = animDurationMs,
+                        valueRange = 0f..500f,
+                        onValueChange = onAnimDurationMs,
+                    )
+                    SwitchPreference(
+                        title = "松手向心收拢动效",
+                        summary = "松手触发或取消时，未选中气泡向圆心平滑收拢淡出，选中项微弹放大，避免生硬瞬消",
+                        checked = dismissAnimEnabled,
+                        onCheckedChange = onDismissAnimEnabled,
+                    )
+                    SliderPreference(
+                        title = "二级文件夹气泡悬停展开延迟",
+                        summary = "手指滑到文件夹气泡上悬停多久展开二级子菜单气泡",
+                        valueText = "${folderHoverDelayMs.toInt()} ms",
+                        value = folderHoverDelayMs,
+                        valueRange = 100f..600f,
+                        onValueChange = onFolderHoverDelayMs,
                     )
                 }
             }
@@ -718,6 +756,62 @@ fun ParamsPage(
                             valueRange = 9f..20f,
                             onValueChange = onHeaderSubtitleSize,
                         )
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                        SmallTitle("全局文字版式与智能色彩（未单独指定的项均生效）")
+                        RadioButtonPreference(
+                            title = "智能跟随图标底色 / 主题色（推荐）",
+                            summary = "每个快捷方式激活时，提示文字自动提取该图标底垫色或主题色，灵动且高辨识度",
+                            selected = globalHintColorMode == HyperOpenConfig.HINT_COLOR_MODE_AUTO,
+                            onClick = { onGlobalHintColorMode(HyperOpenConfig.HINT_COLOR_MODE_AUTO) },
+                        )
+                        RadioButtonPreference(
+                            title = "统一纯白文字",
+                            summary = "所有快捷方式标题均保持纯白高对比度展示",
+                            selected = globalHintColorMode == HyperOpenConfig.HINT_COLOR_MODE_WHITE,
+                            onClick = { onGlobalHintColorMode(HyperOpenConfig.HINT_COLOR_MODE_WHITE) },
+                        )
+                        SliderPreference(
+                            title = "全局文字描边宽度",
+                            summary = "为提示文字添加深色描边，提升在浅色或复杂壁纸上的清晰度",
+                            valueText = if (defaultHintTextStroke.toInt() <= 0) "无描边" else "${defaultHintTextStroke.toInt()} dp",
+                            value = defaultHintTextStroke,
+                            valueRange = 0f..4f,
+                            onValueChange = onDefaultHintTextStroke,
+                        )
+                        SliderPreference(
+                            title = "全局文字投影柔光",
+                            summary = "调节文字黑色柔光阴影立体感",
+                            valueText = if (defaultHintTextShadow.toInt() <= 0) "无投影" else "${defaultHintTextShadow.toInt()} %",
+                            value = defaultHintTextShadow,
+                            valueRange = 0f..100f,
+                            onValueChange = onDefaultHintTextShadow,
+                        )
+                        SliderPreference(
+                            title = "全局标题字重",
+                            summary = when (defaultHintTextWeight) {
+                                0 -> "细体 (Light)"
+                                1 -> "常规 (Regular)"
+                                2 -> "中粗 (Medium)"
+                                else -> "粗体 (Bold)"
+                            },
+                            valueText = when (defaultHintTextWeight) {
+                                0 -> "Light"
+                                1 -> "Regular"
+                                2 -> "Medium"
+                                else -> "Bold"
+                            },
+                            value = defaultHintTextWeight.toFloat(),
+                            valueRange = 0f..3f,
+                            onValueChange = { onDefaultHintTextWeight(it.toInt()) },
+                        )
+                        SliderPreference(
+                            title = "全局文字字间距",
+                            valueText = "${"%.1f".format(defaultHintTextLetterSpacing)} em",
+                            value = defaultHintTextLetterSpacing,
+                            valueRange = -2f..6f,
+                            onValueChange = onDefaultHintTextLetterSpacing,
+                        )
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                         SwitchPreference(
                             title = "显示顶部提示胶囊背景",
                             checked = showHeaderPillBg,

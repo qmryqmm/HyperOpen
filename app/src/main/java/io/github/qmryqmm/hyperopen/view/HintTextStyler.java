@@ -32,12 +32,13 @@ public final class HintTextStyler {
     /**
      * 选中态应用：按字段设置文案、可见性、
      * 颜色+透明度、投影、描边、字重（仅标题）、字间距。
-     *
-     * @param tv      标题或副标题（建议 StrokeTextView 以启用描边）
-     * @param item    快捷项
-     * @param isTitle true=标题（文案=title、字重生效），false=副标题（文案=subtitle）
+     * 支持传入全局配置以实现智能跟随底色与全局默认质感。
      */
     public static void apply(TextView tv, ShortcutItem item, boolean isTitle) {
+        apply(tv, item, isTitle, null);
+    }
+
+    public static void apply(TextView tv, ShortcutItem item, boolean isTitle, io.github.qmryqmm.hyperopen.config.HyperOpenConfig config) {
         boolean show = isTitle ? item.showHintTitle : item.showHintSubtitle;
         tv.setVisibility(show ? View.VISIBLE : View.GONE);
 
@@ -47,7 +48,7 @@ public final class HintTextStyler {
             tv.setText(item.subtitle == null ? "" : item.subtitle);
         }
 
-        int color = isTitle ? item.resolveHintTitleColor() : item.resolveHintSubtitleColor();
+        int color = isTitle ? item.resolveHintTitleColor(config) : item.resolveHintSubtitleColor(config);
         float alpha = isTitle ? item.resolveHintTitleAlpha() : item.resolveHintSubtitleAlpha();
         int baseAlpha = color >>> 24;
         if (baseAlpha == 0) {
@@ -57,14 +58,19 @@ public final class HintTextStyler {
         tv.setTextColor((color & 0x00FFFFFF) | (finalAlpha << 24));
 
         float density = tv.getResources().getDisplayMetrics().density;
-        tv.setShadowLayer(item.hintTextShadow / 20f * 4f, 0f, 0f, SHADOW_COLOR);
+        int shadow = (item.hintTextShadow >= 0) ? item.hintTextShadow : (config != null ? config.defaultHintTextShadow : 0);
+        int stroke = (item.hintTextStroke >= 0) ? item.hintTextStroke : (config != null ? config.defaultHintTextStroke : 0);
+        int weight = (item.hintTextWeight >= 0) ? item.hintTextWeight : (config != null ? config.defaultHintTextWeight : 3);
+        float spacing = (item.hintTextLetterSpacing != 0f || config == null) ? item.hintTextLetterSpacing : config.defaultHintTextLetterSpacing;
+
+        tv.setShadowLayer(shadow / 20f * 4f, 0f, 0f, SHADOW_COLOR);
         if (tv instanceof StrokeTextView) {
-            ((StrokeTextView) tv).setStroke(item.hintTextStroke * density, STROKE_COLOR);
+            ((StrokeTextView) tv).setStroke(stroke * density, STROKE_COLOR);
         }
         if (isTitle) {
-            applyTitleWeight(tv, item.hintTextWeight);
+            applyTitleWeight(tv, weight);
         }
-        tv.setLetterSpacing(item.hintTextLetterSpacing * LETTER_SPACING_UNIT);
+        tv.setLetterSpacing(spacing * LETTER_SPACING_UNIT);
     }
 
     /** 复位到 idle/默认样式（buildHeader 初始观感：白标题假粗体、0xAA 白副标题、无特效） */

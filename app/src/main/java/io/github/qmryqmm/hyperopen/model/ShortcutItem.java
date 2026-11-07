@@ -17,6 +17,8 @@ import org.json.JSONObject;
 
 import java.io.DataOutputStream;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 import io.github.qmryqmm.hyperopen.util.IpcExecutor;
 
@@ -33,6 +35,7 @@ public class ShortcutItem {
     public static final String ACTION_MUTE = "MUTE";
     public static final String ACTION_DND = "DND";
     public static final String ACTION_CAMERA = "CAMERA";
+    public static final String ACTION_FOLDER = "FOLDER";
 
     /**
      * INTENT_URI 内嵌的目标用户标记（URI 写法：i.hyperopen_user=999）。
@@ -221,9 +224,34 @@ public class ShortcutItem {
         return item;
     }
 
-    /** 解析后的提示标题颜色：hintTextColor 非 0 用自定义，否则跟随 tintColor */
+    /**
+     * 智能解析该快捷方式的图标主色调（底垫颜色优先，其次为 tintColor）
+     */
+    public int resolveIconPrimaryColor() {
+        if (glyphPadEnabled && glyphPadColor != 0) {
+            return glyphPadColor;
+        }
+        return tintColor != 0 ? tintColor : 0xFF2A82E4;
+    }
+
+    /** 解析后的提示标题颜色：hintTextColor 非 0 用自定义，否则智能回退 */
     public int resolveHintTitleColor() {
-        return hintTextColor != 0 ? hintTextColor : tintColor;
+        return resolveHintTitleColor(null);
+    }
+
+    public int resolveHintTitleColor(io.github.qmryqmm.hyperopen.config.HyperOpenConfig config) {
+        if (hintTextColor != 0) {
+            return hintTextColor;
+        }
+        if (config != null) {
+            if (config.globalHintColorMode == io.github.qmryqmm.hyperopen.config.HyperOpenConfig.HINT_COLOR_MODE_WHITE) {
+                return 0xFFFFFFFF;
+            } else if (config.globalHintColorMode == io.github.qmryqmm.hyperopen.config.HyperOpenConfig.HINT_COLOR_MODE_CUSTOM) {
+                return config.globalHintCustomColor;
+            }
+        }
+        // 模式 0 / 默认：智能跟随图标底色/主题色
+        return resolveIconPrimaryColor();
     }
 
     /** 解析后的提示标题透明度，钳在 0.05~1.00 */
@@ -232,9 +260,13 @@ public class ShortcutItem {
         return Math.max(0.05f, Math.min(1f, a));
     }
 
-    /** 解析后的提示副标题颜色：自定义色 → 标题色 → tintColor 链式回退 */
+    /** 解析后的提示副标题颜色：自定义色 → 标题色 → 智能底色链式回退 */
     public int resolveHintSubtitleColor() {
-        return hintTextColorSub != 0 ? hintTextColorSub : resolveHintTitleColor();
+        return resolveHintSubtitleColor(null);
+    }
+
+    public int resolveHintSubtitleColor(io.github.qmryqmm.hyperopen.config.HyperOpenConfig config) {
+        return hintTextColorSub != 0 ? hintTextColorSub : resolveHintTitleColor(config);
     }
 
     /** 解析后的提示副标题透明度：自定义值 → 标题透明度×0.82（对应旧版 0xAA） */
@@ -243,6 +275,24 @@ public class ShortcutItem {
             return Math.max(0.05f, Math.min(1f, hintTextAlphaSub));
         }
         return resolveHintTitleAlpha() * 0.82f;
+    }
+
+    /**
+     * 解析文件夹子项列表
+     */
+    public List<ShortcutItem> parseFolderChildren() {
+        if (!ACTION_FOLDER.equals(actionType) || actionPayload == null || actionPayload.trim().isEmpty()) {
+            return new ArrayList<>();
+        }
+        return io.github.qmryqmm.hyperopen.config.HyperOpenConfig.parseShortcutsJson(actionPayload);
+    }
+
+    /**
+     * 将子项列表序列化写回 actionPayload
+     */
+    public void setFolderChildren(List<ShortcutItem> children) {
+        this.actionType = ACTION_FOLDER;
+        this.actionPayload = io.github.qmryqmm.hyperopen.config.HyperOpenConfig.serializeShortcutsJson(children);
     }
 
     /**
