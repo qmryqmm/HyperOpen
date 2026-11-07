@@ -135,12 +135,13 @@ public class CustomHyperOpenContainer extends FrameLayout {
             }
             // 顶部提示参数（位置、文字大小、居中、模糊与背景）热生效
             applyHeaderPillStyleAndLayout();
-            // 气泡材质、模糊半径、留白比例与透明度热生效
+            // 气泡材质、模糊半径、留白比例、圆角比例与透明度热生效
             for (CircularBubbleView b : bubbles) {
                 b.setMaterialStyle(resolvedStyle);
                 b.setBlurRadius(config.bubbleBlurRadius);
                 b.setDimAlpha(config.bubbleDimAlpha);
                 b.setBubblePaddingPercent(config.bubblePaddingPercent);
+                b.setCornerRadiusPercent(config.iconCornerRadius);
                 b.setIconAlpha(config.iconAlpha);
             }
         }
@@ -659,8 +660,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 bubble.targetY = finalY;
                 bubble.setMaterialStyle(resolvedStyle);
                 bubble.setBlurRadius(config.bubbleBlurRadius);
-            bubble.setDimAlpha(config.bubbleDimAlpha);
+                bubble.setDimAlpha(config.bubbleDimAlpha);
                 bubble.setBubblePaddingPercent(config.bubblePaddingPercent);
+                bubble.setCornerRadiusPercent(config.iconCornerRadius);
                 bubble.setIconAlpha(config.iconAlpha);
                 bubble.ensureBlurAndRefreshBackground();
 
@@ -808,7 +810,11 @@ public class CustomHyperOpenContainer extends FrameLayout {
             for (int i = 0, n = bubbles.size(); i < n; i++) {
                 CircularBubbleView b = bubbles.get(i);
                 b.applyScale(b == closest ? config.selectedIconScale : 1.0f);
-                b.setIconAlpha(config.iconAlpha);
+                if (closest != null) {
+                    b.setIconAlpha(b == closest ? config.fisheyeZoomAlpha : config.fisheyeOtherAlpha);
+                } else {
+                    b.setIconAlpha(config.iconAlpha);
+                }
             }
         } else if (useStockRegion && !stockSpecs.isEmpty()) {
             // 系统原生 Region 扇形多边形判定模式
@@ -817,15 +823,19 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 closest = bubbles.get(hitIndex);
                 minDistance = 0f; // 明确命中扇区
             }
-            // 系统原生模式下：对所有气泡应用基础尺寸，或被命中气泡应用选中倍率
+            // 系统原生模式下：对所有气泡应用基础尺寸，或被命中气泡应用选中倍率与对应透明度
             for (int i = 0, n = bubbles.size(); i < n; i++) {
                 CircularBubbleView b = bubbles.get(i);
                 float scale = (b == closest) ? config.selectedIconScale : 1.0f;
                 b.applyScale(scale);
-                b.setIconAlpha(config.iconAlpha);
+                if (closest != null) {
+                    b.setIconAlpha(b == closest ? config.fisheyeZoomAlpha : config.fisheyeOtherAlpha);
+                } else {
+                    b.setIconAlpha(config.iconAlpha);
+                }
             }
         } else {
-            // 经典连续余弦鱼眼动力学与欧氏距离判定模式
+            // 经典连续余弦鱼眼动力学与欧氏距离判定模式（蜂窝、弧形扇面、非扇区圆环、非扇区系统扇形通用）
             for (int i = 0, n = bubbles.size(); i < n; i++) {
                 CircularBubbleView b = bubbles.get(i);
                 float dx = touchX - b.targetX;
@@ -835,14 +845,37 @@ public class CustomHyperOpenContainer extends FrameLayout {
                     minDistance = dist;
                     closest = b;
                 }
+            }
 
-                // 连续余弦鱼眼缩放与动态放大透明度曲线
+            float effectiveRadiusPx = Math.max(influenceRadiusPx, hitDistanceThreshold);
+            float focusFactor = 0f;
+            if (closest != null && minDistance < effectiveRadiusPx) {
+                focusFactor = (minDistance < hitDistanceThreshold)
+                    ? 1.0f
+                    : (float) Math.cos((minDistance / effectiveRadiusPx) * (Math.PI / 2.0));
+            }
+            float otherAlpha = config.iconAlpha + (config.fisheyeOtherAlpha - config.iconAlpha) * focusFactor;
+
+            for (int i = 0, n = bubbles.size(); i < n; i++) {
+                CircularBubbleView b = bubbles.get(i);
+                float dx = touchX - b.targetX;
+                float dy = touchY - b.targetY;
+                float dist = (float) Math.hypot(dx, dy);
+
                 float scale = 1.0f;
-                float currentAlpha = config.iconAlpha;
                 if (dist < influenceRadiusPx) {
                     float factor = (float) Math.cos((dist / influenceRadiusPx) * (Math.PI / 2.0));
                     scale = 1.0f + (config.maxScale - 1.0f) * factor;
-                    currentAlpha = config.iconAlpha + (config.fisheyeZoomAlpha - config.iconAlpha) * factor;
+                }
+
+                float currentAlpha;
+                if (b == closest && dist < effectiveRadiusPx) {
+                    float alphaFactor = (dist < hitDistanceThreshold)
+                        ? 1.0f
+                        : (float) Math.cos((dist / effectiveRadiusPx) * (Math.PI / 2.0));
+                    currentAlpha = config.iconAlpha + (config.fisheyeZoomAlpha - config.iconAlpha) * alphaFactor;
+                } else {
+                    currentAlpha = otherAlpha;
                 }
                 b.applyScale(scale);
                 b.setIconAlpha(currentAlpha);

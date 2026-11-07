@@ -21,18 +21,23 @@ object AppIconCropProcessor {
     private const val BITMAP_SIZE = 192
 
     /**
-     * 根据全局裁切模式对应用图标进行圆形处理
+     * 根据全局裁切模式与圆角比例对应用图标进行裁切处理
      */
     @JvmStatic
     @JvmOverloads
-    fun process(src: Drawable?, cropMode: Int, res: Resources? = null): Drawable? {
+    fun process(
+        src: Drawable?,
+        cropMode: Int,
+        res: Resources? = null,
+        cornerRadiusPercent: Int = 50,
+    ): Drawable? {
         if (src == null) return null
 
         return try {
             when (cropMode) {
-                HyperOpenConfig.CROP_BITMAP_CIRCLE -> createStandardCircle(src, res)
-                HyperOpenConfig.CROP_ADAPTIVE_EXPAND -> createAdaptiveExpandedCircle(src, res)
-                else -> createAdaptiveExpandedCircle(src, res)
+                HyperOpenConfig.CROP_BITMAP_CIRCLE -> createStandardCircle(src, res, cornerRadiusPercent)
+                HyperOpenConfig.CROP_ADAPTIVE_EXPAND -> createAdaptiveExpandedCircle(src, res, cornerRadiusPercent)
+                else -> createAdaptiveExpandedCircle(src, res, cornerRadiusPercent)
             }
         } catch (t: Throwable) {
             src
@@ -40,21 +45,27 @@ object AppIconCropProcessor {
     }
 
     /**
-     * 标准抗锯齿圆形裁切 (BitmapShader)
+     * 标准抗锯齿圆角/圆形裁切 (BitmapShader)
      */
-    private fun createStandardCircle(drawable: Drawable, res: Resources?): Drawable {
-        return renderCircularIcon(drawable, expandAdaptive = false, res = res)
+    private fun createStandardCircle(drawable: Drawable, res: Resources?, cornerRadiusPercent: Int): Drawable {
+        return renderCircularIcon(drawable, expandAdaptive = false, res = res, cornerRadiusPercent = cornerRadiusPercent)
     }
 
     /**
-     * 自适应留白外扩并圆形满铺裁切 (专为 AdaptiveIcon 和带白底的应用打造)
+     * 自适应留白外扩并圆角/圆形满铺裁切 (专为 AdaptiveIcon 和带白底的应用打造)
      */
-    private fun createAdaptiveExpandedCircle(drawable: Drawable, res: Resources?): Drawable {
-        return renderCircularIcon(drawable, expandAdaptive = true, res = res)
+    private fun createAdaptiveExpandedCircle(drawable: Drawable, res: Resources?, cornerRadiusPercent: Int): Drawable {
+        return renderCircularIcon(drawable, expandAdaptive = true, res = res, cornerRadiusPercent = cornerRadiusPercent)
     }
 
-    private fun renderCircularIcon(drawable: Drawable, expandAdaptive: Boolean, res: Resources?): Drawable {
+    private fun renderCircularIcon(
+        drawable: Drawable,
+        expandAdaptive: Boolean,
+        res: Resources?,
+        cornerRadiusPercent: Int,
+    ): Drawable {
         val size = BITMAP_SIZE
+        val clampedPercent = cornerRadiusPercent.coerceIn(0, 50)
         val srcBmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val srcCanvas = Canvas(srcBmp)
 
@@ -90,8 +101,8 @@ object AppIconCropProcessor {
 
             // 检测图标在正交四边与四对角方向上的实际不透明半径；
             // 若系统返回的是带透明边距的 MIUI 超椭圆位图（四直边落在圆内、四角落在圆外），
-            // 直接裁圆会导致“四条直边 + 四段圆弧”拼成八边形，因此自动外扩使有效内容完全填满正圆。
-            val fitScale = computeCircleFillScale(rawBmp, expandAdaptive)
+            // 直接裁圆会导致“四条直边 + 四段圆弧”拼成八边形，因此自动外扩使有效内容完全填满目标圆角形状。
+            val fitScale = computeCircleFillScale(rawBmp, expandAdaptive, clampedPercent)
             if (fitScale > 1.005f) {
                 srcCanvas.save()
                 val center = size / 2f
@@ -111,16 +122,35 @@ object AppIconCropProcessor {
             shader = BitmapShader(srcBmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
         }
         val center = size / 2f
-        // 内缩 1px 确保抗锯齿圆边缘完整落在 Bitmap 内部，放大时绝不被四边截平
-        val circleRadius = center - 1f
-        outCanvas.drawCircle(center, center, circleRadius, paint)
+        // 内缩 1px 确保抗锯齿边缘完整落在 Bitmap 内部，放大时绝不被四边截平
+        val halfRadius = center - 1f
+        val cornerRadiusPx = halfRadius * (clampedPercent / 50f)
+        outCanvas.drawRoundRect(
+            center - halfRadius,
+            center - halfRadius,
+            center + halfRadius,
+            center + halfRadius,
+            cornerRadiusPx,
+            cornerRadiusPx,
+            paint,
+        )
 
         val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 2f
             color = Color.argb(if (expandAdaptive) 32 else 28, 255, 255, 255)
         }
-        outCanvas.drawCircle(center, center, circleRadius - 1f, strokePaint)
+        val strokeHalf = halfRadius - 1f
+        val strokeCorner = (cornerRadiusPx - 1f).coerceAtLeast(0f)
+        outCanvas.drawRoundRect(
+            center - strokeHalf,
+            center - strokeHalf,
+            center + strokeHalf,
+            center + strokeHalf,
+            strokeCorner,
+            strokeCorner,
+            strokePaint,
+        )
 
         // 中间位图仅用于本次绘制，立即回收，避免每次呼出面板都在 SystemUI 堆上遗留数百 KB 垃圾触发 GC
         srcBmp.recycle()
@@ -130,12 +160,15 @@ object AppIconCropProcessor {
 
     /**
      * 沿 8 个方向（上下左右 + 四个 45° 对角线）从中心向外扫描不透明像素边界，
-     * 计算将超椭圆/带留白图标外扩至完全覆盖正圆所需的缩放比例。
+     * 计算将超椭圆/带留白图标外扩至完全覆盖目标圆角矩形所需的缩放比例。
      */
-    private fun computeCircleFillScale(bmp: Bitmap, expandAdaptive: Boolean): Float {
+    private fun computeCircleFillScale(bmp: Bitmap, expandAdaptive: Boolean, cornerRadiusPercent: Int): Float {
         val size = bmp.width
         val center = size / 2f
         val targetRadius = center - 1f
+        val cornerRadius = targetRadius * (cornerRadiusPercent.coerceIn(0, 50) / 50f)
+        // 对角线方向上圆角矩形边界到中心的距离 = (targetRadius - cornerRadius) * sqrt(2) + cornerRadius
+        val diagTargetRadius = (targetRadius - cornerRadius) * 1.4142135f + cornerRadius
         val dirs = arrayOf(
             floatArrayOf(1f, 0f),
             floatArrayOf(-1f, 0f),
@@ -147,27 +180,33 @@ object AppIconCropProcessor {
             floatArrayOf(-0.7071f, -0.7071f),
         )
 
-        var minReach = targetRadius
-        val maxStep = center.toInt()
-        for (dir in dirs) {
+        var maxRatio = 1.0f
+        val maxStep = (center * 1.42f).toInt()
+        for (i in dirs.indices) {
+            val dir = dirs[i]
+            val neededReach = if (i >= 4) diagTargetRadius else targetRadius
             var lastOpaqueDist = 0f
             for (step in 1..maxStep) {
-                val x = (center + dir[0] * step).toInt().coerceIn(0, size - 1)
-                val y = (center + dir[1] * step).toInt().coerceIn(0, size - 1)
-                val alpha = Color.alpha(bmp.getPixel(x, y))
+                val xf = center + dir[0] * step
+                val yf = center + dir[1] * step
+                if (xf < 0f || xf >= size || yf < 0f || yf >= size) break
+                val alpha = Color.alpha(bmp.getPixel(xf.toInt(), yf.toInt()))
                 if (alpha > 180) {
                     lastOpaqueDist = step.toFloat()
                 }
             }
-            if (lastOpaqueDist > center * 0.45f && lastOpaqueDist < minReach) {
-                minReach = lastOpaqueDist
+            if (lastOpaqueDist > center * 0.45f && lastOpaqueDist < neededReach) {
+                val ratio = neededReach / lastOpaqueDist
+                if (ratio > maxRatio) {
+                    maxRatio = ratio
+                }
             }
         }
 
-        if (minReach <= 0f || minReach >= targetRadius) {
+        if (maxRatio <= 1.001f) {
             return 1.0f
         }
-        val neededScale = (targetRadius / minReach) * if (expandAdaptive) 1.04f else 1.01f
-        return neededScale.coerceIn(1.0f, 1.38f)
+        val neededScale = maxRatio * if (expandAdaptive) 1.04f else 1.01f
+        return neededScale.coerceIn(1.0f, 1.48f)
     }
 }

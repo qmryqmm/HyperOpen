@@ -101,6 +101,8 @@ fun ParamsPage(
     influenceRadius: Float, onInfluenceRadius: (Float) -> Unit,
     iconAlpha: Float, onIconAlpha: (Float) -> Unit,
     fisheyeZoomAlpha: Float, onFisheyeZoomAlpha: (Float) -> Unit,
+    fisheyeOtherAlpha: Float, onFisheyeOtherAlpha: (Float) -> Unit,
+    iconCornerRadius: Float, onIconCornerRadius: (Float) -> Unit,
     fullscreenBlurMaskAlpha: Float, onFullscreenBlurMaskAlpha: (Float) -> Unit,
     fullscreenDimAlpha: Float, onFullscreenDimAlpha: (Float) -> Unit,
     headerDimAlpha: Float, onHeaderDimAlpha: (Float) -> Unit,
@@ -744,7 +746,7 @@ fun ParamsPage(
                     title = "图标与物理动力学",
                     expanded = isOpen("icon"),
                     onToggle = { toggle("icon") },
-                    summary = "尺寸 ${iconSize.toInt()} dp · 放大 ${"%.2f".format(maxScale)}x · 辉光${if (iconGlowEffect) "开" else "关"}",
+                    summary = "尺寸 ${iconSize.toInt()} dp · 圆角 ${iconCornerRadius.toInt()}% · 放大 ${"%.2f".format(maxScale)}x · 辉光${if (iconGlowEffect) "开" else "关"}",
                 )
             }
             if (isOpen("icon")) item(key = "icon_card") {
@@ -761,6 +763,18 @@ fun ParamsPage(
                         onValueChange = onIconSize,
                     )
                     SliderPreference(
+                        title = "图标圆角比例",
+                        summary = "调节图标与气泡圆角弧度（50% 为正圆形，0% 为直角矩形）",
+                        valueText = when {
+                            iconCornerRadius.toInt() >= 50 -> "正圆 (50 %)"
+                            iconCornerRadius.toInt() <= 0 -> "直角 (0 %)"
+                            else -> "${iconCornerRadius.toInt()} %"
+                        },
+                        value = iconCornerRadius,
+                        valueRange = 0f..50f,
+                        onValueChange = onIconCornerRadius,
+                    )
+                    SliderPreference(
                         title = "图标常态透明度",
                         valueText = "${(iconAlpha * 100).toInt()} %",
                         value = iconAlpha * 100f,
@@ -769,11 +783,19 @@ fun ParamsPage(
                     )
                     SliderPreference(
                         title = "鱼眼放大时透明度",
-                        summary = "手指划过受鱼眼动力学放大时的动态透明度",
+                        summary = "手指划过选中/放大目标图标时的动态透明度（全布局通用）",
                         valueText = "${(fisheyeZoomAlpha * 100).toInt()} %",
                         value = fisheyeZoomAlpha * 100f,
                         valueRange = 0f..100f,
                         onValueChange = { onFisheyeZoomAlpha(it / 100f) },
+                    )
+                    SliderPreference(
+                        title = "鱼眼放大时其他图标透明度",
+                        summary = "手指划过放大目标图标时，其余未选中图标的动态透明度",
+                        valueText = "${(fisheyeOtherAlpha * 100).toInt()} %",
+                        value = fisheyeOtherAlpha * 100f,
+                        valueRange = 0f..100f,
+                        onValueChange = { onFisheyeOtherAlpha(it / 100f) },
                     )
                     SliderPreference(
                         title = "图标紧凑程度",

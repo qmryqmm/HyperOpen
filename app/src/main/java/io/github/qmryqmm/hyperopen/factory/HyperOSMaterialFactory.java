@@ -187,7 +187,7 @@ public class HyperOSMaterialFactory {
     }
 
     /**
-     * 使用预构建的 CircularOpticsCache 绘制正圆形物理光学层（onDraw 零分配）
+     * 使用预构建的 CircularOpticsCache 绘制正圆/圆角物理光学层（onDraw 零分配）
      */
     public static void drawUnifiedCircularOpticsCached(
         @NonNull Canvas canvas,
@@ -200,36 +200,65 @@ public class HyperOSMaterialFactory {
         @NonNull Paint borderPaint,
         @NonNull CircularOpticsCache cache
     ) {
+        drawUnifiedCircularOpticsCached(
+            canvas, width, height, style, isSelected, bgPaint, highlightPaint, borderPaint, cache, 50
+        );
+    }
+
+    public static void drawUnifiedCircularOpticsCached(
+        @NonNull Canvas canvas,
+        int width,
+        int height,
+        int style,
+        boolean isSelected,
+        @NonNull Paint bgPaint,
+        @NonNull Paint highlightPaint,
+        @NonNull Paint borderPaint,
+        @NonNull CircularOpticsCache cache,
+        int cornerRadiusPercent
+    ) {
         if (width <= 0 || height <= 0) return;
         float cx = width / 2f;
         float cy = height / 2f;
         float radius = Math.min(cx, cy) - 2.0f;
         if (radius <= 0f) return;
 
+        int clampedPercent = Math.max(0, Math.min(50, cornerRadiusPercent));
+        float cornerRadius = radius * (clampedPercent / 50f);
+        float left = cx - radius;
+        float top = cy - radius;
+        float right = cx + radius;
+        float bottom = cy + radius;
+
         cache.ensure(width, height, style, isSelected);
 
         if (style == STYLE_SOFT_GLASS) {
             bgPaint.setShader(cache.lensRefraction);
-            canvas.drawCircle(cx, cy, radius, bgPaint);
+            canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, bgPaint);
 
             highlightPaint.setShader(cache.specularAndCaustic);
-            canvas.drawCircle(cx, cy, radius, highlightPaint);
+            canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, highlightPaint);
 
             float crescentRadius = radius * 0.91f;
             if (crescentRadius > 2f && cache.crestShader != null) {
+                float crescentCorner = crescentRadius * (clampedPercent / 50f);
                 highlightPaint.setShader(cache.crestShader);
-                canvas.drawCircle(cx, cy, crescentRadius, highlightPaint);
+                canvas.drawRoundRect(
+                    cx - crescentRadius, cy - crescentRadius,
+                    cx + crescentRadius, cy + crescentRadius,
+                    crescentCorner, crescentCorner, highlightPaint
+                );
             }
 
             borderPaint.setShader(cache.borderGrad);
-            canvas.drawCircle(cx, cy, radius, borderPaint);
+            canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, borderPaint);
         } else {
             bgPaint.setShader(cache.radialMatte);
-            canvas.drawCircle(cx, cy, radius, bgPaint);
+            canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, bgPaint);
 
             borderPaint.setShader(null);
             borderPaint.setColor(cache.gaussianBorderColor);
-            canvas.drawCircle(cx, cy, radius, borderPaint);
+            canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, borderPaint);
         }
     }
 
@@ -488,6 +517,7 @@ public class HyperOSMaterialFactory {
         private final Paint outerAuraPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint dimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private float dimAlpha = 0f;
+        private int cornerRadiusPercent = 50;
 
         private final CircularOpticsCache opticsCache = new CircularOpticsCache();
         private int glowCachedW = -1;
@@ -538,6 +568,18 @@ public class HyperOSMaterialFactory {
             }
         }
 
+        public void setCornerRadiusPercent(int percent) {
+            int clamped = Math.max(0, Math.min(50, percent));
+            if (this.cornerRadiusPercent != clamped) {
+                this.cornerRadiusPercent = clamped;
+                invalidateSelf();
+            }
+        }
+
+        public int getCornerRadiusPercent() {
+            return cornerRadiusPercent;
+        }
+
         private void ensureGlowShaders(int width, int height, float cx, float cy, float radius) {
             if (glowCachedW == width && glowCachedH == height) {
                 return;
@@ -575,21 +617,27 @@ public class HyperOSMaterialFactory {
             float radius = Math.min(cx, cy) - 2.0f;
             if (radius <= 0f) return;
 
+            float cornerRadius = radius * (cornerRadiusPercent / 50f);
+            float left = cx - radius;
+            float top = cy - radius;
+            float right = cx + radius;
+            float bottom = cy + radius;
+
             // 0. 气泡留白区域背景压暗（位于光学层之下）
             if (dimAlpha > 0.001f) {
-                canvas.drawCircle(cx, cy, radius, dimPaint);
+                canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, dimPaint);
             }
 
             // 1~3. 统一绘制与圆形视界区域底衬完全一致的液态玻璃 / 高斯模糊光学层（缓存 Shader，0 分配）
             drawUnifiedCircularOpticsCached(
-                canvas, width, height, style, isSelected, bgPaint, highlightPaint, borderPaint, opticsCache
+                canvas, width, height, style, isSelected, bgPaint, highlightPaint, borderPaint, opticsCache, cornerRadiusPercent
             );
 
             // 4. 选中状态下的主题色内聚呼吸柔光微晕（严格收敛在 radius 内部，绝不越界被方形 View 边界截成八边形）
             if (isSelected && glowEnabled) {
                 ensureGlowShaders(width, height, cx, cy, radius);
-                canvas.drawCircle(cx, cy, radius, glowPaint);
-                canvas.drawCircle(cx, cy, radius, outerAuraPaint);
+                canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, glowPaint);
+                canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, outerAuraPaint);
             }
         }
 

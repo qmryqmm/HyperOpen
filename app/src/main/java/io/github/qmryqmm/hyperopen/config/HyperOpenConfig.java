@@ -135,6 +135,10 @@ public class HyperOpenConfig {
     public float iconAlpha = 1.0f;
     /** 鱼眼效果放大时的图标透明度 (0.0f ~ 1.0f，默认 1.0f) */
     public float fisheyeZoomAlpha = 1.0f;
+    /** 鱼眼效果放大时其他未选中图标的透明度 (0.0f ~ 1.0f，默认 1.0f) */
+    public float fisheyeOtherAlpha = 1.0f;
+    /** 图标与气泡圆角比例 (0 ~ 50%，默认 50% = 正圆形，0% = 直角矩形) */
+    public int iconCornerRadius = 50;
     /** 唤醒指纹快捷方式时全屏模糊遮罩模糊程度 (0.0f ~ 1.0f，默认 1.0f) */
     public float fullscreenBlurMaskAlpha = 1.0f;
     /** 唤醒指纹快捷方式时全屏遮罩背景压暗程度 (0.0f ~ 1.0f，默认 0.45f) */
@@ -370,6 +374,8 @@ public class HyperOpenConfig {
                     config.influenceRadius = bundle.getInt("influence_radius", 70);
                     config.iconAlpha = bundle.getFloat("icon_alpha", 1.0f);
                     config.fisheyeZoomAlpha = bundle.getFloat("fisheye_zoom_alpha", 1.0f);
+                    config.fisheyeOtherAlpha = bundle.getFloat("fisheye_other_alpha", 1.0f);
+                    config.iconCornerRadius = bundle.getInt("icon_corner_radius", 50);
                     config.fullscreenBlurMaskAlpha = bundle.getFloat("fullscreen_blur_mask_alpha", 1.0f);
                     config.fullscreenDimAlpha = bundle.getFloat("fullscreen_dim_alpha", 0.45f);
                     config.headerDimAlpha = bundle.getFloat("header_dim_alpha", 0f);
@@ -461,6 +467,8 @@ public class HyperOpenConfig {
         config.influenceRadius = xPrefs.getInt("influence_radius", 70);
         config.iconAlpha = xPrefs.getFloat("icon_alpha", 1.0f);
         config.fisheyeZoomAlpha = xPrefs.getFloat("fisheye_zoom_alpha", 1.0f);
+        config.fisheyeOtherAlpha = xPrefs.getFloat("fisheye_other_alpha", 1.0f);
+        config.iconCornerRadius = xPrefs.getInt("icon_corner_radius", 50);
         config.fullscreenBlurMaskAlpha = xPrefs.getFloat("fullscreen_blur_mask_alpha", 1.0f);
         config.fullscreenDimAlpha = xPrefs.getFloat("fullscreen_dim_alpha", 0.45f);
         config.headerDimAlpha = xPrefs.getFloat("header_dim_alpha", 0f);
@@ -542,6 +550,8 @@ public class HyperOpenConfig {
         config.influenceRadius = sp.getInt("influence_radius", 70);
         config.iconAlpha = sp.getFloat("icon_alpha", 1.0f);
         config.fisheyeZoomAlpha = sp.getFloat("fisheye_zoom_alpha", 1.0f);
+        config.fisheyeOtherAlpha = sp.getFloat("fisheye_other_alpha", 1.0f);
+        config.iconCornerRadius = sp.getInt("icon_corner_radius", 50);
         config.fullscreenBlurMaskAlpha = sp.getFloat("fullscreen_blur_mask_alpha", 1.0f);
         config.fullscreenDimAlpha = sp.getFloat("fullscreen_dim_alpha", 0.45f);
         config.headerDimAlpha = sp.getFloat("header_dim_alpha", 0f);
@@ -623,6 +633,8 @@ public class HyperOpenConfig {
             .putInt("influence_radius", influenceRadius)
             .putFloat("icon_alpha", iconAlpha)
             .putFloat("fisheye_zoom_alpha", fisheyeZoomAlpha)
+            .putFloat("fisheye_other_alpha", fisheyeOtherAlpha)
+            .putInt("icon_corner_radius", iconCornerRadius)
             .putFloat("fullscreen_blur_mask_alpha", fullscreenBlurMaskAlpha)
             .putFloat("fullscreen_dim_alpha", fullscreenDimAlpha)
             .putFloat("header_dim_alpha", headerDimAlpha)

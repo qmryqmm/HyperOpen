@@ -25,12 +25,13 @@ import java.util.concurrent.ConcurrentHashMap
  * 性能优化：对每个 [ImageVector] 的解析后 [android.graphics.Path]、线帽属性与总边界框做进程级静态缓存，
  * 避免每次构建气泡时重复解析 SVG PathNode、矩阵变换与 computeBounds。
  */
-class MiuixVectorDrawable(
+class MiuixVectorDrawable @JvmOverloads constructor(
     val vector: ImageVector,
     tintColor: Int,
     private val padEnabled: Boolean = false,
     private val padColor: Int = 0xFF2A82E4.toInt(),
     private val padMode: Int = HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT,
+    private val cornerRadiusPercent: Int = 50,
 ) : Drawable() {
 
     private data class PathElement(
@@ -87,11 +88,32 @@ class MiuixVectorDrawable(
         val b: Rect = bounds
         if (b.width() <= 0 || b.height() <= 0) return
 
-        // 1) 绘制圆形底垫（如启用）
+        // 1) 绘制圆角/圆形底垫（如启用）
         if (padEnabled) {
-            val radius = Math.max(1f, Math.min(b.width(), b.height()) / 2f - 1f)
-            canvas.drawCircle(b.exactCenterX(), b.exactCenterY(), radius, padPaint)
-            canvas.drawCircle(b.exactCenterX(), b.exactCenterY(), radius - 1.25f, padBorderPaint)
+            val cx = b.exactCenterX()
+            val cy = b.exactCenterY()
+            val halfRadius = Math.max(1f, Math.min(b.width(), b.height()) / 2f - 1f)
+            val cornerRadius = halfRadius * (cornerRadiusPercent.coerceIn(0, 50) / 50f)
+            canvas.drawRoundRect(
+                cx - halfRadius,
+                cy - halfRadius,
+                cx + halfRadius,
+                cy + halfRadius,
+                cornerRadius,
+                cornerRadius,
+                padPaint,
+            )
+            val borderHalf = halfRadius - 1.25f
+            val borderCorner = (cornerRadius - 1.25f).coerceAtLeast(0f)
+            canvas.drawRoundRect(
+                cx - borderHalf,
+                cy - borderHalf,
+                cx + borderHalf,
+                cy + borderHalf,
+                borderCorner,
+                borderCorner,
+                padBorderPaint,
+            )
         }
 
         // 2) 绘制 Miuix 矢量线条

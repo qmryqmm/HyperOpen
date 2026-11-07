@@ -33,6 +33,7 @@ public class CircularBubbleView extends FrameLayout {
     private final int sizePx;
     private float blurRadiusDp;
     private int paddingPercent;
+    private int cornerRadiusPercent;
     private final HyperOpenConfig config;
     private final ImageView iconView;
 
@@ -57,12 +58,14 @@ public class CircularBubbleView extends FrameLayout {
         this.config = config;
         this.blurRadiusDp = config != null ? config.bubbleBlurRadius : 25f;
         this.paddingPercent = config != null ? config.bubblePaddingPercent : 18;
+        this.cornerRadiusPercent = config != null ? Math.max(0, Math.min(50, config.iconCornerRadius)) : 50;
 
         boolean glowEnabled = config == null || config.iconGlowEffect;
         this.opticDrawable = new HyperOSMaterialFactory.CircularBubbleDrawable(
             activeStyle, item.tintColor, isSelected, glowEnabled
         );
         this.opticDrawable.setDimAlpha(config != null ? config.bubbleDimAlpha : 0f);
+        this.opticDrawable.setCornerRadiusPercent(this.cornerRadiusPercent);
 
         setLayoutParams(new LayoutParams(sizePx, sizePx));
         setClipChildren(false);
@@ -81,7 +84,9 @@ public class CircularBubbleView extends FrameLayout {
         addView(iconView, iconLp);
 
         // 应用图标透明度
-        iconView.setAlpha(config != null ? config.iconAlpha : 1.0f);
+        float initAlpha = config != null ? config.iconAlpha : 1.0f;
+        iconView.setAlpha(initAlpha);
+        opticDrawable.setAlpha(Math.round(Math.max(0f, Math.min(1f, initAlpha)) * 255f));
 
         // 绑定图标 (优先从包名解析应用图标，或使用默认彩色矢量图形)
         loadItemIcon();
@@ -143,12 +148,14 @@ public class CircularBubbleView extends FrameLayout {
     }
 
     /**
-     * 计算用于 SurfaceFlinger BackgroundBlurDrawable 的正圆圆角半径：
-     * Skia 的 SkRRect::setRectRadii 在 RenderThread 合成时会自动将大于等于 mRect 宽高一半的圆角
-     * 精确钳制为当前缩放后 mRect 宽高的一半（保持 100% 几何正圆），无需在 UI 线程每帧反射修改圆角触发重绘闪烁。
+     * 计算用于 SurfaceFlinger BackgroundBlurDrawable 的圆角半径：
+     * 50% 正圆时乘 4.0f 交由 Skia 自动钳制为半宽；小于 50% 时按比例并随缩放同步。
      */
     private float getScaledBlurCornerRadiusPx() {
-        return getEffectiveCircleRadiusPx() * 4.0f;
+        if (cornerRadiusPercent >= 50) {
+            return getEffectiveCircleRadiusPx() * 4.0f;
+        }
+        return getEffectiveCircleRadiusPx() * (cornerRadiusPercent / 50f) * Math.max(0.1f, currentScale);
     }
 
     private int getBlurRadiusPx() {
@@ -197,6 +204,7 @@ public class CircularBubbleView extends FrameLayout {
         opticDrawable.setStyle(activeStyle);
         opticDrawable.setSelected(isSelected);
         opticDrawable.setGlowEnabled(glowEnabled);
+        opticDrawable.setCornerRadiusPercent(cornerRadiusPercent);
 
         int blurPx = getBlurRadiusPx();
         if (blurPx > 0 && systemBackdropBlurDrawable == null && isAttachedToWindow()) {
@@ -258,6 +266,23 @@ public class CircularBubbleView extends FrameLayout {
         }
     }
 
+    public void setCornerRadiusPercent(int percent) {
+        int clamped = Math.max(0, Math.min(50, percent));
+        if (this.cornerRadiusPercent != clamped) {
+            this.cornerRadiusPercent = clamped;
+            if (this.config != null) {
+                this.config.iconCornerRadius = clamped;
+            }
+            opticDrawable.setCornerRadiusPercent(clamped);
+            loadItemIcon();
+            ensureBlurAndRefreshBackground();
+        }
+    }
+
+    public int getCornerRadiusPercent() {
+        return cornerRadiusPercent;
+    }
+
     public void resetBlur() {
         animate().cancel();
         if (selectedScaleAnimator != null) {
@@ -278,8 +303,11 @@ public class CircularBubbleView extends FrameLayout {
     }
 
     public void setIconAlpha(float alpha) {
-        if (iconView != null && Math.abs(iconView.getAlpha() - alpha) > 0.002f) {
-            iconView.setAlpha(alpha);
+        float clamped = Math.max(0f, Math.min(1f, alpha));
+        if (iconView != null && Math.abs(iconView.getAlpha() - clamped) > 0.002f) {
+            iconView.setAlpha(clamped);
+            opticDrawable.setAlpha(Math.round(clamped * 255f));
+            opticDrawable.invalidateSelf();
         }
     }
 
@@ -328,6 +356,9 @@ public class CircularBubbleView extends FrameLayout {
             this.currentScale = newScale;
             setScaleX(newScale);
             setScaleY(newScale);
+            if (cornerRadiusPercent < 50) {
+                syncBlurCornerRadiusWithViewScale();
+            }
         }
     }
 

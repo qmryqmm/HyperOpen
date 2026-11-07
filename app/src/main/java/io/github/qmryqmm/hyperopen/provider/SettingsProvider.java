@@ -203,6 +203,8 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putInt("influence_radius", sp.getInt("influence_radius", 70));
                 bundle.putFloat("icon_alpha", sp.getFloat("icon_alpha", 1.0f));
                 bundle.putFloat("fisheye_zoom_alpha", sp.getFloat("fisheye_zoom_alpha", 1.0f));
+                bundle.putFloat("fisheye_other_alpha", sp.getFloat("fisheye_other_alpha", 1.0f));
+                bundle.putInt("icon_corner_radius", sp.getInt("icon_corner_radius", 50));
                 bundle.putFloat("fullscreen_blur_mask_alpha", sp.getFloat("fullscreen_blur_mask_alpha", 1.0f));
                 bundle.putFloat("fullscreen_dim_alpha", sp.getFloat("fullscreen_dim_alpha", 0.45f));
                 bundle.putFloat("header_dim_alpha", sp.getFloat("header_dim_alpha", 0f));

@@ -592,6 +592,7 @@ class HyperOpenPreviewView(
             old.bubblePaddingPercent != newConfig.bubblePaddingPercent ||
             old.bubbleBlurRadius != newConfig.bubbleBlurRadius ||
             old.appIconCropMode != newConfig.appIconCropMode ||
+            old.iconCornerRadius != newConfig.iconCornerRadius ||
             old.maxIconCount != newConfig.maxIconCount ||
             old.layoutStyle != newConfig.layoutStyle ||
             old.ringSectorMode != newConfig.ringSectorMode ||
@@ -627,7 +628,11 @@ class HyperOpenPreviewView(
         }
         applyHeaderPillStyleAndLayout()
         refreshFloatingBackButtonBackground()
-        for (b in bubbleViews) b.setDimAlpha(config.bubbleDimAlpha)
+        for (b in bubbleViews) {
+            b.setDimAlpha(config.bubbleDimAlpha)
+            b.setCornerRadiusPercent(config.iconCornerRadius)
+            b.setIconAlpha(config.iconAlpha)
+        }
         if (needRebuild || bubbleViews.isEmpty()) {
             setupLayout()
         } else {
@@ -1318,7 +1323,11 @@ class HyperOpenPreviewView(
             }
             for (b in bubbleViews) {
                 b.applyScale(if (b == closest) config.selectedIconScale else 1.0f)
-                b.setIconAlpha(config.iconAlpha)
+                if (closest != null) {
+                    b.setIconAlpha(if (b == closest) config.fisheyeZoomAlpha else config.fisheyeOtherAlpha)
+                } else {
+                    b.setIconAlpha(config.iconAlpha)
+                }
             }
         } else if (useStockRegion && stockSpecs.isNotEmpty()) {
             val hitIndex = StockFanPacking.findTouchedIndex(stockSpecs, touchX, touchY, lastFodX, lastFodY)
@@ -1329,7 +1338,11 @@ class HyperOpenPreviewView(
             for (b in bubbleViews) {
                 val scale = if (b == closest) config.selectedIconScale else 1.0f
                 b.applyScale(scale)
-                b.setIconAlpha(config.iconAlpha)
+                if (closest != null) {
+                    b.setIconAlpha(if (b == closest) config.fisheyeZoomAlpha else config.fisheyeOtherAlpha)
+                } else {
+                    b.setIconAlpha(config.iconAlpha)
+                }
             }
         } else {
             for (b in bubbleViews) {
@@ -1338,13 +1351,37 @@ class HyperOpenPreviewView(
                     minDistance = dist
                     closest = b
                 }
+            }
+
+            val effectiveRadiusPx = maxOf(influenceRadiusPx, hitDistanceThreshold)
+            var focusFactor = 0f
+            if (closest != null && minDistance < effectiveRadiusPx) {
+                focusFactor = if (minDistance < hitDistanceThreshold) {
+                    1.0f
+                } else {
+                    Math.cos((minDistance / effectiveRadiusPx) * (Math.PI / 2.0)).toFloat()
+                }
+            }
+            val otherAlpha = config.iconAlpha + (config.fisheyeOtherAlpha - config.iconAlpha) * focusFactor
+
+            for (b in bubbleViews) {
+                val dist = Math.hypot((touchX - b.targetX).toDouble(), (touchY - b.targetY).toDouble()).toFloat()
 
                 var scale = 1.0f
-                var currentAlpha = config.iconAlpha
                 if (dist < influenceRadiusPx) {
                     val factor = Math.cos((dist / influenceRadiusPx) * (Math.PI / 2.0)).toFloat()
                     scale = 1.0f + (config.maxScale - 1.0f) * factor
-                    currentAlpha = config.iconAlpha + (config.fisheyeZoomAlpha - config.iconAlpha) * factor
+                }
+
+                val currentAlpha = if (b == closest && dist < effectiveRadiusPx) {
+                    val alphaFactor = if (dist < hitDistanceThreshold) {
+                        1.0f
+                    } else {
+                        Math.cos((dist / effectiveRadiusPx) * (Math.PI / 2.0)).toFloat()
+                    }
+                    config.iconAlpha + (config.fisheyeZoomAlpha - config.iconAlpha) * alphaFactor
+                } else {
+                    otherAlpha
                 }
                 b.applyScale(scale)
                 b.setIconAlpha(currentAlpha)

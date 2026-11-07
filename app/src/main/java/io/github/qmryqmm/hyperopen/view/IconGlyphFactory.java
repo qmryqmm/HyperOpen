@@ -78,16 +78,16 @@ public final class IconGlyphFactory {
     }
 
     @Nullable
-    private static Drawable processedCustomImage(@Nullable Context ctx, @Nullable String spec, int cropMode) {
+    private static Drawable processedCustomImage(@Nullable Context ctx, @Nullable String spec, int cropMode, int cornerRadiusPercent) {
         if (ctx == null || !isCustomImage(spec)) return null;
-        String key = "custom|" + spec.hashCode() + "|" + spec.length() + "|" + cropMode;
+        String key = "custom|" + spec.hashCode() + "|" + spec.length() + "|" + cropMode + "|" + cornerRadiusPercent;
         synchronized (PROCESSED_CACHE) {
             Drawable.ConstantState cs = PROCESSED_CACHE.get(key);
             if (cs != null) return cs.newDrawable(ctx.getResources());
         }
         Drawable raw = decodeCustomImageDrawable(ctx, spec);
         if (raw == null) return null;
-        Drawable out = AppIconCropProcessor.process(raw, cropMode, ctx.getResources());
+        Drawable out = AppIconCropProcessor.process(raw, cropMode, ctx.getResources(), cornerRadiusPercent);
         if (out == null) out = raw;
         Drawable.ConstantState cs = out.getConstantState();
         if (cs != null) {
@@ -101,19 +101,19 @@ public final class IconGlyphFactory {
     }
 
     @Nullable
-    private static Drawable processedAppIcon(@Nullable Context ctx, @Nullable String pkg, int cropMode) {
+    private static Drawable processedAppIcon(@Nullable Context ctx, @Nullable String pkg, int cropMode, int cornerRadiusPercent) {
         if (ctx == null || pkg == null || pkg.isEmpty()) return null;
         if (isCustomImage(pkg)) {
-            return processedCustomImage(ctx, pkg, cropMode);
+            return processedCustomImage(ctx, pkg, cropMode, cornerRadiusPercent);
         }
-        String key = pkg + "|" + cropMode;
+        String key = pkg + "|" + cropMode + "|" + cornerRadiusPercent;
         synchronized (PROCESSED_CACHE) {
             Drawable.ConstantState cs = PROCESSED_CACHE.get(key);
             if (cs != null) return cs.newDrawable(ctx.getResources());
         }
         Drawable raw = appIcon(ctx, pkg);
         if (raw == null) return null;
-        Drawable out = AppIconCropProcessor.process(raw, cropMode, ctx.getResources());
+        Drawable out = AppIconCropProcessor.process(raw, cropMode, ctx.getResources(), cornerRadiusPercent);
         if (out == null) return null;
         Drawable.ConstantState cs = out.getConstantState();
         if (cs != null) {
@@ -173,14 +173,15 @@ public final class IconGlyphFactory {
         int cropMode = item.appIconCropMode > 0
             ? item.appIconCropMode
             : (config != null ? config.appIconCropMode : HyperOpenConfig.CROP_ADAPTIVE_EXPAND);
+        int cornerRadiusPercent = config != null ? Math.max(0, Math.min(50, config.iconCornerRadius)) : 50;
 
         // 0) 优先级最高：本地上传的自定义图片（存储在 iconPackage 或 iconGlyph 中，以 base64: 开头）
         if (isCustomImage(item.iconPackage)) {
-            Drawable d = processedCustomImage(ctx, item.iconPackage, cropMode);
+            Drawable d = processedCustomImage(ctx, item.iconPackage, cropMode, cornerRadiusPercent);
             if (d != null) return d;
         }
         if (isCustomImage(item.iconGlyph)) {
-            Drawable d = processedCustomImage(ctx, item.iconGlyph, cropMode);
+            Drawable d = processedCustomImage(ctx, item.iconGlyph, cropMode, cornerRadiusPercent);
             if (d != null) return d;
         }
 
@@ -189,25 +190,25 @@ public final class IconGlyphFactory {
             boolean padEnabled = item.glyphPadEnabled;
             int padColor = item.glyphPadColor;
             int padMode = item.glyphPadMode;
-            Drawable d = resolveMiuixIcon(item.iconGlyph.trim(), item.tintColor, padEnabled, padColor, padMode);
+            Drawable d = resolveMiuixIcon(item.iconGlyph.trim(), item.tintColor, padEnabled, padColor, padMode, cornerRadiusPercent);
             if (d != null) return d;
         }
 
         // 2) 优先级次之：手动指定应用包名图标
         if (notBlank(item.iconPackage)) {
-            Drawable d = processedAppIcon(ctx, item.iconPackage.trim(), cropMode);
+            Drawable d = processedAppIcon(ctx, item.iconPackage.trim(), cropMode, cornerRadiusPercent);
             if (d != null) return d;
         }
 
         // 3) 动作默认行为：APP 类型直接取目标应用图标
         if (ShortcutItem.ACTION_APP.equals(item.actionType) && notBlank(item.actionPayload)) {
-            Drawable d = processedAppIcon(ctx, item.actionPayload.trim(), cropMode);
+            Drawable d = processedAppIcon(ctx, item.actionPayload.trim(), cropMode, cornerRadiusPercent);
             if (d != null) return d;
         }
 
         // 4) 动作默认行为：INTENT_URI 解析目标应用图标
         if (ShortcutItem.ACTION_INTENT_URI.equals(item.actionType) && notBlank(item.actionPayload)) {
-            Drawable d = processedAppIcon(ctx, packageFromIntentCached(ctx, item.actionPayload), cropMode);
+            Drawable d = processedAppIcon(ctx, packageFromIntentCached(ctx, item.actionPayload), cropMode, cornerRadiusPercent);
             if (d != null) return d;
         }
 
@@ -215,7 +216,7 @@ public final class IconGlyphFactory {
         if (ShortcutItem.ACTION_ACTIVITY.equals(item.actionType) && notBlank(item.actionPayload)) {
             String pkg = io.github.qmryqmm.hyperopen.model.ActivityLaunchSpec
                     .fromJson(item.actionPayload).resolvePackage();
-            Drawable d = processedAppIcon(ctx, pkg, cropMode);
+            Drawable d = processedAppIcon(ctx, pkg, cropMode, cornerRadiusPercent);
             if (d != null) return d;
         }
 
@@ -280,13 +281,18 @@ public final class IconGlyphFactory {
      */
     @Nullable
     public static Drawable resolveMiuixIcon(@NonNull String glyphKey, int tintColor, boolean padEnabled, int padColor, int padMode) {
+        return resolveMiuixIcon(glyphKey, tintColor, padEnabled, padColor, padMode, 50);
+    }
+
+    @Nullable
+    public static Drawable resolveMiuixIcon(@NonNull String glyphKey, int tintColor, boolean padEnabled, int padColor, int padMode, int cornerRadiusPercent) {
         // 1. 优先尝试 Remix Icon 矢量
         try {
             if (io.github.qmryqmm.hyperopen.ui.RemixIconRegistry.INSTANCE.isRemixIcon(glyphKey)) {
                 androidx.compose.ui.graphics.vector.ImageVector rv =
                     io.github.qmryqmm.hyperopen.ui.RemixIconRegistry.INSTANCE.find(glyphKey);
                 if (rv != null) {
-                    return new MiuixVectorDrawable(rv, tintColor, padEnabled, padColor, padMode);
+                    return new MiuixVectorDrawable(rv, tintColor, padEnabled, padColor, padMode, cornerRadiusPercent);
                 }
             }
         } catch (Throwable ignored) {}
@@ -296,7 +302,7 @@ public final class IconGlyphFactory {
             androidx.compose.ui.graphics.vector.ImageVector v =
                 io.github.qmryqmm.hyperopen.ui.MiuixIconRegistry.INSTANCE.find(glyphKey, null);
             if (v != null) {
-                return new MiuixVectorDrawable(v, tintColor, padEnabled, padColor, padMode);
+                return new MiuixVectorDrawable(v, tintColor, padEnabled, padColor, padMode, cornerRadiusPercent);
             }
         } catch (Throwable ignored) {}
 
@@ -304,7 +310,7 @@ public final class IconGlyphFactory {
         if (clean.contains(":")) {
             clean = clean.split(":")[0].trim();
         }
-        return new GlyphDrawable(clean.toLowerCase(), tintColor, padEnabled, padColor, padMode);
+        return new GlyphDrawable(clean.toLowerCase(), tintColor, padEnabled, padColor, padMode, cornerRadiusPercent);
     }
 
     @Nullable
@@ -427,18 +433,24 @@ public final class IconGlyphFactory {
         private boolean padEnabled = false;
         private int padColor = 0;
         private int padMode = HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT;
+        private int cornerRadiusPercent = 50;
         private final Paint padPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint padBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         GlyphDrawable(String key, int tintColor) {
-            this(key, tintColor, false, 0, HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT);
+            this(key, tintColor, false, 0, HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT, 50);
         }
 
         GlyphDrawable(String key, int tintColor, boolean padEnabled, int padColor, int padMode) {
+            this(key, tintColor, padEnabled, padColor, padMode, 50);
+        }
+
+        GlyphDrawable(String key, int tintColor, boolean padEnabled, int padColor, int padMode, int cornerRadiusPercent) {
             this.key = key;
             this.padEnabled = padEnabled;
             this.padColor = padColor;
             this.padMode = padMode;
+            this.cornerRadiusPercent = Math.max(0, Math.min(50, cornerRadiusPercent));
 
             int baseColor = padColor != 0 ? padColor : tintColor;
             int color;
@@ -481,9 +493,30 @@ public final class IconGlyphFactory {
             if (b.width() <= 0 || b.height() <= 0) return;
 
             if (padEnabled) {
-                float radius = Math.max(1f, Math.min(b.width(), b.height()) / 2f - 1f);
-                canvas.drawCircle(b.exactCenterX(), b.exactCenterY(), radius, padPaint);
-                canvas.drawCircle(b.exactCenterX(), b.exactCenterY(), radius - 1.25f, padBorderPaint);
+                float cx = b.exactCenterX();
+                float cy = b.exactCenterY();
+                float halfRadius = Math.max(1f, Math.min(b.width(), b.height()) / 2f - 1f);
+                float cornerRadius = halfRadius * (cornerRadiusPercent / 50f);
+                canvas.drawRoundRect(
+                    cx - halfRadius,
+                    cy - halfRadius,
+                    cx + halfRadius,
+                    cy + halfRadius,
+                    cornerRadius,
+                    cornerRadius,
+                    padPaint
+                );
+                float borderHalf = halfRadius - 1.25f;
+                float borderCorner = Math.max(0f, cornerRadius - 1.25f);
+                canvas.drawRoundRect(
+                    cx - borderHalf,
+                    cy - borderHalf,
+                    cx + borderHalf,
+                    cy + borderHalf,
+                    borderCorner,
+                    borderCorner,
+                    padBorderPaint
+                );
             }
 
             float contentFactor = padEnabled ? 0.58f : 0.82f;

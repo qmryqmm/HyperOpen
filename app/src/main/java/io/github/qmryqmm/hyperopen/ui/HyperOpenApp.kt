@@ -160,6 +160,8 @@ fun HyperOpenApp(
     var influenceRadius by remember { mutableFloatStateOf(initialConfig.influenceRadius.toFloat()) }
     var iconAlpha by remember { mutableFloatStateOf(initialConfig.iconAlpha) }
     var fisheyeZoomAlpha by remember { mutableFloatStateOf(initialConfig.fisheyeZoomAlpha) }
+    var fisheyeOtherAlpha by remember { mutableFloatStateOf(initialConfig.fisheyeOtherAlpha) }
+    var iconCornerRadius by remember { mutableFloatStateOf(initialConfig.iconCornerRadius.toFloat()) }
     var fullscreenBlurMaskAlpha by remember { mutableFloatStateOf(initialConfig.fullscreenBlurMaskAlpha) }
     var fullscreenDimAlpha by remember { mutableFloatStateOf(initialConfig.fullscreenDimAlpha) }
     var headerDimAlpha by remember { mutableFloatStateOf(initialConfig.headerDimAlpha) }
@@ -376,6 +378,8 @@ fun HyperOpenApp(
         c.influenceRadius = influenceRadius.toInt()
         c.iconAlpha = iconAlpha
         c.fisheyeZoomAlpha = fisheyeZoomAlpha
+        c.fisheyeOtherAlpha = fisheyeOtherAlpha
+        c.iconCornerRadius = iconCornerRadius.toInt().coerceIn(0, 50)
         c.fullscreenBlurMaskAlpha = fullscreenBlurMaskAlpha
         c.fullscreenDimAlpha = fullscreenDimAlpha
         c.headerDimAlpha = headerDimAlpha
@@ -457,6 +461,8 @@ fun HyperOpenApp(
         influenceRadius = defaults.influenceRadius.toFloat()
         iconAlpha = defaults.iconAlpha
         fisheyeZoomAlpha = defaults.fisheyeZoomAlpha
+        fisheyeOtherAlpha = defaults.fisheyeOtherAlpha
+        iconCornerRadius = defaults.iconCornerRadius.toFloat()
         fullscreenBlurMaskAlpha = defaults.fullscreenBlurMaskAlpha
         fullscreenDimAlpha = defaults.fullscreenDimAlpha
         headerDimAlpha = defaults.headerDimAlpha
@@ -700,6 +706,8 @@ fun HyperOpenApp(
                             this.sectorLineWidth = sectorLineWidth
                             this.iconAlpha = iconAlpha
                             this.fisheyeZoomAlpha = fisheyeZoomAlpha
+                            this.fisheyeOtherAlpha = fisheyeOtherAlpha
+                            this.iconCornerRadius = iconCornerRadius.toInt().coerceIn(0, 50)
                             this.fullscreenBlurMaskAlpha = fullscreenBlurMaskAlpha
                             this.fullscreenDimAlpha = fullscreenDimAlpha
                             this.headerDimAlpha = headerDimAlpha
@@ -896,9 +904,11 @@ fun HyperOpenApp(
 
                             // 5. 图标气泡留白区域的独立毛玻璃底衬 (固定 key 复用 GPU 模糊纹理，不随手指滑动重建 Shader，彻底消除轻微闪烁；且底色恒定与真实锁屏 1:1 一致)
                             if (currentConfig.bubbleBlurRadius > 0) {
+                                val cornerPercent = currentConfig.iconCornerRadius.coerceIn(0, 50)
+                                val bubbleBlurShape = if (cornerPercent >= 50) CircleShape else RoundedCornerShape(percent = cornerPercent)
                                 blurScene.bubbles.forEach { spot ->
                                     androidx.compose.runtime.key(spot.id) {
-                                        if (spot.diameterPx > 2f) {
+                                        if (spot.diameterPx > 2f && spot.alpha > 0.01f) {
                                             val bubbleRadiusPx = spot.diameterPx / 2f
                                             val bubbleDiameterDp = with(density) { spot.diameterPx.toDp() }
                                             Box(
@@ -908,9 +918,10 @@ fun HyperOpenApp(
                                                         y = with(density) { (spot.centerY - bubbleRadiusPx).toDp() }
                                                     )
                                                     .size(bubbleDiameterDp)
+                                                    .graphicsLayer { alpha = spot.alpha.coerceIn(0f, 1f) }
                                                     .textureBlur(
                                                         backdrop = bubbleBackdrop,
-                                                        shape = CircleShape,
+                                                        shape = bubbleBlurShape,
                                                         blurRadius = currentConfig.bubbleBlurRadius.toFloat(),
                                                         colors = constantUnifiedBlurColors
                                                     )
@@ -1022,6 +1033,10 @@ fun HyperOpenApp(
                                     onIconAlpha = { iconAlpha = it; persist() },
                                     fisheyeZoomAlpha = fisheyeZoomAlpha,
                                     onFisheyeZoomAlpha = { fisheyeZoomAlpha = it; persist() },
+                                    fisheyeOtherAlpha = fisheyeOtherAlpha,
+                                    onFisheyeOtherAlpha = { fisheyeOtherAlpha = it; persist() },
+                                    iconCornerRadius = iconCornerRadius,
+                                    onIconCornerRadius = { iconCornerRadius = it; persist() },
                                     fullscreenBlurMaskAlpha = fullscreenBlurMaskAlpha,
                                     onFullscreenBlurMaskAlpha = { fullscreenBlurMaskAlpha = it; persist() },
                                     fullscreenDimAlpha = fullscreenDimAlpha,
