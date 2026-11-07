@@ -71,6 +71,8 @@ public class ShortcutItem {
     public boolean shellUseRoot = false;
 
     /* ===== 提示文字（顶部胶囊）自定义样式 ===== */
+    /** 是否跟随全局提示文字样式设置（默认 true；关闭后展开单项专属自定义） */
+    public boolean followGlobalHintStyle = true;
     /** 提示标题颜色（0xAARRGGBB）；0 = 跟随 tintColor（旧行为） */
     public int hintTextColor = 0;
     /** 提示标题透明度 0.05~1.00；默认 1.00 */
@@ -153,6 +155,7 @@ public class ShortcutItem {
             json.put("customOffsetY", (double) customOffsetY);
             json.put("userId", userId);
             json.put("shellUseRoot", shellUseRoot);
+            json.put("followGlobalHintStyle", followGlobalHintStyle);
             json.put("hintTextColor", hintTextColor);
             json.put("hintTextAlpha", (double) hintTextAlpha);
             json.put("hintTextColorSub", hintTextColorSub);
@@ -199,6 +202,14 @@ public class ShortcutItem {
         item.hintTextLetterSpacing = (float) json.optDouble("hintTextLetterSpacing", 0.0);
         item.showHintTitle = json.optBoolean("showHintTitle", true);
         item.showHintSubtitle = json.optBoolean("showHintSubtitle", true);
+        if (json.has("followGlobalHintStyle")) {
+            item.followGlobalHintStyle = json.optBoolean("followGlobalHintStyle", true);
+        } else {
+            // 旧版本数据兼容：若以前特意配置过非默认文字参数，保持 false；否则默认跟随全局
+            boolean hasCustom = item.hintTextColor != 0 || item.hintTextStroke > 0
+                || item.hintTextShadow > 0 || item.hintTextWeight != 3 || item.hintTextLetterSpacing != 0f;
+            item.followGlobalHintStyle = !hasCustom;
+        }
         return item;
     }
 
@@ -211,6 +222,7 @@ public class ShortcutItem {
         );
         item.userId = userId;
         item.shellUseRoot = shellUseRoot;
+        item.followGlobalHintStyle = followGlobalHintStyle;
         item.hintTextColor = hintTextColor;
         item.hintTextAlpha = hintTextAlpha;
         item.hintTextColorSub = hintTextColorSub;

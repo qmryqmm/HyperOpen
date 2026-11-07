@@ -48,8 +48,32 @@ public final class HintTextStyler {
             tv.setText(item.subtitle == null ? "" : item.subtitle);
         }
 
-        int color = isTitle ? item.resolveHintTitleColor(config) : item.resolveHintSubtitleColor(config);
-        float alpha = isTitle ? item.resolveHintTitleAlpha() : item.resolveHintSubtitleAlpha();
+        int color;
+        float alpha;
+        int shadow;
+        int stroke;
+        int weight;
+        float spacing;
+
+        if (item.followGlobalHintStyle) {
+            // 跟随全局配置：颜色按全局模式（默认智能跟随图标底色），质感/版式全取全局
+            color = isTitle ? item.resolveHintTitleColor(config) : item.resolveHintSubtitleColor(config);
+            alpha = isTitle ? 1.0f : 0.82f;
+            shadow = (config != null) ? config.defaultHintTextShadow : 0;
+            stroke = (config != null) ? config.defaultHintTextStroke : 0;
+            weight = (config != null) ? config.defaultHintTextWeight : 3;
+            spacing = (config != null) ? config.defaultHintTextLetterSpacing : 0f;
+        } else {
+            // 单独自定义覆盖
+            color = isTitle ? (item.hintTextColor != 0 ? item.hintTextColor : item.resolveIconPrimaryColor())
+                            : (item.hintTextColorSub != 0 ? item.hintTextColorSub : (item.hintTextColor != 0 ? item.hintTextColor : item.resolveIconPrimaryColor()));
+            alpha = isTitle ? item.resolveHintTitleAlpha() : item.resolveHintSubtitleAlpha();
+            shadow = Math.max(0, item.hintTextShadow);
+            stroke = Math.max(0, item.hintTextStroke);
+            weight = (item.hintTextWeight >= 0) ? item.hintTextWeight : 3;
+            spacing = item.hintTextLetterSpacing;
+        }
+
         int baseAlpha = color >>> 24;
         if (baseAlpha == 0) {
             baseAlpha = 255;
@@ -58,11 +82,6 @@ public final class HintTextStyler {
         tv.setTextColor((color & 0x00FFFFFF) | (finalAlpha << 24));
 
         float density = tv.getResources().getDisplayMetrics().density;
-        int shadow = (item.hintTextShadow >= 0) ? item.hintTextShadow : (config != null ? config.defaultHintTextShadow : 0);
-        int stroke = (item.hintTextStroke >= 0) ? item.hintTextStroke : (config != null ? config.defaultHintTextStroke : 0);
-        int weight = (item.hintTextWeight >= 0) ? item.hintTextWeight : (config != null ? config.defaultHintTextWeight : 3);
-        float spacing = (item.hintTextLetterSpacing != 0f || config == null) ? item.hintTextLetterSpacing : config.defaultHintTextLetterSpacing;
-
         tv.setShadowLayer(shadow / 20f * 4f, 0f, 0f, SHADOW_COLOR);
         if (tv instanceof StrokeTextView) {
             ((StrokeTextView) tv).setStroke(stroke * density, STROKE_COLOR);
