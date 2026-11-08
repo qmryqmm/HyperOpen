@@ -93,6 +93,41 @@ class ShortcutsTreeState(
 
     fun isFolderCollapsed(folderId: String): Boolean = folderId in collapsedFolders
 
+    /** 拖拽期间被自动收起的文件夹 id（松手后恢复其拖拽前的展开状态）。 */
+    var dragCollapsedFolderId: String? = null
+
+    /**
+     * 拖拽文件夹卡片开始时自动收起其子项。
+     * 只收起被拖文件夹本身：其子项都排在它下方，收起不影响它自己的 topY，
+     * 拖拽锚点（dragOriginTopY）保持有效，指针零跳动。
+     */
+    fun autoCollapseDraggedFolder(folderId: String) {
+        if (dragCollapsedFolderId != null) return
+        if (folderId in collapsedFolders) return // 本来就是收起态，无需记录
+        dragCollapsedFolderId = folderId
+        collapsedFolders = collapsedFolders + folderId
+    }
+
+    /** 拖拽结束（松手/取消）恢复被拖文件夹拖拽前的展开状态。 */
+    fun restoreDraggedFolderExpanded() {
+        dragCollapsedFolderId?.let { collapsedFolders = collapsedFolders - it }
+        dragCollapsedFolderId = null
+    }
+
+    /** 切换文件夹子项开关（子项存在父文件夹 payload 内，必须写回父文件夹而非顶层列表）。 */
+    fun toggleChildEnabled(node: ShortcutRowNode, enabled: Boolean) {
+        val fid = node.parentFolderId ?: return
+        val fi = shortcuts.indexOfFirst { it.id == fid }
+        if (fi < 0) return
+        val folder = shortcuts[fi]
+        val children = folder.parseFolderChildren().map { c ->
+            if (c.id == node.item.id) c.copy().apply { this.enabled = enabled } else c
+        }
+        shortcuts[fi] = folder.copy().apply { setFolderChildren(children) }
+        version++
+        onShortcutsChanged()
+    }
+
     fun selectAllOrNone() {
         val allKeys = buildNodes().map { it.key }.toSet()
         if (allKeys.isNotEmpty() && interactionState.selection.containsAll(allKeys)) {

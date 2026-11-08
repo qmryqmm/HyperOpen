@@ -158,6 +158,13 @@ fun ShortcutsManagementPage(
                     onDropOutOfFolder = { draggedKey ->
                         treeState.dropOutOfFolder(draggedKey)
                     },
+                    onDragStart = {
+                        // 拖拽文件夹卡片时自动收起其子项（松手后恢复），减小拖拽块体积
+                        if (node.depth == 0 && node.item.actionType == ShortcutItem.ACTION_FOLDER) {
+                            treeState.autoCollapseDraggedFolder(node.item.id)
+                        }
+                    },
+                    onRestoreFolderExpanded = { treeState.restoreDraggedFolderExpanded() },
                     folderCollapsed = node.depth == 0 && node.item.actionType == ShortcutItem.ACTION_FOLDER &&
                             treeState.isFolderCollapsed(node.item.id),
                     onToggleCollapsed = {
@@ -166,7 +173,13 @@ fun ShortcutsManagementPage(
                         }
                     },
                     onToggle = { enabled ->
-                        if (!state.clickSuppressed()) onShortcutToggle(node.item, enabled)
+                        if (!state.clickSuppressed()) {
+                            if (node.depth == 0) {
+                                onShortcutToggle(node.item, enabled)
+                            } else {
+                                treeState.toggleChildEnabled(node, enabled)
+                            }
+                        }
                     },
                     onClick = {
                         if (!state.clickSuppressed()) {
@@ -240,6 +253,8 @@ private fun ShortcutRowEntry(
     move: (ShortcutRowNode, Int) -> Unit,
     onDropIntoFolder: ((draggedKey: String, targetFolderKey: String) -> Unit)? = null,
     onDropOutOfFolder: ((draggedKey: String) -> Unit)? = null,
+    onDragStart: (() -> Unit)? = null,
+    onRestoreFolderExpanded: () -> Unit = {},
     folderCollapsed: Boolean,
     onToggleCollapsed: () -> Unit,
     onToggle: (Boolean) -> Unit,
@@ -298,7 +313,10 @@ private fun ShortcutRowEntry(
                 move = move,
                 onLongPressNoMove = onLongPress,
                 canDropIntoFolder = true,
+                onDragStart = onDragStart,
                 onDragSettled = {
+                    // 恢复拖拽前被自动收起的文件夹展开状态
+                    onRestoreFolderExpanded()
                     val targetKey = state.targetFolderKey
                     if (targetKey != null) {
                         onDropIntoFolder?.invoke(node.key, targetKey)
