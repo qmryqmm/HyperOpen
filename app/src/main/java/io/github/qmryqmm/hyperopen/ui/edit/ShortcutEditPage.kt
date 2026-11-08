@@ -1929,7 +1929,7 @@ private fun FolderChildrenEditor(
                                 },
                                 onLongPressNoMove = { state.toggleSelection(node.key) },
                             )
-                            .dragRowVisuals(state, node, nodes),
+                            .dragRowVisuals(state, node, nodes, enableSwapAnimation = true),
                     ) {
                         ShortcutCard(
                             item = child,

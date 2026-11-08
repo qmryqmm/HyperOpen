@@ -1,6 +1,10 @@
 package io.github.qmryqmm.hyperopen.ui.components
 
 import android.view.HapticFeedbackConstants
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -15,8 +19,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,7 +40,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChangeIgnoreConsumed
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -85,6 +93,9 @@ class ShortcutListInteractionState {
 
     val rowHeights = mutableStateMapOf<String, Float>()
     val rowBounds = mutableStateMapOf<String, Pair<Float, Float>>() // key -> (topY, height)
+
+    /** 相邻行之间的间距（density 感知像素值，由 shortcutRowGestures 在组合期写入）。 */
+    var rowSpacingPx: Float by mutableFloatStateOf(10f)
     var selection: Set<String> by mutableStateOf(emptySet())
     var targetFolderKey: String? by mutableStateOf(null)
     var isDraggingOutOfFolder: Boolean by mutableStateOf(false)
@@ -97,6 +108,16 @@ class ShortcutListInteractionState {
 
     fun clearSelection() {
         selection = emptySet()
+    }
+
+    /** 按槽位序号直接累加物理 Y（与 getNodeTopY 同规则：行高 + 行距）。 */
+    fun topYOfSlot(slot: Int, nodes: List<ShortcutRowNode>): Float {
+        var acc = 0f
+        val end = slot.coerceIn(0, nodes.size)
+        for (i in 0 until end) {
+            acc += (rowHeights[nodes[i].key] ?: 180f) + rowSpacingPx
+        }
+        return acc
     }
 
     /**
@@ -117,7 +138,7 @@ class ShortcutListInteractionState {
         var acc = 0f
         for (n in nodes) {
             if (n.key == targetKey) return acc
-            acc += (rowHeights[n.key] ?: 180f) + 10f
+            acc += (rowHeights[n.key] ?: 180f) + rowSpacingPx
         }
         return acc
     }
@@ -250,8 +271,11 @@ fun Modifier.shortcutRowGestures(
     canDropIntoFolder: Boolean = false,
     onDragStart: (() -> Unit)? = null,
     onDragSettled: () -> Unit = {},
+    rowSpacing: Dp = 10.dp,
 ): Modifier {
     val view = LocalView.current
+    val density = LocalDensity.current
+    state.rowSpacingPx = with(density) { rowSpacing.toPx() }
     return this.pointerInput(nodeKey) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
@@ -327,12 +351,16 @@ fun Modifier.shortcutRowGestures(
     }
 }
 
-/** 拖拽中的行视觉反馈：整块（文件夹+子项）随手势平移，主行轻微放大并抬起，完美贴合圆角无黑边。 */
+/** 拖拽中的行视觉反馈：整块（文件夹+子项）随手势平移，主行轻微放大并抬起，完美贴合圆角无黑边。
+ *  `enableSwapAnimation` = 非拖拽行的槽位补位动画（等价 LazyColumn animateItem，
+ *  供无 LazyItemScope 的普通 Column 列表使用，与快捷项目列表的交换动画观感对齐）。
+ */
 @Composable
 fun Modifier.dragRowVisuals(
     state: ShortcutListInteractionState,
     node: ShortcutRowNode,
     nodes: List<ShortcutRowNode>,
+    enableSwapAnimation: Boolean = false,
 ): Modifier {
     val dragKey = state.draggingKey
     val draggedFolderId = if (dragKey != null) {
@@ -349,10 +377,44 @@ fun Modifier.dragRowVisuals(
         targetAnchorTopY - anchorSlotY
     } else 0f
 
+    // ── 槽位补位动画（无闪烁）：槽位变化当帧在组合期直接写入偏移（与布局同步渲染在旧位置），
+    //    随后弹簧动画从 delta 滑回 0。绝不能在 LaunchedEffect 里才 snapTo——那会晚一帧，
+    //    卡片先以偏移 0 渲染在新槽位上（肉眼可见的闪烁）再跳回旧位置。 ──
+    val slotIndex = if (enableSwapAnimation) nodes.indexOfFirst { it.key == node.key } else -1
+    val swapOffset = remember(node.key) { mutableFloatStateOf(0f) }
+    val slotMemo = remember(node.key) { intArrayOf(-1) }
+    val animVersion = remember(node.key) { mutableIntStateOf(0) }
+
+    val prevSlot = slotMemo[0]
+    if (slotIndex >= 0 && prevSlot != slotIndex) {
+        slotMemo[0] = slotIndex
+        if (prevSlot >= 0 && state.draggingKey != node.key) {
+            // 非拖拽主行的槽位变化：立即叠加补位偏移（动画进行中再次交换则从剩余偏移继续）
+            val delta = state.topYOfSlot(prevSlot, nodes) - state.topYOfSlot(slotIndex, nodes)
+            if (abs(delta) > 0.5f) {
+                swapOffset.floatValue += delta
+                animVersion.intValue++
+            }
+        }
+    }
+
+    LaunchedEffect(animVersion.intValue) {
+        if (animVersion.intValue == 0) return@LaunchedEffect
+        val start = swapOffset.floatValue
+        if (abs(start) < 0.5f) return@LaunchedEffect
+        animate(
+            initialValue = start,
+            targetValue = 0f,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+        ) { v, _ -> swapOffset.floatValue = v }
+    }
+
     return this
         .graphicsLayer {
             if (inDragBlock) {
                 translationY = visualTranslationY
+            } else if (swapOffset.floatValue != 0f) {
+                translationY = swapOffset.floatValue
             }
             if (isMain) {
                 scaleX = 1.02f
