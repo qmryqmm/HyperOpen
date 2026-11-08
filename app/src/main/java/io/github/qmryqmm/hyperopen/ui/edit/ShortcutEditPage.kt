@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -93,6 +95,7 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.icon.extended.Edit
 import top.yukonga.miuix.kmp.icon.extended.Photos
 import top.yukonga.miuix.kmp.icon.extended.Scan
 import top.yukonga.miuix.kmp.icon.extended.Tune
@@ -172,6 +175,25 @@ private fun nextExtraType(t: String): String = when (t) {
     else -> ActivityLaunchSpec.TYPE_STRING
 }
 
+/** 预览卡片上的「铅笔」编辑角标：主色圆底 + 白色铅笔，提示该区域可点开浮窗编辑 */
+@Composable
+private fun EditBadge(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(18.dp)
+            .clip(CircleShape)
+            .background(MiuixTheme.colorScheme.primary),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = MiuixIcons.Edit,
+            contentDescription = "编辑",
+            tint = Color.White,
+            modifier = Modifier.size(11.dp),
+        )
+    }
+}
+
 @Composable
 fun ShortcutEditPage(
     contentPadding: PaddingValues,
@@ -192,8 +214,7 @@ fun ShortcutEditPage(
     val collapsed = remember {
         androidx.compose.runtime.mutableStateMapOf<String, Boolean>().apply {
             listOf(
-                "icon_settings", "single_app_icon_crop", "single_miuix_pad",
-                "basic_info", "hint_text", "action_type", "target_user", "payload",
+                "basic_info", "action_type", "target_user", "payload",
             ).forEach { k ->
                 if (uiPrefs.getBoolean("edit_section_collapsed_$k", false)) put(k, true)
             }
@@ -334,6 +355,8 @@ fun ShortcutEditPage(
     var showMiuixIconPicker by remember { mutableStateOf(false) }
     var showRemixIconPicker by remember { mutableStateOf(false) }
     var showUnsavedDialog by remember { mutableStateOf(false) }
+    var showIconDialog by remember { mutableStateOf(false) }
+    var showTextDialog by remember { mutableStateOf(false) }
 
     // 自定义矢量图标底垫颜色：十六进制文本框（与 RGB 分量滑条双向同步）
     var padHexInput by remember {
@@ -516,40 +539,55 @@ fun ShortcutEditPage(
                         }
 
                         Box(
-                            modifier = Modifier
-                                .size(64.dp)
-                                .clip(CircleShape)
-                                .background(previewPadBg),
-                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.clickable { showIconDialog = true },
+                            contentAlignment = Alignment.TopEnd,
                         ) {
-                            if (vectorIcon != null) {
-                                Icon(
-                                    imageVector = vectorIcon,
-                                    contentDescription = title,
-                                    tint = previewIconTint,
-                                    modifier = Modifier.size(if (glyphPadEnabled) 32.dp else 38.dp),
-                                )
-                            } else if (appDrawablePainter != null) {
-                                Image(
-                                    painter = appDrawablePainter,
-                                    contentDescription = title,
-                                    modifier = Modifier.size(52.dp),
-                                )
+                            Box(
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .clip(CircleShape)
+                                    .background(previewPadBg),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (vectorIcon != null) {
+                                    Icon(
+                                        imageVector = vectorIcon,
+                                        contentDescription = title,
+                                        tint = previewIconTint,
+                                        modifier = Modifier.size(if (glyphPadEnabled) 32.dp else 38.dp),
+                                    )
+                                } else if (appDrawablePainter != null) {
+                                    Image(
+                                        painter = appDrawablePainter,
+                                        contentDescription = title,
+                                        modifier = Modifier.size(52.dp),
+                                    )
+                                }
                             }
+                            EditBadge()
                         }
                         Spacer(Modifier.height(10.dp))
-                        Text(
-                            text = title.ifBlank { "快捷方式名称" },
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MiuixTheme.colorScheme.onSurface,
-                        )
-                        if (subtitle.isNotBlank()) {
-                            Text(
-                                text = subtitle,
-                                fontSize = 13.sp,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            )
+                        Row(
+                            modifier = Modifier.clickable { showTextDialog = true },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = title.ifBlank { "快捷方式名称" },
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MiuixTheme.colorScheme.onSurface,
+                                )
+                                if (subtitle.isNotBlank()) {
+                                    Text(
+                                        text = subtitle,
+                                        fontSize = 13.sp,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            EditBadge()
                         }
                         Spacer(Modifier.height(14.dp))
                         TextButton(
@@ -578,301 +616,6 @@ fun ShortcutEditPage(
             }
         }
 
-        // ── 图标自定义配置 ──
-        item(key = "icon_settings_title") {
-            CollapsibleSectionTitle("图标设置", isOpen("icon_settings")) { toggle("icon_settings") }
-        }
-        if (isOpen("icon_settings")) {
-        item(key = "icon_settings_card") {
-            Card(
-                modifier = Modifier
-                    .padding(horizontal = 12.dp)
-                    .fillMaxWidth(),
-            ) {
-                ArrowPreference(
-                    title = "上传本地自定义图片",
-                    summary = if (IconGlyphFactory.isCustomImage(iconPackage)) "已使用本地上传的自定义图片" else "从相册或文件管理器选择本地图片作为图标",
-                    startAction = {
-                        Icon(
-                            imageVector = MiuixIcons.Add,
-                            contentDescription = null,
-                            tint = MiuixTheme.colorScheme.primary,
-                            modifier = Modifier.padding(end = 8.dp),
-                        )
-                    },
-                    onClick = { imagePickerLauncher.launch("image/*") },
-                )
-                ArrowPreference(
-                    title = "选择系统/应用图标",
-                    summary = when {
-                        IconGlyphFactory.isCustomImage(iconPackage) -> "未选择"
-                        iconPackage.isNotBlank() -> "当前选择：$iconPackage"
-                        else -> "未选择"
-                    },
-                    startAction = {
-                        Icon(
-                            imageVector = MiuixIcons.Photos,
-                            contentDescription = null,
-                            tint = MiuixTheme.colorScheme.primary,
-                            modifier = Modifier.padding(end = 8.dp),
-                        )
-                    },
-                    onClick = { showAppPicker = true },
-                )
-                ArrowPreference(
-                    title = "选择 Remix Icon 快捷图标(推荐)",
-                    summary = if (iconPackage.isBlank() && iconGlyph.isNotBlank() && RemixIconRegistry.isRemixIcon(iconGlyph)) {
-                        val meta = RemixIconRegistry.findMeta(iconGlyph)
-                        "当前选择：${meta?.desc ?: iconGlyph} (${meta?.rawName ?: iconGlyph})"
-                    } else "未选择",
-                    startAction = {
-                        Icon(
-                            imageVector = MiuixIcons.Tune,
-                            contentDescription = null,
-                            tint = MiuixTheme.colorScheme.primary,
-                            modifier = Modifier.padding(end = 8.dp),
-                        )
-                    },
-                    onClick = { showRemixIconPicker = true },
-                )
-                ArrowPreference(
-                    title = "选择 Miuix 矢量图标",
-                    summary = if (iconPackage.isBlank() && iconGlyph.isNotBlank() && !RemixIconRegistry.isRemixIcon(iconGlyph) && vectorIcon != null) "当前选择：$iconGlyph" else "未选择",
-                    startAction = {
-                        Icon(
-                            imageVector = MiuixIcons.Scan,
-                            contentDescription = null,
-                            tint = MiuixTheme.colorScheme.primary,
-                            modifier = Modifier.padding(end = 8.dp),
-                        )
-                    },
-                    onClick = { showMiuixIconPicker = true },
-                )
-                if (iconPackage.isNotBlank() || iconGlyph.isNotBlank()) {
-                    ArrowPreference(
-                        title = "清除自定义图标",
-                        summary = "恢复跟随启动应用或默认符号",
-                        onClick = {
-                            iconPackage = ""
-                            iconGlyph = ""
-                        },
-                    )
-                }
-            }
-        }
-        }
-
-        // ── 仅当快捷方式的图标为应用图标时，显示独享的应用图标形状方案 ──
-        if (isAppIcon) {
-            item(key = "single_app_icon_crop_title") {
-                CollapsibleSectionTitle("应用图标形状方案", isOpen("single_app_icon_crop")) { toggle("single_app_icon_crop") }
-            }
-            if (isOpen("single_app_icon_crop")) {
-            item(key = "single_app_icon_crop_card") {
-                Card(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .fillMaxWidth(),
-                ) {
-                    RadioButtonPreference(
-                        title = "自适应外扩满铺",
-                        summary = "分离前景与背景图层并外扩满铺正圆，彻底消除直角白边",
-                        selected = appIconCropMode == HyperOpenConfig.CROP_ADAPTIVE_EXPAND,
-                        onClick = { appIconCropMode = HyperOpenConfig.CROP_ADAPTIVE_EXPAND },
-                    )
-                    RadioButtonPreference(
-                        title = "标准抗锯齿圆形裁切",
-                        summary = "对完整渲染图标直接进行正圆形 BitmapShader 裁切",
-                        selected = appIconCropMode == HyperOpenConfig.CROP_BITMAP_CIRCLE,
-                        onClick = { appIconCropMode = HyperOpenConfig.CROP_BITMAP_CIRCLE },
-                    )
-                }
-            }
-            }
-        }
-
-        // ── 仅当选择 Miuix 或 Remix 矢量图标时，展示独享的底垫与色彩配置 ──
-        if (vectorIcon != null && iconPackage.isBlank()) {
-            item(key = "single_miuix_pad_title") {
-                CollapsibleSectionTitle("矢量图标底垫与色彩", isOpen("single_miuix_pad")) { toggle("single_miuix_pad") }
-            }
-            if (isOpen("single_miuix_pad")) {
-            item(key = "single_miuix_pad_card") {
-                Card(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .fillMaxWidth(),
-                ) {
-                    SwitchPreference(
-                        title = "启用此图标圆形底垫",
-                        summary = "为当前矢量图标添加独立圆形底板",
-                        checked = glyphPadEnabled,
-                        onCheckedChange = { glyphPadEnabled = it },
-                    )
-
-                    if (glyphPadEnabled) {
-                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-                        Text(
-                            text = "底垫渲染质感",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MiuixTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
-                        )
-
-                        RadioButtonPreference(
-                            title = "磨砂微透底板",
-                            summary = "65% 半透明高光底板，颜色与背景毛玻璃相互交融",
-                            selected = glyphPadMode == HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT,
-                            onClick = { glyphPadMode = HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT },
-                        )
-                        RadioButtonPreference(
-                            title = "饱满纯色底板",
-                            summary = "100% 不透明纯色实心圆，上方呈现白色高对比矢量",
-                            selected = glyphPadMode == HyperOpenConfig.GLYPH_PAD_MODE_SOLID,
-                            onClick = { glyphPadMode = HyperOpenConfig.GLYPH_PAD_MODE_SOLID },
-                        )
-                        RadioButtonPreference(
-                            title = "反色渲染模式",
-                            summary = "微透亮白底板 + 彩色矢量图标",
-                            selected = glyphPadMode == HyperOpenConfig.GLYPH_PAD_MODE_INVERTED,
-                            onClick = { glyphPadMode = HyperOpenConfig.GLYPH_PAD_MODE_INVERTED },
-                        )
-
-                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-                        Text(
-                            text = "快捷品牌色预设",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MiuixTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
-                        )
-
-                        val brandColors = listOf(
-                            "微信绿" to 0xFF07C160.toInt(),
-                            "支付宝蓝" to 0xFF1677FF.toInt(),
-                            "小米橙" to 0xFFFF6900.toInt(),
-                            "网易红" to 0xFFE60026.toInt(),
-                            "极客紫" to 0xFF7928CA.toInt(),
-                            "暗夜黑" to 0xFF1F2329.toInt(),
-                            "科技蓝" to 0xFF2A82E4.toInt(),
-                        )
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 6.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            brandColors.forEach { (name, colorValue) ->
-                                val isSelectedColor = glyphPadColor == colorValue
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(colorValue))
-                                        .clickable {
-                                            glyphPadColor = colorValue
-                                            padHexInput = String.format("#%06X", colorValue and 0xFFFFFF)
-                                        },
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    if (isSelectedColor) {
-                                        Text("✓", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    }
-                                }
-                            }
-                        }
-
-                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-                        Text(
-                            text = "自定义底垫颜色",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MiuixTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
-                        )
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(glyphPadColor)),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                if (brandColors.none { it.second == glyphPadColor }) {
-                                    Text("✦", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                }
-                            }
-                            TextField(
-                                value = padHexInput,
-                                onValueChange = { s ->
-                                    padHexInput = s
-                                    parseHexColor(s)?.let { glyphPadColor = it }
-                                },
-                                label = "十六进制颜色 (#RRGGBB)",
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-
-                        SliderPreference(
-                            title = "红色分量",
-                            summary = "自定义底垫颜色的红色通道 (R)",
-                            valueText = "${(glyphPadColor shr 16) and 0xFF}",
-                            value = ((glyphPadColor shr 16) and 0xFF).toFloat(),
-                            valueRange = 0f..255f,
-                            onValueChange = { r ->
-                                glyphPadColor = composePadColor(
-                                    r.toInt(), (glyphPadColor shr 8) and 0xFF, glyphPadColor and 0xFF
-                                )
-                                syncPadHexFromColor()
-                            },
-                        )
-                        SliderPreference(
-                            title = "绿色分量",
-                            summary = "自定义底垫颜色的绿色通道 (G)",
-                            valueText = "${(glyphPadColor shr 8) and 0xFF}",
-                            value = ((glyphPadColor shr 8) and 0xFF).toFloat(),
-                            valueRange = 0f..255f,
-                            onValueChange = { g ->
-                                glyphPadColor = composePadColor(
-                                    (glyphPadColor shr 16) and 0xFF, g.toInt(), glyphPadColor and 0xFF
-                                )
-                                syncPadHexFromColor()
-                            },
-                        )
-                        SliderPreference(
-                            title = "蓝色分量",
-                            summary = "自定义底垫颜色的蓝色通道 (B)",
-                            valueText = "${glyphPadColor and 0xFF}",
-                            value = (glyphPadColor and 0xFF).toFloat(),
-                            valueRange = 0f..255f,
-                            onValueChange = { b ->
-                                glyphPadColor = composePadColor(
-                                    (glyphPadColor shr 16) and 0xFF, (glyphPadColor shr 8) and 0xFF, b.toInt()
-                                )
-                                syncPadHexFromColor()
-                            },
-                        )
-
-                        Spacer(Modifier.height(10.dp))
-                    }
-                }
-            }
-            }
-        }
-
         // ── 基础信息 ──
         item(key = "basic_info_title") {
             CollapsibleSectionTitle("基础参数", isOpen("basic_info")) { toggle("basic_info") }
@@ -884,377 +627,11 @@ fun ShortcutEditPage(
                     .padding(horizontal = 12.dp)
                     .fillMaxWidth(),
             ) {
-                Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    TextField(
-                        value = title,
-                        onValueChange = { title = it },
-                        label = "快捷方式标题",
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    TextField(
-                        value = subtitle,
-                        onValueChange = { subtitle = it },
-                        label = "副标题 / 功能描述（可选）",
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                 SwitchPreference(
                     title = "在指纹快捷面板中启用",
                     checked = enabled,
                     onCheckedChange = { enabled = it },
                 )
-            }
-        }
-        }
-
-        // ── 提示文字（顶部胶囊选中提示的颜色/透明度/文案/质感）──
-        item(key = "hint_text_title") {
-            CollapsibleSectionTitle("提示文字", isOpen("hint_text")) { toggle("hint_text") }
-        }
-        if (isOpen("hint_text")) {
-        item(key = "hint_text_card") {
-            Card(
-                modifier = Modifier
-                    .padding(horizontal = 12.dp)
-                    .fillMaxWidth(),
-            ) {
-                // 实时预览胶囊：颜色/透明度/字重/字距/投影按与真机一致的回退链解析
-                val previewDensity = androidx.compose.ui.platform.LocalDensity.current.density
-                val globalCfg = remember(ctx) { HyperOpenConfig.loadFromApp(ctx) }
-
-                val previewTitleBase = Color(
-                    if (followGlobalHintStyle) initialItem.resolveHintTitleColor(globalCfg)
-                    else if (hintTextColor != 0) hintTextColor else initialItem.resolveIconPrimaryColor()
-                )
-                val previewTitleAlpha = if (followGlobalHintStyle) 1.0f else hintTextAlpha.coerceIn(0.05f, 1f)
-                val previewSubAlphaEffective = previewTitleAlpha * 0.82f
-                val previewSubBase = Color(
-                    if (followGlobalHintStyle) initialItem.resolveHintSubtitleColor(globalCfg)
-                    else if (hintTextColorSub != 0) hintTextColorSub else (if (hintTextColor != 0) hintTextColor else initialItem.resolveIconPrimaryColor())
-                )
-                val previewSubAlpha =
-                    if (followGlobalHintStyle) 0.82f
-                    else if (hintTextAlphaSub >= 0f) hintTextAlphaSub.coerceIn(0.05f, 1f) else previewSubAlphaEffective
-
-                val effectiveShadow = if (followGlobalHintStyle) globalCfg.defaultHintTextShadow.toFloat() else hintTextShadow
-                val previewShadow = if (effectiveShadow >= 0.5f) {
-                    Shadow(
-                        color = Color(0x99000000),
-                        blurRadius = effectiveShadow / 20f * 4f * previewDensity,
-                    )
-                } else null
-
-                val effectiveWeight = if (followGlobalHintStyle) globalCfg.defaultHintTextWeight else hintTextWeight
-                val previewWeight = when (effectiveWeight) {
-                    0 -> FontWeight.Light
-                    2 -> FontWeight.Medium
-                    3 -> FontWeight.Bold
-                    else -> FontWeight.Normal
-                }
-
-                val effectiveSpacing = if (followGlobalHintStyle) globalCfg.defaultHintTextLetterSpacing else hintTextLetterSpacing
-                val effectiveShowTitle = if (followGlobalHintStyle) globalCfg.defaultShowHintTitle else showHintTitle
-                val effectiveShowSubtitle = if (followGlobalHintStyle) globalCfg.defaultShowHintSubtitle else showHintSubtitle
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(Color(0x33FFFFFF))
-                            .padding(horizontal = 18.dp, vertical = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        if (effectiveShowTitle) {
-                            Text(
-                                text = title.trim().ifBlank { "快捷方式" },
-                                fontSize = 15.sp,
-                                fontWeight = previewWeight,
-                                letterSpacing = (15f * effectiveSpacing * 0.05f).sp,
-                                color = previewTitleBase.copy(alpha = previewTitleBase.alpha * previewTitleAlpha),
-                                style = TextStyle(shadow = previewShadow),
-                            )
-                        }
-                        if (effectiveShowSubtitle) {
-                            Text(
-                                text = subtitle.trim().ifEmpty { "移至目标图标后松手直接打开" },
-                                fontSize = 11.sp,
-                                letterSpacing = (11f * effectiveSpacing * 0.05f).sp,
-                                color = previewSubBase.copy(alpha = previewSubBase.alpha * previewSubAlpha),
-                                style = TextStyle(shadow = previewShadow),
-                            )
-                        }
-                    }
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-                SwitchPreference(
-                    title = "提示文字样式跟随全局配置",
-                    summary = "开启后文字显隐、描边、投影柔光、字重、字间距与颜色均统一跟随全局设置，避免重复调整",
-                    checked = followGlobalHintStyle,
-                    onCheckedChange = { followGlobalHintStyle = it },
-                )
-
-                if (!followGlobalHintStyle) {
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-                    Text(
-                        text = "文字内容",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MiuixTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
-                    )
-                    SwitchPreference(
-                        title = "显示提示标题",
-                        summary = "选中图标时胶囊内显示主标题（快捷方式标题）",
-                        checked = showHintTitle,
-                        onCheckedChange = { showHintTitle = it },
-                    )
-                    SwitchPreference(
-                        title = "显示提示副标题",
-                        summary = "选中图标时胶囊内显示副标题描述",
-                        checked = showHintSubtitle,
-                        onCheckedChange = { showHintSubtitle = it },
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-                    Text(
-                        text = "颜色与透明度",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MiuixTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
-                    )
-                    SwitchPreference(
-                        title = "标题颜色跟随图标底色（推荐）",
-                        summary = "开启 = 智能提取该图标底垫色或主题色，关闭可自定义单项覆盖色",
-                        checked = hintTextColor == 0,
-                        onCheckedChange = { follow ->
-                            hintTextColor = if (follow) 0
-                            else parseHexColor(hintHexInput) ?: (initialItem.tintColor or 0xFF000000.toInt())
-                        },
-                    )
-                    if (hintTextColor != 0) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(hintTextColor)),
-                            )
-                            TextField(
-                                value = hintHexInput,
-                                onValueChange = { s ->
-                                    hintHexInput = s
-                                    parseHexColor(s)?.let { hintTextColor = it }
-                                },
-                                label = "标题颜色 十六进制 (#RRGGBB)",
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                        SliderPreference(
-                            title = "标题红色分量",
-                            summary = "提示标题颜色的红色通道 (R)",
-                            valueText = "${(hintTextColor shr 16) and 0xFF}",
-                            value = ((hintTextColor shr 16) and 0xFF).toFloat(),
-                            valueRange = 0f..255f,
-                            onValueChange = { r ->
-                                hintTextColor = composePadColor(r.toInt(), (hintTextColor shr 8) and 0xFF, hintTextColor and 0xFF)
-                                hintHexInput = String.format("#%06X", hintTextColor and 0xFFFFFF)
-                            },
-                        )
-                        SliderPreference(
-                            title = "绿色分量",
-                            summary = "提示标题颜色的绿色通道 (G)",
-                            valueText = "${(hintTextColor shr 8) and 0xFF}",
-                            value = ((hintTextColor shr 8) and 0xFF).toFloat(),
-                            valueRange = 0f..255f,
-                            onValueChange = { g ->
-                                hintTextColor = composePadColor((hintTextColor shr 16) and 0xFF, g.toInt(), hintTextColor and 0xFF)
-                                hintHexInput = String.format("#%06X", hintTextColor and 0xFFFFFF)
-                            },
-                        )
-                        SliderPreference(
-                            title = "蓝色分量",
-                            summary = "提示标题颜色的蓝色通道 (B)",
-                            valueText = "${hintTextColor and 0xFF}",
-                            value = (hintTextColor and 0xFF).toFloat(),
-                            valueRange = 0f..255f,
-                            onValueChange = { b ->
-                                hintTextColor = composePadColor((hintTextColor shr 16) and 0xFF, (hintTextColor shr 8) and 0xFF, b.toInt())
-                                hintHexInput = String.format("#%06X", hintTextColor and 0xFFFFFF)
-                            },
-                        )
-                    }
-                    SliderPreference(
-                        title = "标题透明度",
-                        summary = "提示标题不透明度 5%~100%",
-                        valueText = "${Math.round(hintTextAlpha.coerceIn(0.05f, 1f) * 100)}%",
-                        value = hintTextAlpha.coerceIn(0.05f, 1f),
-                        valueRange = 0.05f..1f,
-                        onValueChange = { hintTextAlpha = (Math.round(it * 20f) / 20f).coerceIn(0.05f, 1f) },
-                    )
-                    SwitchPreference(
-                        title = "副标题颜色跟随标题",
-                        summary = "开启 = 与标题同色；关闭可自定义副标题独立颜色",
-                        checked = hintTextColorSub == 0,
-                        onCheckedChange = { follow ->
-                            hintTextColorSub = if (follow) 0
-                            else parseHexColor(hintHexSubInput)
-                                ?: (if (hintTextColor != 0) hintTextColor else initialItem.tintColor)
-                        },
-                    )
-                    if (hintTextColorSub != 0) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(hintTextColorSub)),
-                            )
-                            TextField(
-                                value = hintHexSubInput,
-                                onValueChange = { s ->
-                                    hintHexSubInput = s
-                                    parseHexColor(s)?.let { hintTextColorSub = it }
-                                },
-                                label = "副标题颜色 十六进制 (#RRGGBB)",
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                        SliderPreference(
-                            title = "副标题红色分量",
-                            summary = "提示副标题颜色的红色通道 (R)",
-                            valueText = "${(hintTextColorSub shr 16) and 0xFF}",
-                            value = ((hintTextColorSub shr 16) and 0xFF).toFloat(),
-                            valueRange = 0f..255f,
-                            onValueChange = { r ->
-                                hintTextColorSub = composePadColor(r.toInt(), (hintTextColorSub shr 8) and 0xFF, hintTextColorSub and 0xFF)
-                                hintHexSubInput = String.format("#%06X", hintTextColorSub and 0xFFFFFF)
-                            },
-                        )
-                        SliderPreference(
-                            title = "副标题绿色分量",
-                            summary = "提示副标题颜色的绿色通道 (G)",
-                            valueText = "${(hintTextColorSub shr 8) and 0xFF}",
-                            value = ((hintTextColorSub shr 8) and 0xFF).toFloat(),
-                            valueRange = 0f..255f,
-                            onValueChange = { g ->
-                                hintTextColorSub = composePadColor((hintTextColorSub shr 16) and 0xFF, g.toInt(), hintTextColorSub and 0xFF)
-                                hintHexSubInput = String.format("#%06X", hintTextColorSub and 0xFFFFFF)
-                            },
-                        )
-                        SliderPreference(
-                            title = "副标题蓝色分量",
-                            summary = "提示副标题颜色的蓝色通道 (B)",
-                            valueText = "${hintTextColorSub and 0xFF}",
-                            value = (hintTextColorSub and 0xFF).toFloat(),
-                            valueRange = 0f..255f,
-                            onValueChange = { b ->
-                                hintTextColorSub = composePadColor((hintTextColorSub shr 16) and 0xFF, (hintTextColorSub shr 8) and 0xFF, b.toInt())
-                                hintHexSubInput = String.format("#%06X", hintTextColorSub and 0xFFFFFF)
-                            },
-                        )
-                    }
-                    SwitchPreference(
-                        title = "副标题透明度跟随标题",
-                        summary = "开启 = 标题透明度 ×82%，关闭可独立调节",
-                        checked = hintTextAlphaSub < 0f,
-                        onCheckedChange = { follow ->
-                            hintTextAlphaSub = if (follow) -1f else previewSubAlphaEffective
-                        },
-                    )
-                    if (hintTextAlphaSub >= 0f) {
-                        SliderPreference(
-                            title = "副标题透明度",
-                            summary = "提示副标题不透明度 5%~100%",
-                            valueText = "${Math.round(hintTextAlphaSub.coerceIn(0.05f, 1f) * 100)}%",
-                            value = hintTextAlphaSub.coerceIn(0.05f, 1f),
-                            valueRange = 0.05f..1f,
-                            onValueChange = { hintTextAlphaSub = (Math.round(it * 20f) / 20f).coerceIn(0.05f, 1f) },
-                        )
-                    }
-
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-                    Text(
-                        text = "质感与排版",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MiuixTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
-                    )
-                    SliderPreference(
-                        title = "文字描边",
-                        summary = "深色对比描边，任意壁纸下都清晰；1dp 步进",
-                        valueText = if (Math.round(hintTextStroke) == 0) "关闭" else "${Math.round(hintTextStroke)}dp",
-                        value = Math.round(hintTextStroke).toFloat(),
-                        valueRange = 0f..4f,
-                        onValueChange = { hintTextStroke = Math.round(it).coerceIn(0, 4).toFloat() },
-                    )
-                    SliderPreference(
-                        title = "文字阴影",
-                        summary = "黑色柔光投影，弱壁纸背景下提升可读性；半径 = 强度/20×4px",
-                        valueText = if (hintTextShadow < 0.5f) "关闭" else "${hintTextShadow.toInt()}",
-                        value = hintTextShadow,
-                        valueRange = 0f..100f,
-                        onValueChange = { hintTextShadow = (Math.round(it / 5f) * 5f).coerceIn(0f, 100f) },
-                    )
-                    SliderPreference(
-                        title = "标题字重",
-                        summary = when (hintTextWeight) {
-                            0 -> "细体 (Light)"
-                            1 -> "常规 (Regular)"
-                            2 -> "中粗 (Medium)"
-                            else -> "粗体 (Bold)"
-                        },
-                        valueText = when (hintTextWeight) {
-                            0 -> "Light"
-                            1 -> "Regular"
-                            2 -> "Medium"
-                            else -> "Bold"
-                        },
-                        value = hintTextWeight.toFloat(),
-                        valueRange = 0f..3f,
-                        onValueChange = { hintTextWeight = it.toInt() },
-                    )
-                    SliderPreference(
-                        title = "字间距",
-                        summary = "提示文字字间距 -2~+6（×0.05em），字母文案调宽更精致",
-                        valueText = String.format("%+.1f em", hintTextLetterSpacing),
-                        value = hintTextLetterSpacing,
-                        valueRange = -2f..6f,
-                        onValueChange = { hintTextLetterSpacing = (Math.round(it * 2f) / 2f).coerceIn(-2f, 6f) },
-                    )
-                }
-
-                Spacer(Modifier.height(10.dp))
             }
         }
         }
@@ -1755,6 +1132,773 @@ fun ShortcutEditPage(
                                 // 保存并退出：共用 buildSavedItem()（含 userId/shellUseRoot/ACTIVITY payload/URI 标记同步）
                                 onSave(buildSavedItem(), true)
                             },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // ── 图标设置浮窗（点预览卡片图标打开）──
+    if (showIconDialog) {
+        Dialog(
+            onDismissRequest = { showIconDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth(0.92f)
+                    .imePadding()
+                    .padding(vertical = 16.dp),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                ) {
+                    Text(
+                        text = "图标设置",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 480.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        // ── 实时预览圆 ──
+                        item(key = "icon_dialog_preview") {
+                            val isVectorSelected = vectorIcon != null && iconPackage.isBlank()
+                            val previewPadBg = if (isVectorSelected && glyphPadEnabled) {
+                                when (glyphPadMode) {
+                                    HyperOpenConfig.GLYPH_PAD_MODE_SOLID -> Color(glyphPadColor)
+                                    HyperOpenConfig.GLYPH_PAD_MODE_INVERTED -> Color(0x30FFFFFF)
+                                    else -> Color(glyphPadColor).copy(alpha = 0.65f)
+                                }
+                            } else {
+                                MiuixTheme.colorScheme.surfaceVariant
+                            }
+                            val previewIconTint = if (isVectorSelected && glyphPadEnabled) {
+                                if (glyphPadMode == HyperOpenConfig.GLYPH_PAD_MODE_INVERTED) Color(glyphPadColor)
+                                else Color.White
+                            } else {
+                                MiuixTheme.colorScheme.primary
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .clip(CircleShape)
+                                        .background(previewPadBg),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (vectorIcon != null) {
+                                        Icon(
+                                            imageVector = vectorIcon,
+                                            contentDescription = title,
+                                            tint = previewIconTint,
+                                            modifier = Modifier.size(if (glyphPadEnabled) 32.dp else 38.dp),
+                                        )
+                                    } else if (appDrawablePainter != null) {
+                                        Image(
+                                            painter = appDrawablePainter,
+                                            contentDescription = title,
+                                            modifier = Modifier.size(52.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── 图标来源 ──
+                        item(key = "icon_dialog_source") {
+                            ArrowPreference(
+                                title = "上传本地自定义图片",
+                                summary = if (IconGlyphFactory.isCustomImage(iconPackage)) "已使用本地上传的自定义图片" else "从相册或文件管理器选择本地图片作为图标",
+                                startAction = {
+                                    Icon(
+                                        imageVector = MiuixIcons.Add,
+                                        contentDescription = null,
+                                        tint = MiuixTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(end = 8.dp),
+                                    )
+                                },
+                                onClick = { imagePickerLauncher.launch("image/*") },
+                            )
+                            ArrowPreference(
+                                title = "选择系统/应用图标",
+                                summary = when {
+                                    IconGlyphFactory.isCustomImage(iconPackage) -> "未选择"
+                                    iconPackage.isNotBlank() -> "当前选择：$iconPackage"
+                                    else -> "未选择"
+                                },
+                                startAction = {
+                                    Icon(
+                                        imageVector = MiuixIcons.Photos,
+                                        contentDescription = null,
+                                        tint = MiuixTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(end = 8.dp),
+                                    )
+                                },
+                                onClick = { showAppPicker = true },
+                            )
+                            ArrowPreference(
+                                title = "选择 Remix Icon 快捷图标(推荐)",
+                                summary = if (iconPackage.isBlank() && iconGlyph.isNotBlank() && RemixIconRegistry.isRemixIcon(iconGlyph)) {
+                                    val meta = RemixIconRegistry.findMeta(iconGlyph)
+                                    "当前选择：${meta?.desc ?: iconGlyph} (${meta?.rawName ?: iconGlyph})"
+                                } else "未选择",
+                                startAction = {
+                                    Icon(
+                                        imageVector = MiuixIcons.Tune,
+                                        contentDescription = null,
+                                        tint = MiuixTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(end = 8.dp),
+                                    )
+                                },
+                                onClick = { showRemixIconPicker = true },
+                            )
+                            ArrowPreference(
+                                title = "选择 Miuix 矢量图标",
+                                summary = if (iconPackage.isBlank() && iconGlyph.isNotBlank() && !RemixIconRegistry.isRemixIcon(iconGlyph) && vectorIcon != null) "当前选择：$iconGlyph" else "未选择",
+                                startAction = {
+                                    Icon(
+                                        imageVector = MiuixIcons.Scan,
+                                        contentDescription = null,
+                                        tint = MiuixTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(end = 8.dp),
+                                    )
+                                },
+                                onClick = { showMiuixIconPicker = true },
+                            )
+                            if (iconPackage.isNotBlank() || iconGlyph.isNotBlank()) {
+                                ArrowPreference(
+                                    title = "清除自定义图标",
+                                    summary = "恢复跟随启动应用或默认符号",
+                                    onClick = {
+                                        iconPackage = ""
+                                        iconGlyph = ""
+                                    },
+                                )
+                            }
+                        }
+
+                        // ── 应用图标形状方案（仅应用图标）──
+                        if (isAppIcon) {
+                            item(key = "icon_dialog_crop") {
+                                RadioButtonPreference(
+                                    title = "自适应外扩满铺",
+                                    summary = "分离前景与背景图层并外扩满铺正圆，彻底消除直角白边",
+                                    selected = appIconCropMode == HyperOpenConfig.CROP_ADAPTIVE_EXPAND,
+                                    onClick = { appIconCropMode = HyperOpenConfig.CROP_ADAPTIVE_EXPAND },
+                                )
+                                RadioButtonPreference(
+                                    title = "标准抗锯齿圆形裁切",
+                                    summary = "对完整渲染图标直接进行正圆形 BitmapShader 裁切",
+                                    selected = appIconCropMode == HyperOpenConfig.CROP_BITMAP_CIRCLE,
+                                    onClick = { appIconCropMode = HyperOpenConfig.CROP_BITMAP_CIRCLE },
+                                )
+                            }
+                        }
+
+                        // ── 矢量图标底垫与色彩（仅矢量图标）──
+                        if (vectorIcon != null && iconPackage.isBlank()) {
+                            item(key = "icon_dialog_pad") {
+                                Column {
+                                    SwitchPreference(
+                                        title = "启用此图标圆形底垫",
+                                        summary = "为当前矢量图标添加独立圆形底板",
+                                        checked = glyphPadEnabled,
+                                        onCheckedChange = { glyphPadEnabled = it },
+                                    )
+
+                                    if (glyphPadEnabled) {
+                                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+                                        Text(
+                                            text = "底垫渲染质感",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MiuixTheme.colorScheme.onSurface,
+                                            modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
+                                        )
+
+                                        RadioButtonPreference(
+                                            title = "磨砂微透底板",
+                                            summary = "65% 半透明高光底板，颜色与背景毛玻璃相互交融",
+                                            selected = glyphPadMode == HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT,
+                                            onClick = { glyphPadMode = HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT },
+                                        )
+                                        RadioButtonPreference(
+                                            title = "饱满纯色底板",
+                                            summary = "100% 不透明纯色实心圆，上方呈现白色高对比矢量",
+                                            selected = glyphPadMode == HyperOpenConfig.GLYPH_PAD_MODE_SOLID,
+                                            onClick = { glyphPadMode = HyperOpenConfig.GLYPH_PAD_MODE_SOLID },
+                                        )
+                                        RadioButtonPreference(
+                                            title = "反色渲染模式",
+                                            summary = "微透亮白底板 + 彩色矢量图标",
+                                            selected = glyphPadMode == HyperOpenConfig.GLYPH_PAD_MODE_INVERTED,
+                                            onClick = { glyphPadMode = HyperOpenConfig.GLYPH_PAD_MODE_INVERTED },
+                                        )
+
+                                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+                                        Text(
+                                            text = "快捷品牌色预设",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MiuixTheme.colorScheme.onSurface,
+                                            modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
+                                        )
+
+                                        val brandColors = listOf(
+                                            "微信绿" to 0xFF07C160.toInt(),
+                                            "支付宝蓝" to 0xFF1677FF.toInt(),
+                                            "小米橙" to 0xFFFF6900.toInt(),
+                                            "网易红" to 0xFFE60026.toInt(),
+                                            "极客紫" to 0xFF7928CA.toInt(),
+                                            "暗夜黑" to 0xFF1F2329.toInt(),
+                                            "科技蓝" to 0xFF2A82E4.toInt(),
+                                        )
+
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                        ) {
+                                            brandColors.forEach { (name, colorValue) ->
+                                                val isSelectedColor = glyphPadColor == colorValue
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(36.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color(colorValue))
+                                                        .clickable {
+                                                            glyphPadColor = colorValue
+                                                            padHexInput = String.format("#%06X", colorValue and 0xFFFFFF)
+                                                        },
+                                                    contentAlignment = Alignment.Center,
+                                                ) {
+                                                    if (isSelectedColor) {
+                                                        Text("✓", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+                                        Text(
+                                            text = "自定义底垫颜色",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MiuixTheme.colorScheme.onSurface,
+                                            modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
+                                        )
+
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(glyphPadColor)),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                if (brandColors.none { it.second == glyphPadColor }) {
+                                                    Text("✦", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                                }
+                                            }
+                                            TextField(
+                                                value = padHexInput,
+                                                onValueChange = { s ->
+                                                    padHexInput = s
+                                                    parseHexColor(s)?.let { glyphPadColor = it }
+                                                },
+                                                label = "十六进制颜色 (#RRGGBB)",
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            )
+                                        }
+
+                                        SliderPreference(
+                                            title = "红色分量",
+                                            summary = "自定义底垫颜色的红色通道 (R)",
+                                            valueText = "${(glyphPadColor shr 16) and 0xFF}",
+                                            value = ((glyphPadColor shr 16) and 0xFF).toFloat(),
+                                            valueRange = 0f..255f,
+                                            onValueChange = { r ->
+                                                glyphPadColor = composePadColor(
+                                                    r.toInt(), (glyphPadColor shr 8) and 0xFF, glyphPadColor and 0xFF
+                                                )
+                                                syncPadHexFromColor()
+                                            },
+                                        )
+                                        SliderPreference(
+                                            title = "绿色分量",
+                                            summary = "自定义底垫颜色的绿色通道 (G)",
+                                            valueText = "${(glyphPadColor shr 8) and 0xFF}",
+                                            value = ((glyphPadColor shr 8) and 0xFF).toFloat(),
+                                            valueRange = 0f..255f,
+                                            onValueChange = { g ->
+                                                glyphPadColor = composePadColor(
+                                                    (glyphPadColor shr 16) and 0xFF, g.toInt(), glyphPadColor and 0xFF
+                                                )
+                                                syncPadHexFromColor()
+                                            },
+                                        )
+                                        SliderPreference(
+                                            title = "蓝色分量",
+                                            summary = "自定义底垫颜色的蓝色通道 (B)",
+                                            valueText = "${glyphPadColor and 0xFF}",
+                                            value = (glyphPadColor and 0xFF).toFloat(),
+                                            valueRange = 0f..255f,
+                                            onValueChange = { b ->
+                                                glyphPadColor = composePadColor(
+                                                    (glyphPadColor shr 16) and 0xFF, (glyphPadColor shr 8) and 0xFF, b.toInt()
+                                                )
+                                                syncPadHexFromColor()
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            text = "完成",
+                            onClick = { showIconDialog = false },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // ── 文字与提示样式浮窗（点预览卡片文字打开）──
+    if (showTextDialog) {
+        Dialog(
+            onDismissRequest = { showTextDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth(0.92f)
+                    .imePadding()
+                    .padding(vertical = 16.dp),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                ) {
+                    Text(
+                        text = "文字与提示",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 520.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        // ── 实时预览胶囊：颜色/透明度/字重/字距/投影按与真机一致的回退链解析 ──
+                        item(key = "text_dialog_preview") {
+                            val previewDensity = androidx.compose.ui.platform.LocalDensity.current.density
+                            val globalCfg = remember(ctx) { HyperOpenConfig.loadFromApp(ctx) }
+
+                            val previewTitleBase = Color(
+                                if (followGlobalHintStyle) initialItem.resolveHintTitleColor(globalCfg)
+                                else if (hintTextColor != 0) hintTextColor else initialItem.resolveIconPrimaryColor()
+                            )
+                            val previewTitleAlpha = if (followGlobalHintStyle) 1.0f else hintTextAlpha.coerceIn(0.05f, 1f)
+                            val previewSubAlphaEffective = previewTitleAlpha * 0.82f
+                            val previewSubBase = Color(
+                                if (followGlobalHintStyle) initialItem.resolveHintSubtitleColor(globalCfg)
+                                else if (hintTextColorSub != 0) hintTextColorSub else (if (hintTextColor != 0) hintTextColor else initialItem.resolveIconPrimaryColor())
+                            )
+                            val previewSubAlpha =
+                                if (followGlobalHintStyle) 0.82f
+                                else if (hintTextAlphaSub >= 0f) hintTextAlphaSub.coerceIn(0.05f, 1f) else previewSubAlphaEffective
+
+                            val effectiveShadow = if (followGlobalHintStyle) globalCfg.defaultHintTextShadow.toFloat() else hintTextShadow
+                            val previewShadow = if (effectiveShadow >= 0.5f) {
+                                Shadow(
+                                    color = Color(0x99000000),
+                                    blurRadius = effectiveShadow / 20f * 4f * previewDensity,
+                                )
+                            } else null
+
+                            val effectiveWeight = if (followGlobalHintStyle) globalCfg.defaultHintTextWeight else hintTextWeight
+                            val previewWeight = when (effectiveWeight) {
+                                0 -> FontWeight.Light
+                                2 -> FontWeight.Medium
+                                3 -> FontWeight.Bold
+                                else -> FontWeight.Normal
+                            }
+
+                            val effectiveSpacing = if (followGlobalHintStyle) globalCfg.defaultHintTextLetterSpacing else hintTextLetterSpacing
+                            val effectiveShowTitle = if (followGlobalHintStyle) globalCfg.defaultShowHintTitle else showHintTitle
+                            val effectiveShowSubtitle = if (followGlobalHintStyle) globalCfg.defaultShowHintSubtitle else showHintSubtitle
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(Color(0x33FFFFFF))
+                                        .padding(horizontal = 18.dp, vertical = 8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    if (effectiveShowTitle) {
+                                        Text(
+                                            text = title.trim().ifBlank { "快捷方式" },
+                                            fontSize = 15.sp,
+                                            fontWeight = previewWeight,
+                                            letterSpacing = (15f * effectiveSpacing * 0.05f).sp,
+                                            color = previewTitleBase.copy(alpha = previewTitleBase.alpha * previewTitleAlpha),
+                                            style = TextStyle(shadow = previewShadow),
+                                        )
+                                    }
+                                    if (effectiveShowSubtitle) {
+                                        Text(
+                                            text = subtitle.trim().ifEmpty { "移至目标图标后松手直接打开" },
+                                            fontSize = 11.sp,
+                                            letterSpacing = (11f * effectiveSpacing * 0.05f).sp,
+                                            color = previewSubBase.copy(alpha = previewSubBase.alpha * previewSubAlpha),
+                                            style = TextStyle(shadow = previewShadow),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── 标题 / 副标题内容 ──
+                        item(key = "text_dialog_title") {
+                            Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                                TextField(
+                                    value = title,
+                                    onValueChange = { title = it },
+                                    label = "快捷方式标题",
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+                        item(key = "text_dialog_subtitle") {
+                            Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                                TextField(
+                                    value = subtitle,
+                                    onValueChange = { subtitle = it },
+                                    label = "副标题 / 功能描述（可选）",
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+
+                        item(key = "text_dialog_follow_global") {
+                            SwitchPreference(
+                                title = "提示文字样式跟随全局配置",
+                                summary = "开启后文字显隐、描边、投影柔光、字重、字间距与颜色均统一跟随全局设置，避免重复调整",
+                                checked = followGlobalHintStyle,
+                                onCheckedChange = { followGlobalHintStyle = it },
+                            )
+                        }
+
+                        if (!followGlobalHintStyle) {
+                            item(key = "text_dialog_content") {
+                                Column {
+                                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                                    Text(
+                                        text = "文字内容",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MiuixTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
+                                    )
+                                    SwitchPreference(
+                                        title = "显示提示标题",
+                                        summary = "选中图标时胶囊内显示主标题（快捷方式标题）",
+                                        checked = showHintTitle,
+                                        onCheckedChange = { showHintTitle = it },
+                                    )
+                                    SwitchPreference(
+                                        title = "显示提示副标题",
+                                        summary = "选中图标时胶囊内显示副标题描述",
+                                        checked = showHintSubtitle,
+                                        onCheckedChange = { showHintSubtitle = it },
+                                    )
+                                }
+                            }
+
+                            item(key = "text_dialog_color") {
+                                Column {
+                                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                                    Text(
+                                        text = "颜色与透明度",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MiuixTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
+                                    )
+                                    SwitchPreference(
+                                        title = "标题颜色跟随图标底色（推荐）",
+                                        summary = "开启 = 智能提取该图标底垫色或主题色，关闭可自定义单项覆盖色",
+                                        checked = hintTextColor == 0,
+                                        onCheckedChange = { follow ->
+                                            hintTextColor = if (follow) 0
+                                            else parseHexColor(hintHexInput) ?: (initialItem.tintColor or 0xFF000000.toInt())
+                                        },
+                                    )
+                                    if (hintTextColor != 0) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(hintTextColor)),
+                                            )
+                                            TextField(
+                                                value = hintHexInput,
+                                                onValueChange = { s ->
+                                                    hintHexInput = s
+                                                    parseHexColor(s)?.let { hintTextColor = it }
+                                                },
+                                                label = "标题颜色 十六进制 (#RRGGBB)",
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            )
+                                        }
+                                        SliderPreference(
+                                            title = "标题红色分量",
+                                            summary = "提示标题颜色的红色通道 (R)",
+                                            valueText = "${(hintTextColor shr 16) and 0xFF}",
+                                            value = ((hintTextColor shr 16) and 0xFF).toFloat(),
+                                            valueRange = 0f..255f,
+                                            onValueChange = { r ->
+                                                hintTextColor = composePadColor(r.toInt(), (hintTextColor shr 8) and 0xFF, hintTextColor and 0xFF)
+                                                hintHexInput = String.format("#%06X", hintTextColor and 0xFFFFFF)
+                                            },
+                                        )
+                                        SliderPreference(
+                                            title = "绿色分量",
+                                            summary = "提示标题颜色的绿色通道 (G)",
+                                            valueText = "${(hintTextColor shr 8) and 0xFF}",
+                                            value = ((hintTextColor shr 8) and 0xFF).toFloat(),
+                                            valueRange = 0f..255f,
+                                            onValueChange = { g ->
+                                                hintTextColor = composePadColor((hintTextColor shr 16) and 0xFF, g.toInt(), hintTextColor and 0xFF)
+                                                hintHexInput = String.format("#%06X", hintTextColor and 0xFFFFFF)
+                                            },
+                                        )
+                                        SliderPreference(
+                                            title = "蓝色分量",
+                                            summary = "提示标题颜色的蓝色通道 (B)",
+                                            valueText = "${hintTextColor and 0xFF}",
+                                            value = (hintTextColor and 0xFF).toFloat(),
+                                            valueRange = 0f..255f,
+                                            onValueChange = { b ->
+                                                hintTextColor = composePadColor((hintTextColor shr 16) and 0xFF, (hintTextColor shr 8) and 0xFF, b.toInt())
+                                                hintHexInput = String.format("#%06X", hintTextColor and 0xFFFFFF)
+                                            },
+                                        )
+                                    }
+                                    SliderPreference(
+                                        title = "标题透明度",
+                                        summary = "提示标题不透明度 5%~100%",
+                                        valueText = "${Math.round(hintTextAlpha.coerceIn(0.05f, 1f) * 100)}%",
+                                        value = hintTextAlpha.coerceIn(0.05f, 1f),
+                                        valueRange = 0.05f..1f,
+                                        onValueChange = { hintTextAlpha = (Math.round(it * 20f) / 20f).coerceIn(0.05f, 1f) },
+                                    )
+                                    SwitchPreference(
+                                        title = "副标题颜色跟随标题",
+                                        summary = "开启 = 与标题同色；关闭可自定义副标题独立颜色",
+                                        checked = hintTextColorSub == 0,
+                                        onCheckedChange = { follow ->
+                                            hintTextColorSub = if (follow) 0
+                                            else parseHexColor(hintHexSubInput)
+                                                ?: (if (hintTextColor != 0) hintTextColor else initialItem.tintColor)
+                                        },
+                                    )
+                                    if (hintTextColorSub != 0) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(hintTextColorSub)),
+                                            )
+                                            TextField(
+                                                value = hintHexSubInput,
+                                                onValueChange = { s ->
+                                                    hintHexSubInput = s
+                                                    parseHexColor(s)?.let { hintTextColorSub = it }
+                                                },
+                                                label = "副标题颜色 十六进制 (#RRGGBB)",
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            )
+                                        }
+                                        SliderPreference(
+                                            title = "副标题红色分量",
+                                            summary = "提示副标题颜色的红色通道 (R)",
+                                            valueText = "${(hintTextColorSub shr 16) and 0xFF}",
+                                            value = ((hintTextColorSub shr 16) and 0xFF).toFloat(),
+                                            valueRange = 0f..255f,
+                                            onValueChange = { r ->
+                                                hintTextColorSub = composePadColor(r.toInt(), (hintTextColorSub shr 8) and 0xFF, hintTextColorSub and 0xFF)
+                                                hintHexSubInput = String.format("#%06X", hintTextColorSub and 0xFFFFFF)
+                                            },
+                                        )
+                                        SliderPreference(
+                                            title = "副标题绿色分量",
+                                            summary = "提示副标题颜色的绿色通道 (G)",
+                                            valueText = "${(hintTextColorSub shr 8) and 0xFF}",
+                                            value = ((hintTextColorSub shr 8) and 0xFF).toFloat(),
+                                            valueRange = 0f..255f,
+                                            onValueChange = { g ->
+                                                hintTextColorSub = composePadColor((hintTextColorSub shr 16) and 0xFF, g.toInt(), hintTextColorSub and 0xFF)
+                                                hintHexSubInput = String.format("#%06X", hintTextColorSub and 0xFFFFFF)
+                                            },
+                                        )
+                                        SliderPreference(
+                                            title = "副标题蓝色分量",
+                                            summary = "提示副标题颜色的蓝色通道 (B)",
+                                            valueText = "${hintTextColorSub and 0xFF}",
+                                            value = (hintTextColorSub and 0xFF).toFloat(),
+                                            valueRange = 0f..255f,
+                                            onValueChange = { b ->
+                                                hintTextColorSub = composePadColor((hintTextColorSub shr 16) and 0xFF, (hintTextColorSub shr 8) and 0xFF, b.toInt())
+                                                hintHexSubInput = String.format("#%06X", hintTextColorSub and 0xFFFFFF)
+                                            },
+                                        )
+                                    }
+                                    SwitchPreference(
+                                        title = "副标题透明度跟随标题",
+                                        summary = "开启 = 标题透明度 ×82%，关闭可独立调节",
+                                        checked = hintTextAlphaSub < 0f,
+                                        onCheckedChange = { follow ->
+                                            hintTextAlphaSub = if (follow) -1f else hintTextAlpha.coerceIn(0.05f, 1f) * 0.82f
+                                        },
+                                    )
+                                    if (hintTextAlphaSub >= 0f) {
+                                        SliderPreference(
+                                            title = "副标题透明度",
+                                            summary = "提示副标题不透明度 5%~100%",
+                                            valueText = "${Math.round(hintTextAlphaSub.coerceIn(0.05f, 1f) * 100)}%",
+                                            value = hintTextAlphaSub.coerceIn(0.05f, 1f),
+                                            valueRange = 0.05f..1f,
+                                            onValueChange = { hintTextAlphaSub = (Math.round(it * 20f) / 20f).coerceIn(0.05f, 1f) },
+                                        )
+                                    }
+                                }
+                            }
+
+                            item(key = "text_dialog_style") {
+                                Column {
+                                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                                    Text(
+                                        text = "质感与排版",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MiuixTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
+                                    )
+                                    SliderPreference(
+                                        title = "文字描边",
+                                        summary = "深色对比描边，任意壁纸下都清晰；1dp 步进",
+                                        valueText = if (Math.round(hintTextStroke) == 0) "关闭" else "${Math.round(hintTextStroke)}dp",
+                                        value = Math.round(hintTextStroke).toFloat(),
+                                        valueRange = 0f..4f,
+                                        onValueChange = { hintTextStroke = Math.round(it).coerceIn(0, 4).toFloat() },
+                                    )
+                                    SliderPreference(
+                                        title = "文字阴影",
+                                        summary = "黑色柔光投影，弱壁纸背景下提升可读性；半径 = 强度/20×4px",
+                                        valueText = if (hintTextShadow < 0.5f) "关闭" else "${hintTextShadow.toInt()}",
+                                        value = hintTextShadow,
+                                        valueRange = 0f..100f,
+                                        onValueChange = { hintTextShadow = (Math.round(it / 5f) * 5f).coerceIn(0f, 100f) },
+                                    )
+                                    SliderPreference(
+                                        title = "标题字重",
+                                        summary = when (hintTextWeight) {
+                                            0 -> "细体 (Light)"
+                                            1 -> "常规 (Regular)"
+                                            2 -> "中粗 (Medium)"
+                                            else -> "粗体 (Bold)"
+                                        },
+                                        valueText = when (hintTextWeight) {
+                                            0 -> "Light"
+                                            1 -> "Regular"
+                                            2 -> "Medium"
+                                            else -> "Bold"
+                                        },
+                                        value = hintTextWeight.toFloat(),
+                                        valueRange = 0f..3f,
+                                        onValueChange = { hintTextWeight = it.toInt() },
+                                    )
+                                    SliderPreference(
+                                        title = "字间距",
+                                        summary = "提示文字字间距 -2~+6（×0.05em），字母文案调宽更精致",
+                                        valueText = String.format("%+.1f em", hintTextLetterSpacing),
+                                        value = hintTextLetterSpacing,
+                                        valueRange = -2f..6f,
+                                        onValueChange = { hintTextLetterSpacing = (Math.round(it * 2f) / 2f).coerceIn(-2f, 6f) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            text = "完成",
+                            onClick = { showTextDialog = false },
                         )
                     }
                 }

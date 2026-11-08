@@ -1669,11 +1669,11 @@ private fun ParamsTabBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MiuixTheme.colorScheme.background)
+            .background(MiuixTheme.colorScheme.surface)
             // 左右留 12dp，与下方 Card 的 horizontal padding 对齐，避免轨道比卡片窄一圈
             .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 8.dp)
             .clip(RoundedCornerShape(22.dp))
-            .background(MiuixTheme.colorScheme.surface)
+            .background(MiuixTheme.colorScheme.surfaceContainer)
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
