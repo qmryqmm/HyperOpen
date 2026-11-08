@@ -119,8 +119,14 @@ class ShortcutListInteractionState {
     /** 散开动画起始时冻结的叠放锚点 Y（主卡松手瞬间的视觉顶部） */
     var groupScatterAnchorY: Float by mutableFloatStateOf(0f)
 
-    /** 被携带的行 key（不含主卡） */
+    /** 被携带的行 key（不含主卡）。散开阶段会临时并入主卡，用于主卡的散开位移。 */
     var carriedKeys: Set<String> by mutableStateOf(emptySet())
+
+    /** 行高被收缩的行 key（= 拾起时的携带集，始终不含主卡）。
+     *  主卡在拖拽期间走 inDragBlock 分支、行高从未收缩，散开时只应恢复位移、
+     *  不应恢复行高——否则松手瞬间主卡行高从满高塌缩到 0，下方卡片整体上跳一整行，
+     *  且散开偏移冻结值（getNodeTopY）整体偏差一个主卡行高。 */
+    var shrunkKeys: Set<String> by mutableStateOf(emptySet())
 
     /** 携带行 → 叠放序号（1 起，决定下沉偏移与渲染层级） */
     val stackIndices = mutableStateMapOf<String, Int>()
@@ -161,7 +167,7 @@ class ShortcutListInteractionState {
      */
     fun rowHeightNow(key: String): Float {
         val measured = rowHeights[key] ?: return 180f
-        if ((groupDragActive || groupScattering) && key in carriedKeys) {
+        if ((groupDragActive || groupScattering) && key in shrunkKeys) {
             val full = fullRowHeights[key] ?: measured
             return full * (1f - stackProgress.value)
         }
@@ -398,6 +404,7 @@ fun Modifier.shortcutRowGestures(
                 state.stackBaseOffsets.clear()
                 state.stackScatterOffsets.clear()
                 state.carriedKeys = state.selection - nodeKey
+                state.shrunkKeys = state.carriedKeys
                 state.stackGapPx = with(density) { 12.dp.toPx() }
                 var idx = 1
                 state.carriedKeys.forEach { key ->
@@ -438,6 +445,7 @@ fun Modifier.shortcutRowGestures(
                                 state.groupDragActive = false
                                 state.groupScattering = false
                                 state.carriedKeys = emptySet()
+                                state.shrunkKeys = emptySet()
                                 state.stackIndices.clear()
                                 state.stackBaseOffsets.clear()
                                 state.stackScatterOffsets.clear()
@@ -464,6 +472,9 @@ fun Modifier.shortcutRowGestures(
                                 // （拖拽段视觉=dragOriginTopY+totalDragY，目标=新槽位，散开偏移=两者之差）
                                 state.stackScatterOffsets[nodeKey] = mainVisualTopY -
                                     state.getNodeTopY(nodeKey, settledNodes)
+                                // 主卡并入携带集参与散开位移，但 shrunkKeys 不含主卡：
+                                // 拖拽期间主卡行高从未收缩，散开时不做行高恢复，
+                                // 否则松手瞬间行高塌缩 0 → 下方卡片整体上跳一整行。
                                 state.carriedKeys = state.carriedKeys + nodeKey
                                 state.groupScattering = true
                                 state.groupScatterAnchorY = mainVisualTopY
@@ -525,6 +536,7 @@ fun Modifier.shortcutRowGestures(
                             state.groupDragActive = false
                             state.groupScattering = false
                             state.carriedKeys = emptySet()
+                            state.shrunkKeys = emptySet()
                             state.stackIndices.clear()
                             state.stackBaseOffsets.clear()
                             state.stackScatterOffsets.clear()
@@ -535,6 +547,7 @@ fun Modifier.shortcutRowGestures(
                 state.groupDragActive = false
                 state.groupScattering = false
                 state.carriedKeys = emptySet()
+                state.shrunkKeys = emptySet()
                 state.stackIndices.clear()
                 state.stackBaseOffsets.clear()
                 state.stackScatterOffsets.clear()
@@ -663,9 +676,11 @@ fun Modifier.dragRowVisuals(
             }
         }
         .then(
-            if (carried) {
+            if (carried && node.key in state.shrunkKeys) {
                 // 拾起后行高随叠起进度收缩到 0 → 布局层面闭合原空位，
                 // 其余卡片由 animateItem 平滑上移补位；散开时行高随进度恢复，卡片滑回原槽。
+                // 主卡不参与收缩（shrunkKeys 不含主卡）：拖拽期间主卡走 inDragBlock、
+                // 行高从未收缩，散开时套上收缩 layout 会让行高塌缩 0、下方卡片整体跳一整行。
                 // 收缩=full×(1−p)：行距交给外层 spacedBy（不随收缩变化），使 getNodeTopY
                 // 的累加模型（rowHeightNow+rowSpacingPx）与真实布局逐帧精确一致。
                 // fullRowHeights 在测量结果上记录完整高度，供 rowHeightNow 零滞后折算。
