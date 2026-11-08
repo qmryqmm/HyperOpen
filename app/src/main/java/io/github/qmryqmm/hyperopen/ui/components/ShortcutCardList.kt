@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +41,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChangeIgnoreConsumed
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
@@ -51,6 +53,8 @@ import io.github.qmryqmm.hyperopen.model.ShortcutItem
 import io.github.qmryqmm.hyperopen.ui.IconPainter
 import io.github.qmryqmm.hyperopen.ui.MiuixIconRegistry
 import io.github.qmryqmm.hyperopen.ui.RemixIconRegistry
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
@@ -59,6 +63,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.util.UUID
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * 快捷方式卡片列表共享交互组件：
@@ -92,6 +97,10 @@ class ShortcutListInteractionState {
     var totalDragY: Float by mutableFloatStateOf(0f)
 
     val rowHeights = mutableStateMapOf<String, Float>()
+    /** 各行完整（收缩前）实测高度，key -> 高度px。由 ShortcutRowEntry 在收缩
+     *  Modifier.layout 内部记录，不随叠起收缩变化——rowHeightNow 用它把携带行
+     *  折算成当前帧真实行高（rowHeights 由 onGloballyPositioned 记录、晚一帧）。 */
+    val fullRowHeights = mutableStateMapOf<String, Float>()
     val rowBounds = mutableStateMapOf<String, Pair<Float, Float>>() // key -> (topY, height)
 
     /** 相邻行之间的间距（density 感知像素值，由 shortcutRowGestures 在组合期写入）。 */
@@ -99,6 +108,41 @@ class ShortcutListInteractionState {
     var selection: Set<String> by mutableStateOf(emptySet())
     var targetFolderKey: String? by mutableStateOf(null)
     var isDraggingOutOfFolder: Boolean by mutableStateOf(false)
+
+    // ── 多选组合拖拽（叠起/散开）状态 ──
+    /** 组合拖拽进行中：其余选中卡片被“拾起”叠放到主卡下方随行 */
+    var groupDragActive: Boolean by mutableStateOf(false)
+
+    /** 松手散开阶段（叠放锚点已冻结到 groupScatterAnchorY） */
+    var groupScattering: Boolean by mutableStateOf(false)
+
+    /** 散开动画起始时冻结的叠放锚点 Y（主卡松手瞬间的视觉顶部） */
+    var groupScatterAnchorY: Float by mutableFloatStateOf(0f)
+
+    /** 被携带的行 key（不含主卡） */
+    var carriedKeys: Set<String> by mutableStateOf(emptySet())
+
+    /** 携带行 → 叠放序号（1 起，决定下沉偏移与渲染层级） */
+    val stackIndices = mutableStateMapOf<String, Int>()
+
+    /** 拾起瞬间冻结的携带卡基准叠放偏移（主卡原位 − 自身槽位 + 阶梯下沉）。
+     *  拖拽期间只与 totalDragY 相加，中途交换重排不会引起携带卡视觉跳动。 */
+    val stackBaseOffsets = mutableStateMapOf<String, Float>()
+
+    /** 松手瞬间冻结的散开起始偏移（= 基准偏移 + totalDragY，与拖拽段末值无缝衔接）。 */
+    val stackScatterOffsets = mutableStateMapOf<String, Float>()
+
+    /** 叠放进度：0=各行在自身槽位，1=完全叠到主卡下（叠起与散开共用同一进度，保证丝滑衔接） */
+    val stackProgress = Animatable(0f)
+
+    /** 相邻叠层露出高度（density 像素，shortcutRowGestures 组合期写入）——形成重叠阶梯感 */
+    var stackGapPx: Float by mutableFloatStateOf(0f)
+
+    /** 叠起/散开动画的驱动协程（并发于手势循环之后，不阻塞手势收尾） */
+    var stackAnimJob: Job? = null
+
+    /** 组合拖拽世代令牌：新一轮 groupDrag 递增，用于取消上一轮尚未收敛的散开动画 */
+    var stackGeneration: Int by mutableIntStateOf(0)
 
     val multiSelect: Boolean get() = selection.isNotEmpty()
 
@@ -110,15 +154,35 @@ class ShortcutListInteractionState {
         selection = emptySet()
     }
 
+    /**
+     * 行当前实际布局高度。携带行在叠起/散开期间按 stackProgress 实时折算——
+     * rowHeights 由 onGloballyPositioned 记录、晚一帧，直接用会让锚定坐标逐帧抖动；
+     * fullRowHeights 是收缩前完整高度，与 (1−progress) 相乘即当前帧真实行高，零滞后。
+     */
+    fun rowHeightNow(key: String): Float {
+        val measured = rowHeights[key] ?: return 180f
+        if ((groupDragActive || groupScattering) && key in carriedKeys) {
+            val full = fullRowHeights[key] ?: measured
+            return full * (1f - stackProgress.value)
+        }
+        return measured
+    }
+
     /** 按槽位序号直接累加物理 Y（与 getNodeTopY 同规则：行高 + 行距）。 */
     fun topYOfSlot(slot: Int, nodes: List<ShortcutRowNode>): Float {
         var acc = 0f
         val end = slot.coerceIn(0, nodes.size)
         for (i in 0 until end) {
-            acc += (rowHeights[nodes[i].key] ?: 180f) + rowSpacingPx
+            acc += rowHeightNow(nodes[i].key) + rowSpacingPx
         }
         return acc
     }
+
+    /** 叠起末段层距压缩系数（p>0.9 从 1 收拢到 0.75）。
+     *  手势松手冻结散开偏移与 dragRowVisuals 实时偏移必须共用同一系数，
+     *  否则松手瞬间携带卡会跳 idx×gap×(1−comp)。 */
+    fun stackGapComp(): Float =
+        if (stackProgress.value > 0.9f) 0.75f + 0.25f * (1f - stackProgress.value) / 0.1f else 1f
 
     /**
      * 长按手势期间 / 结束后抑制行内误触点击：
@@ -133,12 +197,14 @@ class ShortcutListInteractionState {
 
     /**
      * 辅助纯计算：获取指定 key 在当前节点排布中的相对 Y 坐标（基于当前节点顺序及实测行高）。
+     * 用 rowHeightNow 而非 rowHeights：携带行叠起收缩期间行高零滞后折算，
+     * 槽位坐标即当前帧真实布局位置——任何额外补偿都会双重扣除导致乱跳。
      */
     fun getNodeTopY(targetKey: String, nodes: List<ShortcutRowNode>): Float {
         var acc = 0f
         for (n in nodes) {
             if (n.key == targetKey) return acc
-            acc += (rowHeights[n.key] ?: 180f) + rowSpacingPx
+            acc += rowHeightNow(n.key) + rowSpacingPx
         }
         return acc
     }
@@ -154,7 +220,8 @@ class ShortcutListInteractionState {
         onHapticTick: (() -> Unit)? = null,
     ) {
         val dk = draggingKey ?: return
-        totalDragY += dy
+        // 注意：totalDragY 已在 shortcutRowGestures 手势循环内统一累加（组合拖拽也需要累计位移），
+        // 此处不再重复累加，否则非组合拖拽位移会翻倍。
 
         val curIdx = nodes.indexOfFirst { it.key == dk }
         if (curIdx < 0) return
@@ -221,13 +288,18 @@ class ShortcutListInteractionState {
         if (targetFolderKey != null) return
 
         // ── 场景 3：同级卡片中心线穿透交换（优雅、自然、零顿挫）──
+        // 组合拖拽中：跳过其他被叠起的选中行——交换只发生在主卡与非选中卡之间，
+        // 整叠作为一块与外界换位，选中卡之间相对顺序冻结、互不交换。
         val dir = if (dy >= 0f) 1 else -1
 
         // 视觉方向上最近的同作用域行 = 作用域内相邻行
         var j = -1
         var k = curIdx + dir
         while (k in nodes.indices) {
-            if (nodes[k].scopeId == nodes[curIdx].scopeId) {
+            val candidate = nodes[k]
+            if (candidate.scopeId == nodes[curIdx].scopeId &&
+                candidate.key !in carriedKeys
+            ) {
                 j = k
                 break
             }
@@ -247,6 +319,9 @@ class ShortcutListInteractionState {
         }
 
         if (shouldSwap) {
+            // 交换后 LazyColumn 同帧重排：布局槽位 Y 与 visualTranslationY 里的「−槽位Y」
+            // 一增一减相互抵消，视觉位置天然连续（dragOriginTopY 保持拾起时的值）。
+            // 切勿随交换改写 dragOriginTopY——那会与布局位移双重补偿，卡片被反向拉跳。
             move(nodes[curIdx], dir)
             onHapticTick?.invoke()
         }
@@ -271,10 +346,13 @@ fun Modifier.shortcutRowGestures(
     canDropIntoFolder: Boolean = false,
     onDragStart: (() -> Unit)? = null,
     onDragSettled: () -> Unit = {},
+    /** 组合拖拽松手时把整叠新顺序写回数据层（主卡 key + 携带卡按叠中顺序）。 */
+    onGroupReorder: ((mainKey: String, carriedKeys: List<String>) -> Unit)? = null,
     rowSpacing: Dp = 10.dp,
 ): Modifier {
     val view = LocalView.current
     val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
     state.rowSpacingPx = with(density) { rowSpacing.toPx() }
     return this.pointerInput(nodeKey) {
         awaitEachGesture {
@@ -304,8 +382,47 @@ fun Modifier.shortcutRowGestures(
             state.targetFolderKey = null
             state.isDraggingOutOfFolder = false
             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+
+            // ── 多选组合拖拽：若长按的行在多选集内，则其余选中行被一起“拾起”叠到主卡下 ──
+            // 仅当选中集与长按行同层（同一排序作用域 scopeId）时才组合叠起；
+            // 跨层选中（根目录项与文件夹子项混选）不叠起，仅拖动手指按中的卡片。
+            val pressedNode = initialNodes.firstOrNull { it.key == nodeKey }
+            val groupDrag = state.multiSelect && nodeKey in state.selection && pressedNode != null &&
+                initialNodes.filter { it.key in state.selection }.all { it.scopeId == pressedNode.scopeId }
+            if (groupDrag) {
+                // 上一轮散开动画若未收敛，立即取消并冻结当前进度，作为本轮叠起起点（丝滑续接）
+                state.stackAnimJob?.cancel()
+                state.stackAnimJob = null
+                state.stackGeneration++
+                state.stackIndices.clear()
+                state.stackBaseOffsets.clear()
+                state.stackScatterOffsets.clear()
+                state.carriedKeys = state.selection - nodeKey
+                state.stackGapPx = with(density) { 12.dp.toPx() }
+                var idx = 1
+                state.carriedKeys.forEach { key ->
+                    state.stackIndices[key] = idx
+                    // 冻结基准：拾起瞬间主卡原位 − 自身槽位 + 阶梯下沉。
+                    // 之后拖拽中只追加 totalDragY，主卡交换重排不会造成携带卡视觉跳变。
+                    val base = state.dragOriginTopY - state.getNodeTopY(key, initialNodes) + idx * state.stackGapPx
+                    state.stackBaseOffsets[key] = base
+                    idx++
+                }
+                state.groupScattering = false
+                state.groupDragActive = true
+                // 拾起即叠起：长按瞬间就开始把其余选中卡片叠到主卡下（并发驱动，不阻塞手势循环）。
+                // 先叠起、后拖动——长按保持期间动画有时间完成，拖动时整叠已成形（不会“有概率不触发”）。
+                state.stackAnimJob = scope.launch {
+                    state.stackProgress.animateTo(
+                        1f,
+                        spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
+                    )
+                }
+            }
+
             var dragDist = 0f
             var dragStarted = false
+            var settledCalled = false
             try {
                 while (true) {
                     val ev = awaitPointerEvent()
@@ -314,9 +431,47 @@ fun Modifier.shortcutRowGestures(
                     if (ch == null || ch.changedToUpIgnoreConsumed()) {
                         if (dragDist <= viewConfiguration.touchSlop) {
                             onLongPressNoMove()
+                            // 未拖动的长按：不进入散开动画，取消动画协程并复位叠放状态
+                            if (groupDrag) {
+                                state.stackAnimJob?.cancel()
+                                state.stackAnimJob = null
+                                state.groupDragActive = false
+                                state.groupScattering = false
+                                state.carriedKeys = emptySet()
+                                state.stackIndices.clear()
+                                state.stackBaseOffsets.clear()
+                                state.stackScatterOffsets.clear()
+                                scope.launch { state.stackProgress.snapTo(0f) }
+                            }
                         } else {
-                            dragStarted = false
-                            onDragSettled()
+                            if (groupDrag) {
+                                // ── 松手：把整叠的当前顺序写回数据层（散开后按新顺序落位，不回原位）──
+                                // 主卡已通过中途交换重排到新槽位；携带卡按叠中相对顺序紧随主卡插入。
+                                onGroupReorder?.invoke(nodeKey, state.carriedKeys.toList())
+                                // 冻结散开起始偏移：按重排后的节点序计算「松手视觉位置 − 新槽位」，
+                                // 散开动画从这无缝起步、精确滑向新槽位。
+                                val settledNodes = getNodes()
+                                val mainVisualTopY = state.dragOriginTopY + state.totalDragY
+                                state.carriedKeys.forEach { key ->
+                                    val idx = state.stackIndices[key] ?: 0
+                                    // 与 dragRowVisuals 实时偏移同公式（含 stackGapComp）：
+                                    // 压缩系数不一致时松手瞬间携带卡跳 idx×gap×(1−comp)。
+                                    state.stackScatterOffsets[key] =
+                                        (mainVisualTopY - state.getNodeTopY(key, settledNodes)) +
+                                            idx * state.stackGapPx * state.stackGapComp()
+                                }
+                                // 主卡也参与散开：从松手视觉位置平滑滑向其新槽位
+                                // （拖拽段视觉=dragOriginTopY+totalDragY，目标=新槽位，散开偏移=两者之差）
+                                state.stackScatterOffsets[nodeKey] = mainVisualTopY -
+                                    state.getNodeTopY(nodeKey, settledNodes)
+                                state.carriedKeys = state.carriedKeys + nodeKey
+                                state.groupScattering = true
+                                state.groupScatterAnchorY = mainVisualTopY
+                            }
+                            if (dragStarted) {
+                                settledCalled = true
+                                onDragSettled()
+                            }
                         }
                         break
                     }
@@ -324,14 +479,20 @@ fun Modifier.shortcutRowGestures(
                     dragDist += abs(dp.x) + abs(dp.y)
                     if (dragDist > viewConfiguration.touchSlop && !dragStarted) {
                         dragStarted = true
-                        onDragStart?.invoke()
+                        // 组合拖拽不做“拖文件夹自动收起”：被选中的子项要参与叠起，
+                        // 收起会让子项行从节点树消失、无法渲染叠放动画。
+                        if (!groupDrag) onDragStart?.invoke()
                     }
                     if (dp != Offset.Zero) {
+                        // 手指位移始终累计（组合拖拽靠它驱动整叠移动与锚点换算）
+                        state.totalDragY += dp.y
+                        // 组合拖拽也调用 onDragDelta：主卡照常与相邻卡交换位置（重排底层顺序），
+                        // 但禁用移入文件夹判定（整叠松手不应落入文件夹）。
                         state.onDragDelta(
                             dy = dp.y,
                             nodes = getNodes(),
                             move = move,
-                            canDropIntoFolder = canDropIntoFolder,
+                            canDropIntoFolder = canDropIntoFolder && !groupDrag,
                             onHapticTick = {
                                 view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                             },
@@ -339,13 +500,44 @@ fun Modifier.shortcutRowGestures(
                     }
                 }
             } finally {
-                if (dragStarted) {
+                if (dragStarted && !settledCalled) {
+                    settledCalled = true
                     onDragSettled()
                 }
                 state.draggingKey = null
                 state.totalDragY = 0f
                 state.targetFolderKey = null
                 state.isDraggingOutOfFolder = false
+            }
+            if (groupDrag && dragStarted) {
+                // 叠起/散开动画由独立协程并发驱动（不阻塞 pointerInput 协程收尾）：
+                // 从冻结的散开末偏移继续 → 弹回 0（携带卡滑回各自槽位）→ 清理状态。
+                val gen = state.stackGeneration
+                state.stackAnimJob?.cancel()
+                state.stackAnimJob = scope.launch {
+                    try {
+                        state.stackProgress.animateTo(
+                            0f,
+                            spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
+                        )
+                    } finally {
+                        if (gen == state.stackGeneration) {
+                            state.groupDragActive = false
+                            state.groupScattering = false
+                            state.carriedKeys = emptySet()
+                            state.stackIndices.clear()
+                            state.stackBaseOffsets.clear()
+                            state.stackScatterOffsets.clear()
+                        }
+                    }
+                }
+            } else if (groupDrag) {
+                state.groupDragActive = false
+                state.groupScattering = false
+                state.carriedKeys = emptySet()
+                state.stackIndices.clear()
+                state.stackBaseOffsets.clear()
+                state.stackScatterOffsets.clear()
             }
         }
     }
@@ -366,15 +558,47 @@ fun Modifier.dragRowVisuals(
     val draggedFolderId = if (dragKey != null) {
         nodes.firstOrNull { it.key == dragKey }?.let { if (it.depth == 0) it.item.id else null }
     } else null
+    // 跨层多选（子项+顶层项混选）不触发组合拖拽 → 拖拽块吸附逻辑保持原样：
+    // 拖文件夹时其全部子项随块移动（用户确认的预期行为）。
     val inDragBlock = dragKey == node.key || (draggedFolderId != null && node.parentFolderId == draggedFolderId)
     val isMain = dragKey == node.key
 
-    // 计算当前项为了绝对精确锚定在当前手指视觉坐标上所需的平移偏移
+    // ── 多选组合拖拽：本行是否被“拾起” ──
+    // groupDrag 仅在同层多选时激活（shortcutRowGestures 已按 scopeId 校验）；
+    // 拖拽中主卡走 inDragBlock 分支（实时跟随手指），其余选中行走 carried 分支。
+    // 散开阶段 draggingKey 已清空，主卡也落入 carried 分支，整叠一起滑回。
+    val carried = state.groupDragActive && !inDragBlock && node.key in state.carriedKeys
+    val stackIdx = if (carried) (state.stackIndices[node.key] ?: 0) else 0
+
+    // 计算当前项为了绝对精确锚定在当前手指视觉坐标上所需的平移偏移。
+    // getNodeTopY 经 rowHeightNow 已是当前帧真实布局槽位（携带行收缩实时折算），
+    // 无需任何额外补偿——额外补偿即双重扣除，整叠漂移+交换乱跳。
     val anchorKey = if (draggedFolderId != null && node.parentFolderId == draggedFolderId) dragKey else node.key
     val visualTranslationY = if (anchorKey != null) {
         val anchorSlotY = state.getNodeTopY(anchorKey, nodes)
         val targetAnchorTopY = state.dragOriginTopY + state.totalDragY
         targetAnchorTopY - anchorSlotY
+    } else 0f
+
+    // 携带卡片叠放偏移（绝对丝滑）：
+    //  - 拖拽中：实时计算「主卡当前视觉 top − 自身槽位 Y + 阶梯下沉」——主卡交换重排、
+    //    其余行行高收缩补位时布局与偏移互补抵消，整叠始终精确贴住主卡视觉位置下方；
+    //  - 散开中：松手瞬间冻结的起始偏移（按重排后的新槽位计算）→ 随 stackProgress 弹回 0，
+    //    卡片滑向新顺序的槽位（散开落位 = 新位置，而非原位置）。
+    // stackProgress 从 0 涨到 1 时与各卡原位无缝衔接（progress=0 恒为自身槽位）。
+    // 叠起末段（progress>0.9）额外收拢层间距（最低 ×0.75），让卡叠紧凑但层间
+    // 仍露出一条稳定条带（重叠可见）；state.stackGapComp() 是同一函数——松手冻结
+    // 散开偏移时用同一系数，保证拖拽→散开帧间无缝、无跳变。
+    val stackGapCompression = state.stackGapComp()
+    val carryOffset = if (carried) {
+        val base = if (state.groupScattering) {
+            state.stackScatterOffsets[node.key] ?: 0f
+        } else {
+            val mainVisualTopY = state.dragOriginTopY + state.totalDragY
+            val ownSlotY = state.getNodeTopY(node.key, nodes)
+            (mainVisualTopY - ownSlotY) + stackIdx * state.stackGapPx * stackGapCompression
+        }
+        base * state.stackProgress.value
     } else 0f
 
     // ── 槽位补位动画（无闪烁）：槽位变化当帧在组合期直接写入偏移（与布局同步渲染在旧位置），
@@ -411,7 +635,21 @@ fun Modifier.dragRowVisuals(
 
     return this
         .graphicsLayer {
-            if (inDragBlock) {
+            if (carried) {
+                // 层叠厚度感：层距经 stackGapCompression 收拢后仍露出稳定条带；
+                // scale/alpha 随叠中序号渐变。叠起形态拖拽全程恒定、不被交换改变。
+                translationY = carryOffset
+                val p = state.stackProgress.value
+                // 叠起形态随叠中序号渐变：越靠下的卡越小越淡，形成“一叠卡片”的厚度感；
+                // 散开时随 progress 回落恢复原样（叠起效果拖拽全程恒定、不被交换改变）。
+                val scale = 1f - (0.025f + stackIdx * 0.008f) * p
+                scaleX = scale
+                scaleY = scale
+                shadowElevation = 10f * p
+                shape = RoundedCornerShape(16.dp)
+                clip = false
+                alpha = 1f - 0.12f * stackIdx * p
+            } else if (inDragBlock) {
                 translationY = visualTranslationY
             } else if (swapOffset.floatValue != 0f) {
                 translationY = swapOffset.floatValue
@@ -424,7 +662,32 @@ fun Modifier.dragRowVisuals(
                 clip = false
             }
         }
-        .zIndex(if (isMain) 1f else if (inDragBlock) 0.5f else 0f)
+        .then(
+            if (carried) {
+                // 拾起后行高随叠起进度收缩到 0 → 布局层面闭合原空位，
+                // 其余卡片由 animateItem 平滑上移补位；散开时行高随进度恢复，卡片滑回原槽。
+                // 收缩=full×(1−p)：行距交给外层 spacedBy（不随收缩变化），使 getNodeTopY
+                // 的累加模型（rowHeightNow+rowSpacingPx）与真实布局逐帧精确一致。
+                // fullRowHeights 在测量结果上记录完整高度，供 rowHeightNow 零滞后折算。
+                Modifier.layout { measurable, constraints ->
+                    val placeable = measurable.measure(constraints)
+                    state.fullRowHeights[node.key] = placeable.height.toFloat()
+                    val shrink = placeable.height * (1f - state.stackProgress.value)
+                    val h = shrink.roundToInt().coerceIn(0, placeable.height)
+                    layout(placeable.width, h) {
+                        placeable.placeRelative(0, 0)
+                    }
+                }
+            } else {
+                Modifier
+            },
+        )
+        .zIndex(
+            if (carried) 0.9f - stackIdx * 0.01f
+            else if (isMain) 1f
+            else if (inDragBlock) 0.5f
+            else 0f,
+        )
 }
 
 /**

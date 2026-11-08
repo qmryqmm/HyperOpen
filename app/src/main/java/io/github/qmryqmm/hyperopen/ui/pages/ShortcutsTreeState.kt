@@ -167,6 +167,78 @@ class ShortcutsTreeState(
     }
 
     /**
+     * 组合拖拽松手：把整叠的当前顺序写回数据层（散开后按新顺序落位）。
+     * 主卡在中途交换中已重排到新槽位；携带卡按叠中相对顺序紧随主卡插入，
+     * 原本位于主卡与携带卡之间的卡片被顺移到携带卡之后。同层内整体重排。
+     */
+    fun reorderGroup(mainKey: String, carriedKeys: List<String>) {
+        val nodes = buildNodes()
+        val mainNode = nodes.firstOrNull { it.key == mainKey } ?: return
+        val carriedNodes = carriedKeys.mapNotNull { key -> nodes.firstOrNull { it.key == key } }
+        if (carriedNodes.isEmpty()) return
+        if (mainNode.depth == 0) {
+            // 顶层：主卡位置之后依次放携带卡，其余保持相对顺序
+            val carriedIds = carriedNodes.map { it.item.id }.toSet()
+            val rest = shortcuts.filter { it.id !in carriedIds }
+            val insertAt = rest.indexOfFirst { it.id == mainNode.item.id } + 1
+            if (insertAt <= 0) return
+            val newOrder = rest.toMutableList()
+            newOrder.addAll(insertAt, carriedNodes.map { it.item })
+            shortcuts.clear()
+            shortcuts.addAll(newOrder)
+        } else {
+            // 文件夹子项：同层重排子项列表
+            val fi = shortcuts.indexOfFirst { it.id == mainNode.parentFolderId }
+            if (fi < 0) return
+            val folder = shortcuts[fi]
+            val children = folder.parseFolderChildren().toMutableList()
+            val carriedIds = carriedNodes.map { it.item.id }.toSet()
+            val rest = children.filter { it.id !in carriedIds }
+            val insertAt = rest.indexOfFirst { it.id == mainNode.item.id } + 1
+            val newChildren = rest.toMutableList()
+            newChildren.addAll(insertAt, carriedNodes.map { it.item })
+            shortcuts[fi] = folder.copy().apply { setFolderChildren(newChildren) }
+        }
+        version++
+        onShortcutsChanged()
+    }
+
+    /**
+     * 组合拖拽交换：整叠只以主卡一个身份与未叠起卡片换位。
+     * 主卡一次性越过目标卡落到其另一侧（moveNode 是相邻位交换，数据邻位是携带卡时
+     * 会造成"视觉空操作 + 触觉连响 + 补位迟迟不触发"）；中间的携带卡视作不存在、
+     * 数据顺序保持冻结，松手后由 reorderGroup 在新位置展开排列整叠。
+     */
+    fun moveGroupNode(node: ShortcutRowNode, dir: Int) {
+        val nodes = buildNodes()
+        val carriedIds = nodes.filter { it.key in interactionState.carriedKeys }.map { it.item.id }.toSet()
+        if (node.depth == 0) {
+            val i = shortcuts.indexOfFirst { it.id == node.item.id }
+            if (i < 0) return
+            var j = i + dir
+            while (j in shortcuts.indices && shortcuts[j].id in carriedIds) j += dir
+            if (j !in shortcuts.indices) return
+            val main = shortcuts.removeAt(i)
+            shortcuts.add(j, main) // dir>0 时目标已前移一位，add(j) 恰好落在目标之后；dir<0 时落在目标之前
+        } else {
+            val fi = shortcuts.indexOfFirst { it.id == node.parentFolderId }
+            if (fi < 0) return
+            val folder = shortcuts[fi]
+            val children = folder.parseFolderChildren().toMutableList()
+            val i = children.indexOfFirst { it.id == node.item.id }
+            if (i < 0) return
+            var j = i + dir
+            while (j in children.indices && children[j].id in carriedIds) j += dir
+            if (j !in children.indices) return
+            val main = children.removeAt(i)
+            children.add(j, main)
+            shortcuts[fi] = folder.copy().apply { setFolderChildren(children) }
+        }
+        version++
+        onShortcutsChanged()
+    }
+
+    /**
      * 将拖拽的卡片直接移入目标聚合文件夹。
      */
     fun dropIntoFolder(draggedKey: String, targetFolderKey: String) {

@@ -145,13 +145,25 @@ fun ShortcutsManagementPage(
             ) { index, node ->
                 val isLastChild = node.depth == 1 &&
                         (index == nodes.lastIndex || nodes[index + 1].parentFolderId != node.parentFolderId)
+                // 拖拽主行与散开中的携带行不走 animateItem（位移由 dragRowVisuals 独立驱动，
+                // 叠加 animateItem 会被 LazyColumn 位置动画拉回布局槽位 → 卡片不跟手乱跳）。
+                val skipAnimateItem = node.key == state.draggingKey ||
+                        ((state.groupDragActive || state.groupScattering) && node.key in state.carriedKeys)
                 ShortcutRowEntry(
-                    modifier = if (node.key != state.draggingKey) Modifier.animateItem() else Modifier,
+                    modifier = if (!skipAnimateItem) Modifier.animateItem() else Modifier,
                     node = node,
                     isLastChild = isLastChild,
                     state = state,
                     getNodes = { treeState.buildNodes() },
-                    move = { n, dir -> treeState.moveNode(n, dir) },
+                    move = { n, dir ->
+                        // 组合拖拽：整叠只以主卡身份换位（块交换越过携带卡）；
+                        // 普通拖拽：相邻位交换。
+                        if ((state.groupDragActive || state.groupScattering) && state.carriedKeys.isNotEmpty()) {
+                            treeState.moveGroupNode(n, dir)
+                        } else {
+                            treeState.moveNode(n, dir)
+                        }
+                    },
                     onDropIntoFolder = { draggedKey, targetFolderKey ->
                         treeState.dropIntoFolder(draggedKey, targetFolderKey)
                     },
@@ -163,6 +175,9 @@ fun ShortcutsManagementPage(
                         if (node.depth == 0 && node.item.actionType == ShortcutItem.ACTION_FOLDER) {
                             treeState.autoCollapseDraggedFolder(node.item.id)
                         }
+                    },
+                    onGroupReorder = { mainKey, carriedKeys ->
+                        treeState.reorderGroup(mainKey, carriedKeys)
                     },
                     onRestoreFolderExpanded = { treeState.restoreDraggedFolderExpanded() },
                     folderCollapsed = node.depth == 0 && node.item.actionType == ShortcutItem.ACTION_FOLDER &&
@@ -255,6 +270,7 @@ private fun ShortcutRowEntry(
     onDropOutOfFolder: ((draggedKey: String) -> Unit)? = null,
     onDragStart: (() -> Unit)? = null,
     onRestoreFolderExpanded: () -> Unit = {},
+    onGroupReorder: ((mainKey: String, carriedKeys: List<String>) -> Unit)? = null,
     folderCollapsed: Boolean,
     onToggleCollapsed: () -> Unit,
     onToggle: (Boolean) -> Unit,
@@ -314,6 +330,7 @@ private fun ShortcutRowEntry(
                 onLongPressNoMove = onLongPress,
                 canDropIntoFolder = true,
                 onDragStart = onDragStart,
+                onGroupReorder = onGroupReorder,
                 onDragSettled = {
                     // 恢复拖拽前被自动收起的文件夹展开状态
                     onRestoreFolderExpanded()
