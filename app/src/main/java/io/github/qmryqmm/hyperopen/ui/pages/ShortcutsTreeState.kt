@@ -108,6 +108,29 @@ class ShortcutsTreeState(
         collapsedFolders = collapsedFolders + folderId
     }
 
+    /** 组合拖拽（多选叠起）期间被自动收起的文件夹 id 集合（松手后恢复原展开状态）。 */
+    var groupDragCollapsedFolderIds: Set<String> = emptySet()
+
+    /**
+     * 多选叠起开始时收起选中集内的全部展开态文件夹。
+     * 选中集与长按行同 scopeId 校验保证了选中的文件夹与其子项不会同时在选中集里，
+     * 收起不会移除任何携带行；被收起文件夹自身的 topY 也不变（子项都在其下方），
+     * 拖拽锚点（dragOriginTopY）保持有效。
+     */
+    fun autoCollapseFoldersForGroupDrag(folderIds: Collection<String>) {
+        val newlyCollapsed = folderIds.filter { it !in collapsedFolders }
+        if (newlyCollapsed.isEmpty()) return
+        groupDragCollapsedFolderIds = newlyCollapsed.toSet()
+        collapsedFolders = collapsedFolders + newlyCollapsed.toSet()
+    }
+
+    /** 组合拖拽结束（散开完成）恢复叠起时被自动收起的文件夹。 */
+    fun restoreFoldersExpandedAfterGroupDrag() {
+        if (groupDragCollapsedFolderIds.isEmpty()) return
+        collapsedFolders = collapsedFolders - groupDragCollapsedFolderIds
+        groupDragCollapsedFolderIds = emptySet()
+    }
+
     /** 拖拽结束（松手/取消）恢复被拖文件夹拖拽前的展开状态。 */
     fun restoreDraggedFolderExpanded() {
         dragCollapsedFolderId?.let { collapsedFolders = collapsedFolders - it }

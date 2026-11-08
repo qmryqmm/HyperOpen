@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -1912,6 +1913,7 @@ private fun FolderChildrenEditor(
                                 val h = coordinates.size.height.toFloat()
                                 state.rowBounds[node.key] = topY to h
                                 state.rowHeights[node.key] = h
+                                state.rowWindowY[node.key] = coordinates.positionInWindow().y
                             }
                             .shortcutRowGestures(
                                 state = state,

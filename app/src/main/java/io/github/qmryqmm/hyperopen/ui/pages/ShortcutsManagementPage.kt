@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -179,6 +180,19 @@ fun ShortcutsManagementPage(
                     onGroupReorder = { mainKey, carriedKeys ->
                         treeState.reorderGroup(mainKey, carriedKeys)
                     },
+                    onGroupCollapse = {
+                        // 叠起开始：收起选中集内的全部展开态文件夹
+                        // （选中集同层校验保证不会移除携带行；松手散开完成后恢复）。
+                        val folderIds = nodes.filter {
+                            it.key in state.selection &&
+                                it.depth == 0 &&
+                                it.item.actionType == ShortcutItem.ACTION_FOLDER
+                        }.map { it.item.id }
+                        if (folderIds.isNotEmpty()) {
+                            treeState.autoCollapseFoldersForGroupDrag(folderIds)
+                        }
+                    },
+                    onGroupExpand = { treeState.restoreFoldersExpandedAfterGroupDrag() },
                     onRestoreFolderExpanded = { treeState.restoreDraggedFolderExpanded() },
                     folderCollapsed = node.depth == 0 && node.item.actionType == ShortcutItem.ACTION_FOLDER &&
                             treeState.isFolderCollapsed(node.item.id),
@@ -271,6 +285,8 @@ private fun ShortcutRowEntry(
     onDragStart: (() -> Unit)? = null,
     onRestoreFolderExpanded: () -> Unit = {},
     onGroupReorder: ((mainKey: String, carriedKeys: List<String>) -> Unit)? = null,
+    onGroupCollapse: (() -> Unit)? = null,
+    onGroupExpand: () -> Unit = {},
     folderCollapsed: Boolean,
     onToggleCollapsed: () -> Unit,
     onToggle: (Boolean) -> Unit,
@@ -321,6 +337,7 @@ private fun ShortcutRowEntry(
                 val h = coordinates.size.height.toFloat()
                 state.rowBounds[node.key] = topY to h
                 state.rowHeights[node.key] = h
+                state.rowWindowY[node.key] = coordinates.positionInWindow().y
             }
             .shortcutRowGestures(
                 state = state,
@@ -331,6 +348,8 @@ private fun ShortcutRowEntry(
                 canDropIntoFolder = true,
                 onDragStart = onDragStart,
                 onGroupReorder = onGroupReorder,
+                onGroupCollapse = onGroupCollapse,
+                onGroupExpand = onGroupExpand,
                 onDragSettled = {
                     // 恢复拖拽前被自动收起的文件夹展开状态
                     onRestoreFolderExpanded()
