@@ -50,6 +50,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -66,6 +67,13 @@ import io.github.qmryqmm.hyperopen.ui.IconPainter
 import io.github.qmryqmm.hyperopen.ui.MiuixIconRegistry
 import io.github.qmryqmm.hyperopen.ui.RemixIconRegistry
 import io.github.qmryqmm.hyperopen.ui.components.CollapsibleSectionTitle
+import io.github.qmryqmm.hyperopen.ui.components.ShortcutCard
+import io.github.qmryqmm.hyperopen.ui.components.ShortcutListInteractionState
+import io.github.qmryqmm.hyperopen.ui.components.ShortcutRowNode
+import io.github.qmryqmm.hyperopen.ui.components.dragRowVisuals
+import io.github.qmryqmm.hyperopen.ui.components.duplicateShortcut
+import io.github.qmryqmm.hyperopen.ui.components.newBlankChildShortcut
+import io.github.qmryqmm.hyperopen.ui.components.shortcutRowGestures
 import io.github.qmryqmm.hyperopen.ui.components.toComposeImageBitmap
 import io.github.qmryqmm.hyperopen.view.IconGlyphFactory
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -169,6 +177,8 @@ fun ShortcutEditPage(
     onSave: (ShortcutItem, Boolean) -> Unit,
     onDelete: (ShortcutItem) -> Unit,
     onExitWithoutSave: () -> Unit,
+    onEditChild: ((ShortcutItem, ShortcutItem) -> Unit)? = null,
+    existingShortcuts: List<ShortcutItem> = emptyList(),
 ) {
     val ctx = LocalContext.current
     val lazyListState = rememberLazyListState()
@@ -208,6 +218,11 @@ fun ShortcutEditPage(
         )
     }
     var enabled by remember { mutableStateOf(initialItem.enabled) }
+    // ── FOLDER 子快捷方式卡片列表（替代原 JSON 文本框）：直接编辑子项，保存时序列化回 payload ──
+    val folderChildren = remember {
+        mutableStateListOf<ShortcutItem>().apply { addAll(initialItem.parseFolderChildren()) }
+    }
+    var childrenRev by remember { mutableIntStateOf(0) }
     // ── 提示文字样式（hint* 字段）：颜色 / 透明度 / 投影 / 描边 / 字重 / 字距 / 显隐 ──
     var followGlobalHintStyle by remember { mutableStateOf(initialItem.followGlobalHintStyle) }
     var hintTextColor by remember { mutableIntStateOf(initialItem.hintTextColor) }
@@ -274,7 +289,12 @@ fun ShortcutEditPage(
         newItem.title = title.trim().ifBlank { "快捷方式" }
         newItem.subtitle = subtitle.trim()
         newItem.actionType = actionType
-        newItem.actionPayload = if (actionType == ShortcutItem.ACTION_ACTIVITY) buildActPayload() else actionPayload.trim()
+        newItem.actionPayload = when {
+            actionType == ShortcutItem.ACTION_ACTIVITY -> buildActPayload()
+            // FOLDER：子项以卡片列表维护，保存时序列化回 payload JSON 数组
+            actionType == ShortcutItem.ACTION_FOLDER -> HyperOpenConfig.serializeShortcutsJson(folderChildren.toList())
+            else -> actionPayload.trim()
+        }
         newItem.iconPackage = iconPackage.trim()
         newItem.iconGlyph = iconGlyph.trim()
         newItem.glyphPadEnabled = glyphPadEnabled
@@ -369,11 +389,11 @@ fun ShortcutEditPage(
     // 检查是否有未保存的修改（基准为「最近一次保存」的快照：保存修改后留在编辑页时重置基准，
     // 返回键不会因已保存内容误弹未保存弹窗）
     var savedBaseline by remember { mutableStateOf(initialItem) }
-    val isModified = remember(title, subtitle, actionType, actionPayload, iconPackage, iconGlyph, glyphPadEnabled, glyphPadColor, glyphPadMode, appIconCropMode, enabled, pickedUser, shellAsRoot, actAction, actData, actComponent, actPackage, actExtras, actNewTask, actUseRoot, savedBaseline, followGlobalHintStyle, hintTextColor, hintTextAlpha, hintTextColorSub, hintTextAlphaSub, hintTextShadow, hintTextStroke, hintTextWeight, hintTextLetterSpacing, showHintTitle, showHintSubtitle) {
+    val isModified = remember(title, subtitle, actionType, actionPayload, iconPackage, iconGlyph, glyphPadEnabled, glyphPadColor, glyphPadMode, appIconCropMode, enabled, pickedUser, shellAsRoot, actAction, actData, actComponent, actPackage, actExtras, actNewTask, actUseRoot, savedBaseline, followGlobalHintStyle, hintTextColor, hintTextAlpha, hintTextColorSub, hintTextAlphaSub, hintTextShadow, hintTextStroke, hintTextWeight, hintTextLetterSpacing, showHintTitle, showHintSubtitle, childrenRev) {
         title != savedBaseline.title ||
         subtitle != savedBaseline.subtitle ||
         actionType != savedBaseline.actionType ||
-        actionPayload != savedBaseline.actionPayload ||
+        (actionType != ShortcutItem.ACTION_FOLDER && actionPayload != savedBaseline.actionPayload) ||
         iconPackage != savedBaseline.iconPackage ||
         iconGlyph != savedBaseline.iconGlyph ||
         glyphPadEnabled != savedBaseline.glyphPadEnabled ||
@@ -394,7 +414,11 @@ fun ShortcutEditPage(
         Math.round(hintTextLetterSpacing * 2f) / 2 != Math.round(savedBaseline.hintTextLetterSpacing * 2f) / 2 ||
         showHintTitle != savedBaseline.showHintTitle ||
         showHintSubtitle != savedBaseline.showHintSubtitle ||
-        (actionType == ShortcutItem.ACTION_ACTIVITY && buildActPayload() != savedBaseline.actionPayload)
+        (actionType == ShortcutItem.ACTION_ACTIVITY && buildActPayload() != savedBaseline.actionPayload) ||
+        // FOLDER：子项列表即 payload，双侧归一化序列化后对比（预设手写 JSON 字段顺序差异不误报）
+        (actionType == ShortcutItem.ACTION_FOLDER &&
+            HyperOpenConfig.serializeShortcutsJson(folderChildren.toList()) !=
+                HyperOpenConfig.serializeShortcutsJson(savedBaseline.parseFolderChildren()))
     }
 
     // 响应顶部返回键或系统返回手势（记录初始 trigger，只有在当前页面内新发生点击时才响应）
@@ -530,7 +554,11 @@ fun ShortcutEditPage(
                                 val testItem = initialItem.copy().apply {
                                     this.title = title.trim().ifBlank { "测试快捷方式" }
                                     this.actionType = actionType
-                                    this.actionPayload = if (actionType == ShortcutItem.ACTION_ACTIVITY) buildActPayload() else actionPayload.trim()
+                                    this.actionPayload = when {
+                                        actionType == ShortcutItem.ACTION_ACTIVITY -> buildActPayload()
+                                        actionType == ShortcutItem.ACTION_FOLDER -> HyperOpenConfig.serializeShortcutsJson(folderChildren.toList())
+                                        else -> actionPayload.trim()
+                                    }
                                 }
                                 testItem.userId = pickedUser
                                 testItem.shellUseRoot = shellAsRoot
@@ -927,6 +955,8 @@ fun ShortcutEditPage(
                 }
 
                 val effectiveSpacing = if (followGlobalHintStyle) globalCfg.defaultHintTextLetterSpacing else hintTextLetterSpacing
+                val effectiveShowTitle = if (followGlobalHintStyle) globalCfg.defaultShowHintTitle else showHintTitle
+                val effectiveShowSubtitle = if (followGlobalHintStyle) globalCfg.defaultShowHintSubtitle else showHintSubtitle
 
                 Box(
                     modifier = Modifier
@@ -941,7 +971,7 @@ fun ShortcutEditPage(
                             .padding(horizontal = 18.dp, vertical = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        if (showHintTitle) {
+                        if (effectiveShowTitle) {
                             Text(
                                 text = title.trim().ifBlank { "快捷方式" },
                                 fontSize = 15.sp,
@@ -951,7 +981,7 @@ fun ShortcutEditPage(
                                 style = TextStyle(shadow = previewShadow),
                             )
                         }
-                        if (showHintSubtitle) {
+                        if (effectiveShowSubtitle) {
                             Text(
                                 text = subtitle.trim().ifEmpty { "移至目标图标后松手直接打开" },
                                 fontSize = 11.sp,
@@ -965,36 +995,35 @@ fun ShortcutEditPage(
 
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
-                Text(
-                    text = "文字内容",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MiuixTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
-                )
-                SwitchPreference(
-                    title = "显示提示标题",
-                    summary = "选中图标时胶囊内显示主标题（快捷方式标题）",
-                    checked = showHintTitle,
-                    onCheckedChange = { showHintTitle = it },
-                )
-                SwitchPreference(
-                    title = "显示提示副标题",
-                    summary = "选中图标时胶囊内显示副标题描述",
-                    checked = showHintSubtitle,
-                    onCheckedChange = { showHintSubtitle = it },
-                )
-
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
                 SwitchPreference(
                     title = "提示文字样式跟随全局配置",
-                    summary = "开启后文字描边、投影柔光、字重、字间距与颜色模式均统一跟随全局设置，避免重复调整",
+                    summary = "开启后文字显隐、描边、投影柔光、字重、字间距与颜色均统一跟随全局设置，避免重复调整",
                     checked = followGlobalHintStyle,
                     onCheckedChange = { followGlobalHintStyle = it },
                 )
 
                 if (!followGlobalHintStyle) {
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+                    Text(
+                        text = "文字内容",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MiuixTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
+                    )
+                    SwitchPreference(
+                        title = "显示提示标题",
+                        summary = "选中图标时胶囊内显示主标题（快捷方式标题）",
+                        checked = showHintTitle,
+                        onCheckedChange = { showHintTitle = it },
+                    )
+                    SwitchPreference(
+                        title = "显示提示副标题",
+                        summary = "选中图标时胶囊内显示副标题描述",
+                        checked = showHintSubtitle,
+                        onCheckedChange = { showHintSubtitle = it },
+                    )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
                     Text(
@@ -1372,7 +1401,10 @@ fun ShortcutEditPage(
 
         if (!isNoPayloadAction) {
             item(key = "payload_title") {
-                CollapsibleSectionTitle("动作参数详情 (Payload)", isOpen("payload")) { toggle("payload") }
+                CollapsibleSectionTitle(
+                    if (actionType == ShortcutItem.ACTION_FOLDER) "子快捷方式列表" else "动作参数详情 (Payload)",
+                    isOpen("payload"),
+                ) { toggle("payload") }
             }
             if (isOpen("payload")) {
             item(key = "payload_card") {
@@ -1514,6 +1546,14 @@ fun ShortcutEditPage(
                                 onCheckedChange = { actNewTask = it },
                             )
                         }
+                    } else if (actionType == ShortcutItem.ACTION_FOLDER) {
+                        // ── FOLDER：子快捷方式卡片列表（替代原 JSON 文本框）──
+                        FolderChildrenEditor(
+                            children = folderChildren,
+                            existingShortcuts = existingShortcuts.filter { it.id != initialItem.id },
+                            onEditChild = { child -> onEditChild?.invoke(buildSavedItem(), child) },
+                            onChanged = { childrenRev++ },
+                        )
                     } else {
                     Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                         Column {
@@ -1722,3 +1762,267 @@ fun ShortcutEditPage(
 // ─────────────────────────────────────────────────────────────────────
 // 预选动作列表项数据与弹窗
 // ─────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────
+// FOLDER 子快捷方式卡片列表编辑器（替代原「子快捷方式 JSON」文本框）
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * 聚合文件夹的子快捷方式卡片列表：
+ *  - 轻触卡片：进入子快捷方式参数编辑（经 onEditChild 回调）；
+ *  - 长按拖拽：子项交换排序；
+ *  - 长按不动：多选后复制 / 删除；
+ *  - 头部按钮：从预设添加（排除文件夹，不支持嵌套）/ 新建空白子项。
+ */
+@Composable
+private fun FolderChildrenEditor(
+    children: androidx.compose.runtime.snapshots.SnapshotStateList<ShortcutItem>,
+    existingShortcuts: List<ShortcutItem>,
+    onEditChild: (ShortcutItem) -> Unit,
+    onChanged: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val state = remember { ShortcutListInteractionState() }
+    var showPresetDialog by remember { mutableStateOf(false) }
+    var showExistingPicker by remember { mutableStateOf(false) }
+
+    fun childNodes(): List<ShortcutRowNode> =
+        children.map { ShortcutRowNode("c:${it.id}", "children", it, 1, null) }
+
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        // ── 头部：标题 + 添加入口 ──
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "子快捷方式 (${children.size})",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            TextButton(text = "从已有添加", onClick = { showExistingPicker = true })
+            Spacer(modifier = Modifier.width(6.dp))
+            TextButton(text = "从预设添加", onClick = { showPresetDialog = true })
+            Spacer(modifier = Modifier.width(6.dp))
+            TextButton(
+                text = "空白子项",
+                onClick = {
+                    children.add(newBlankChildShortcut())
+                    onChanged()
+                },
+            )
+        }
+
+        // ── 多选操作条（内联）──
+        if (state.multiSelect) {
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "已选 ${state.selection.size} 项",
+                    fontSize = 12.sp,
+                    color = MiuixTheme.colorScheme.primary,
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                TextButton(
+                    text = "复制 (${state.selection.size})",
+                    onClick = {
+                        val selected = children.filter { "c:${it.id}" in state.selection }
+                        for (item in selected.asReversed()) {
+                            val i = children.indexOfFirst { it.id == item.id }
+                            if (i >= 0) children.add(i + 1, duplicateShortcut(item))
+                        }
+                        onChanged()
+                        state.clearSelection()
+                        android.widget.Toast.makeText(ctx, "已复制 ${selected.size} 个子快捷方式", android.widget.Toast.LENGTH_SHORT).show()
+                    },
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                TextButton(
+                    text = "删除 (${state.selection.size})",
+                    onClick = {
+                        val n = state.selection.size
+                        children.removeAll { "c:${it.id}" in state.selection }
+                        onChanged()
+                        state.clearSelection()
+                        android.widget.Toast.makeText(ctx, "已删除 $n 个子快捷方式", android.widget.Toast.LENGTH_SHORT).show()
+                    },
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                TextButton(text = "取消", onClick = { state.clearSelection() })
+            }
+        }
+
+        if (children.isEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "暂无子快捷方式。点击「从已有添加」复制列表里的快捷方式进来，或「从预设添加」/「空白子项」创建；卡片轻触编辑参数，长按拖拽排序，长按不动多选后可复制 / 删除。",
+                fontSize = 12.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                lineHeight = 18.sp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            Spacer(Modifier.height(8.dp))
+            val nodes = childNodes()
+            children.forEachIndexed { index, child ->
+                val node = nodes[index]
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 5.dp)
+                        .onSizeChanged { state.rowHeights[node.key] = it.height.toFloat() }
+                        .shortcutRowGestures(
+                            state = state,
+                            nodeKey = node.key,
+                            getNodes = ::childNodes,
+                            move = { n, dir ->
+                                val i = children.indexOfFirst { it.id == n.item.id }
+                                val j = i + dir
+                                if (i >= 0 && j >= 0 && j < children.size) {
+                                    val tmp = children[i]
+                                    children[i] = children[j]
+                                    children[j] = tmp
+                                    onChanged()
+                                }
+                            },
+                            onLongPressNoMove = { state.toggleSelection(node.key) },
+                        )
+                        .dragRowVisuals(state, node, nodes),
+                ) {
+                    ShortcutCard(
+                        item = child,
+                        selected = node.key in state.selection,
+                        endActions = {
+                            Switch(
+                                checked = child.enabled,
+                                onCheckedChange = { on ->
+                                    if (!state.clickSuppressed()) {
+                                        // 必须整体替换元素触发重组，不能原地改 Java 字段
+                                        children[index] = child.copy().also { it.enabled = on }
+                                        onChanged()
+                                    }
+                                },
+                            )
+                        },
+                        onClick = {
+                            if (!state.clickSuppressed()) {
+                                if (state.multiSelect) {
+                                    state.toggleSelection(node.key)
+                                } else {
+                                    onEditChild(child)
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    if (showPresetDialog) {
+        PresetActionPickerDialog(
+            onDismiss = { showPresetDialog = false },
+            onSelect = { preset ->
+                val child = ShortcutItem(
+                    java.util.UUID.randomUUID().toString(),
+                    preset.title,
+                    preset.subtitle,
+                    preset.actionType,
+                    preset.actionPayload,
+                    preset.iconPackage,
+                    preset.iconGlyph,
+                    preset.tintColor,
+                    true,
+                    preset.glyphPadEnabled,
+                    preset.glyphPadColor,
+                    preset.glyphPadMode,
+                )
+                child.userId = preset.userId
+                child.shellUseRoot = preset.shellUseRoot
+                if (child.actionType == ShortcutItem.ACTION_INTENT_URI) {
+                    child.actionPayload = ShortcutItem.syncUserMarker(child.actionPayload, preset.userId)
+                }
+                children.add(child)
+                onChanged()
+                showPresetDialog = false
+            },
+            filter = { it.actionType != ShortcutItem.ACTION_FOLDER },
+        )
+    }
+
+    // ── 从已有快捷方式添加（复制语义：新 id、标题不变；排除聚合文件夹与已在本列表的项）──
+    if (showExistingPicker) {
+        val candidates = existingShortcuts.filter {
+            it.actionType != ShortcutItem.ACTION_FOLDER && children.none { c -> c.id == it.id }
+        }
+        Dialog(
+            onDismissRequest = { showExistingPicker = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Card(modifier = Modifier.fillMaxWidth(0.92f)) {
+                Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                    Text(
+                        text = "从已有快捷方式添加（复制为子项）",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MiuixTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                    )
+                    if (candidates.isEmpty()) {
+                        Text(
+                            text = "没有可添加的快捷方式。已在子列表中的项和聚合文件夹不可添加。",
+                            fontSize = 13.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            lineHeight = 19.sp,
+                            modifier = Modifier
+                                .padding(horizontal = 20.dp)
+                                .padding(bottom = 16.dp),
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .height(360.dp)
+                                .fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        ) {
+                            items(candidates.size) { i ->
+                                val item = candidates[i]
+                                ShortcutCard(
+                                    item = item,
+                                    summaryOverride = item.subtitle.ifBlank { "轻触右侧按钮添加为子项" },
+                                    endActions = {
+                                        TextButton(
+                                            text = "添加",
+                                            onClick = {
+                                                val copy = item.copy().also { it.id = java.util.UUID.randomUUID().toString() }
+                                                children.add(copy)
+                                                onChanged()
+                                                showExistingPicker = false
+                                                android.widget.Toast.makeText(ctx, "已添加「${item.title}」", android.widget.Toast.LENGTH_SHORT).show()
+                                            },
+                                        )
+                                    },
+                                    onClick = {
+                                        val copy = item.copy().also { it.id = java.util.UUID.randomUUID().toString() }
+                                        children.add(copy)
+                                        onChanged()
+                                        showExistingPicker = false
+                                        android.widget.Toast.makeText(ctx, "已添加「${item.title}」", android.widget.Toast.LENGTH_SHORT).show()
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(text = "关闭", onClick = { showExistingPicker = false })
+                    }
+                }
+            }
+        }
+    }
+}

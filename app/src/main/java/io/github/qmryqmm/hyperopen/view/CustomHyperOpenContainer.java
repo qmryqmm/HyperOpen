@@ -526,8 +526,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
 
         // 重置顶部提示文字为初始状态（含 hint* 自定义样式清空：颜色/投影/描边/字重/字距/显隐）
         if (headerTitle != null && headerSubtitle != null) {
-            HintTextStyler.reset(headerTitle, true);
-            HintTextStyler.reset(headerSubtitle, false);
+            HintTextStyler.reset(headerTitle, true, config);
+            HintTextStyler.reset(headerSubtitle, false, config);
             headerTitle.setText("滑动选择快捷方式");
             headerSubtitle.setText("移至目标图标后松手直接打开");
         }
@@ -1004,8 +1004,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
             if (currentSelectedBubble != null) {
                 currentSelectedBubble.setSelectedState(false);
                 currentSelectedBubble = null;
-                HintTextStyler.reset(headerTitle, true);
-                HintTextStyler.reset(headerSubtitle, false);
+                HintTextStyler.reset(headerTitle, true, config);
+                HintTextStyler.reset(headerSubtitle, false, config);
                 headerTitle.setText("滑动选择快捷方式");
                 headerSubtitle.setText("移至目标图标后松手直接打开");
             }

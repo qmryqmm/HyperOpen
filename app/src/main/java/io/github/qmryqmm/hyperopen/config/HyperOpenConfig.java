@@ -150,6 +150,10 @@ public class HyperOpenConfig {
     public int defaultHintTextWeight = 3;
     /** 全局默认字间距 (-2 ~ +6，默认 0) */
     public float defaultHintTextLetterSpacing = 0f;
+    /** 全局默认是否显示提示标题 (默认 true) */
+    public boolean defaultShowHintTitle = true;
+    /** 全局默认是否显示提示副标题 (默认 true) */
+    public boolean defaultShowHintSubtitle = true;
 
     /** 文件夹二级气泡悬停展开延迟 (100 ~ 600 ms，默认 250 ms) */
     public int folderHoverDelayMs = 250;
@@ -405,6 +409,8 @@ public class HyperOpenConfig {
                     config.defaultHintTextShadow = bundle.getInt("default_hint_text_shadow", 0);
                     config.defaultHintTextWeight = bundle.getInt("default_hint_text_weight", 3);
                     config.defaultHintTextLetterSpacing = bundle.getFloat("default_hint_text_letter_spacing", 0f);
+                    config.defaultShowHintTitle = bundle.getBoolean("default_show_hint_title", true);
+                    config.defaultShowHintSubtitle = bundle.getBoolean("default_show_hint_subtitle", true);
                     config.folderHoverDelayMs = bundle.getInt("folder_hover_delay_ms", 250);
                     config.stockSystemRegion = bundle.getBoolean("stock_system_region", true);
                     config.ringCount = bundle.getInt("ring_count", 2);
@@ -509,6 +515,8 @@ public class HyperOpenConfig {
         config.defaultHintTextShadow = xPrefs.getInt("default_hint_text_shadow", 0);
         config.defaultHintTextWeight = xPrefs.getInt("default_hint_text_weight", 3);
         config.defaultHintTextLetterSpacing = xPrefs.getFloat("default_hint_text_letter_spacing", 0f);
+        config.defaultShowHintTitle = xPrefs.getBoolean("default_show_hint_title", true);
+        config.defaultShowHintSubtitle = xPrefs.getBoolean("default_show_hint_subtitle", true);
         config.folderHoverDelayMs = xPrefs.getInt("folder_hover_delay_ms", 250);
         config.stockSystemRegion = xPrefs.getBoolean("stock_system_region", true);
         config.ringCount = xPrefs.getInt("ring_count", 2);
@@ -603,6 +611,8 @@ public class HyperOpenConfig {
         config.defaultHintTextShadow = sp.getInt("default_hint_text_shadow", 0);
         config.defaultHintTextWeight = sp.getInt("default_hint_text_weight", 3);
         config.defaultHintTextLetterSpacing = sp.getFloat("default_hint_text_letter_spacing", 0f);
+        config.defaultShowHintTitle = sp.getBoolean("default_show_hint_title", true);
+        config.defaultShowHintSubtitle = sp.getBoolean("default_show_hint_subtitle", true);
         config.folderHoverDelayMs = sp.getInt("folder_hover_delay_ms", 250);
         config.stockSystemRegion = sp.getBoolean("stock_system_region", true);
         config.ringCount = sp.getInt("ring_count", 2);
@@ -698,6 +708,8 @@ public class HyperOpenConfig {
             .putInt("default_hint_text_shadow", defaultHintTextShadow)
             .putInt("default_hint_text_weight", defaultHintTextWeight)
             .putFloat("default_hint_text_letter_spacing", defaultHintTextLetterSpacing)
+            .putBoolean("default_show_hint_title", defaultShowHintTitle)
+            .putBoolean("default_show_hint_subtitle", defaultShowHintSubtitle)
             .putInt("folder_hover_delay_ms", folderHoverDelayMs)
             .putInt("ring_count", ringCount)
             .putFloat("max_scale", maxScale)

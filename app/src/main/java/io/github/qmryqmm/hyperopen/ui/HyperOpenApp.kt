@@ -80,6 +80,9 @@ import io.github.qmryqmm.hyperopen.ui.pages.ParamsPage
 import io.github.qmryqmm.hyperopen.ui.pages.PermissionCheckPage
 import io.github.qmryqmm.hyperopen.ui.pages.SettingsPage
 import io.github.qmryqmm.hyperopen.ui.pages.ShortcutsManagementPage
+import io.github.qmryqmm.hyperopen.ui.pages.ShortcutsTreeState
+import io.github.qmryqmm.hyperopen.ui.pages.ShortcutMultiSelectBottomBar
+import io.github.qmryqmm.hyperopen.ui.pages.rememberShortcutsTreeState
 import io.github.qmryqmm.hyperopen.ui.pages.ThemeSettingsPage
 import io.github.qmryqmm.hyperopen.util.LiveWallpaperLoader
 import kotlinx.coroutines.Dispatchers
@@ -218,6 +221,8 @@ fun HyperOpenApp(
     var defaultHintTextShadow by remember { mutableFloatStateOf(initialConfig.defaultHintTextShadow.toFloat()) }
     var defaultHintTextWeight by remember { mutableIntStateOf(initialConfig.defaultHintTextWeight) }
     var defaultHintTextLetterSpacing by remember { mutableFloatStateOf(initialConfig.defaultHintTextLetterSpacing) }
+    var defaultShowHintTitle by remember { mutableStateOf(initialConfig.defaultShowHintTitle) }
+    var defaultShowHintSubtitle by remember { mutableStateOf(initialConfig.defaultShowHintSubtitle) }
     var folderHoverDelayMs by remember { mutableFloatStateOf(initialConfig.folderHoverDelayMs.toFloat()) }
     val shortcuts = remember { mutableStateListOf<ShortcutItem>().apply { addAll(initialConfig.shortcuts) } }
     var safetyTick by remember { mutableStateOf(0) }
@@ -302,6 +307,14 @@ fun HyperOpenApp(
     var isNewShortcut by remember { mutableStateOf(false) }
     var requestEditBackTrigger by remember { mutableIntStateOf(0) }
     var showNewShortcutPresetDialog by remember { mutableStateOf(false) }
+    // ── 聚合文件夹的「子快捷方式编辑会话」状态 ──
+    // editingChildFolder != null 时表示正在编辑某个文件夹的子项：
+    // editingItem = 子项，editingChildFolder = 文件夹草稿（含子项列表）。
+    var editingChildFolder by remember { mutableStateOf<ShortcutItem?>(null) }
+    /** 子项编辑结束后是否返回文件夹编辑器（false = 返回快捷项目列表） */
+    var editingChildReturnToEditor by remember { mutableStateOf(false) }
+    /** 该文件夹是否尚未加入快捷项目列表（新建流程，保存仍为「确认添加」） */
+    var editingChildFolderIsNew by remember { mutableStateOf(false) }
 
     // ── 布局容量联动（方案 A）：几何参数决定「图标数量」滑块上限，超额值就地钳制使滑块位置随容量移动 ──
     // 容量探针与排布引擎同源（同一 dpToPx 管道的 px 值），弧形扇面无几何上限恒为 15
@@ -394,6 +407,8 @@ fun HyperOpenApp(
         c.defaultHintTextShadow = defaultHintTextShadow.toInt()
         c.defaultHintTextWeight = defaultHintTextWeight
         c.defaultHintTextLetterSpacing = defaultHintTextLetterSpacing
+        c.defaultShowHintTitle = defaultShowHintTitle
+        c.defaultShowHintSubtitle = defaultShowHintSubtitle
         c.folderHoverDelayMs = folderHoverDelayMs.toInt()
         c.maxScale = maxScale
         c.influenceRadius = influenceRadius.toInt()
@@ -440,6 +455,8 @@ fun HyperOpenApp(
         c.shortcuts = ArrayList(shortcuts)
         c.save(ctx)
     }
+
+    val shortcutsTreeState = rememberShortcutsTreeState(shortcuts = shortcuts, onShortcutsChanged = { persist() })
 
     // 进入时校准一次：旧配置的「图标数量」可能超过当前几何容量（仅超出时钳制+持久化，0=全部显示不动）
     LaunchedEffect(Unit) {
@@ -488,6 +505,8 @@ fun HyperOpenApp(
         defaultHintTextShadow = defaults.defaultHintTextShadow.toFloat()
         defaultHintTextWeight = defaults.defaultHintTextWeight
         defaultHintTextLetterSpacing = defaults.defaultHintTextLetterSpacing
+        defaultShowHintTitle = defaults.defaultShowHintTitle
+        defaultShowHintSubtitle = defaults.defaultShowHintSubtitle
         folderHoverDelayMs = defaults.folderHoverDelayMs.toFloat()
         maxScale = defaults.maxScale
         influenceRadius = defaults.influenceRadius.toFloat()
@@ -535,36 +554,45 @@ fun HyperOpenApp(
         persist()
     }
 
-    // 拦截系统返回键与手势返回：在二级页时优先处理
-    LaunchedEffect(activity, subPage) {
+    // 拦截系统返回键与手势返回：在二级页或多选时优先处理
+    LaunchedEffect(activity, subPage, page, shortcutsTreeState.multiSelect) {
         activity?.backPressConsumer = {
-            when (subPage) {
-                2 -> {
-                    requestEditBackTrigger++
-                    true
-                }
-                3 -> {
-                    // 排版预览页：有未保存修改时弹「是否保存」，否则直接退出
-                    requestPreviewExit()
-                    true
-                }
-                else -> if (subPage != 0) {
-                    subPage = 0
-                    editingItem = null
-                    true
-                } else {
-                    false
+            if (subPage == 0 && page == 1 && shortcutsTreeState.multiSelect) {
+                shortcutsTreeState.interactionState.clearSelection()
+                true
+            } else {
+                when (subPage) {
+                    2 -> {
+                        requestEditBackTrigger++
+                        true
+                    }
+                    3 -> {
+                        // 排版预览页：有未保存修改时弹「是否保存」，否则直接退出
+                        requestPreviewExit()
+                        true
+                    }
+                    else -> if (subPage != 0) {
+                        subPage = 0
+                        editingItem = null
+                        true
+                    } else {
+                        false
+                    }
                 }
             }
         }
     }
-    BackHandler(enabled = subPage != 0) {
-        when (subPage) {
-            2 -> requestEditBackTrigger++
-            3 -> requestPreviewExit()
-            else -> {
-                subPage = 0
-                editingItem = null
+    BackHandler(enabled = subPage != 0 || (page == 1 && shortcutsTreeState.multiSelect)) {
+        if (subPage == 0 && page == 1 && shortcutsTreeState.multiSelect) {
+            shortcutsTreeState.interactionState.clearSelection()
+        } else {
+            when (subPage) {
+                2 -> requestEditBackTrigger++
+                3 -> requestPreviewExit()
+                else -> {
+                    subPage = 0
+                    editingItem = null
+                }
             }
         }
     }
@@ -576,12 +604,17 @@ fun HyperOpenApp(
         val topAppBarScrollBehavior = MiuixScrollBehavior()
         val title = when (subPage) {
             1 -> "主题设置"
-            2 -> if (isNewShortcut) "新建快捷方式" else "快捷方式参数设置"
+            2 -> when {
+                editingChildFolder != null -> "子快捷方式参数设置"
+                isNewShortcut && editingItem?.actionType == ShortcutItem.ACTION_FOLDER -> "新建聚合文件夹"
+                isNewShortcut -> "新建快捷方式"
+                else -> "快捷方式参数设置"
+            }
             3 -> "指纹快捷整体预览"
             4 -> "权限检测"
             else -> when (page) {
                 0 -> "参数配置"
-                1 -> "快捷项目"
+                1 -> if (shortcutsTreeState.multiSelect) "已选择 ${shortcutsTreeState.selectedCount} 项" else "快捷项目"
                 else -> "软件设置"
             }
         }
@@ -612,6 +645,10 @@ fun HyperOpenApp(
                                             editingItem = null
                                         }
                                     })
+                                } else if (page == 1 && shortcutsTreeState.multiSelect) {
+                                    BackNavigationIcon(onClick = {
+                                        shortcutsTreeState.interactionState.clearSelection()
+                                    })
                                 }
                             },
                         )
@@ -634,10 +671,11 @@ fun HyperOpenApp(
                     enter = fadeIn() + expandVertically(),
                     exit = fadeOut() + shrinkVertically(),
                 ) {
-                    AppBottomBar(
+                    AppBottomBarOrMultiSelect(
                         items = navItems,
                         selectedPage = page,
                         floating = floatingNavBar,
+                        shortcutsTreeState = shortcutsTreeState,
                         onPageSelect = { page = it },
                     )
                 }
@@ -664,44 +702,33 @@ fun HyperOpenApp(
                     }
                     2 -> {
                         editingItem?.let { currentEdit ->
-                            ShortcutEditPage(
+                            // 整段编辑会话抽为独立组合函数（避免 Scaffold content lambda 方法体超 64KB）
+                            ShortcutEditSession(
                                 contentPadding = pagePadding,
-                                initialItem = currentEdit,
+                                shortcuts = shortcuts,
+                                currentEdit = currentEdit,
                                 isNew = isNewShortcut,
                                 backTrigger = requestEditBackTrigger,
-                                onSave = { updated, exitAfter ->
-                                    if (isNewShortcut) {
-                                        shortcuts.add(updated)
-                                        Toast.makeText(ctx, "已添加快捷方式: ${updated.title}", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        val idx = shortcuts.indexOfFirst { it.id == updated.id }
-                                        if (idx >= 0) {
-                                            shortcuts[idx] = updated.copy()
-                                            Toast.makeText(ctx, "已保存参数设置", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                    persist()
-                                    if (exitAfter) {
-                                        subPage = 0
-                                        editingItem = null
-                                    }
-                                    // exitAfter = false（「保存修改」）：留在编辑界面，editingItem 保持不变
-                                },
-                                onDelete = { toDelete ->
-                                    shortcuts.removeAll { it.id == toDelete.id }
-                                    persist()
-                                    Toast.makeText(ctx, "已删除快捷方式", Toast.LENGTH_SHORT).show()
+                                childFolder = editingChildFolder,
+                                returnToEditor = editingChildReturnToEditor,
+                                childFolderIsNew = editingChildFolderIsNew,
+                                persist = { persist() },
+                                setEditingItem = { editingItem = it },
+                                setEditingChildFolder = { editingChildFolder = it },
+                                setEditingChildFolderIsNew = { editingChildFolderIsNew = it },
+                                setNew = { isNewShortcut = it },
+                                resetBackTrigger = { requestEditBackTrigger = 0 },
+                                exitToList = {
                                     subPage = 0
                                     editingItem = null
-                                },
-                                onExitWithoutSave = {
-                                    subPage = 0
-                                    editingItem = null
+                                    editingChildFolder = null
                                 },
                             )
                         }
                     }
                     3 -> {
+                        // 整段预览会话抽为局部组合 lambda（编译为独立合成方法，避免 Scaffold content 方法体超 64KB）
+                        val previewContent: @Composable () -> Unit = {
                         // 指纹快捷方式整体预览与长按自由排版界面
                         val currentConfig = HyperOpenConfig.loadFromApp(ctx).apply {
                             this.materialStyle = materialStyle
@@ -734,6 +761,8 @@ fun HyperOpenApp(
                             this.defaultHintTextShadow = defaultHintTextShadow.toInt()
                             this.defaultHintTextWeight = defaultHintTextWeight
                             this.defaultHintTextLetterSpacing = defaultHintTextLetterSpacing
+                            this.defaultShowHintTitle = defaultShowHintTitle
+                            this.defaultShowHintSubtitle = defaultShowHintSubtitle
                             this.folderHoverDelayMs = folderHoverDelayMs.toInt()
                             this.maxScale = maxScale
                             this.influenceRadius = influenceRadius.toInt()
@@ -1007,6 +1036,8 @@ fun HyperOpenApp(
                                 },
                             )
                         }
+                        }
+                        previewContent()
                     }
                     4 -> {
                         PermissionCheckPage(
@@ -1015,6 +1046,8 @@ fun HyperOpenApp(
                         )
                     }
                     else -> {
+                        // when(page) 整段抽为局部组合 lambda（编译为独立合成方法，避免 Scaffold content 方法体超 64KB）
+                        val pagesContent: @Composable () -> Unit = {
                         when (page) {
                             0 -> {
                                 ParamsPage(
@@ -1087,6 +1120,10 @@ fun HyperOpenApp(
                                     onDefaultHintTextWeight = { defaultHintTextWeight = it; persist() },
                                     defaultHintTextLetterSpacing = defaultHintTextLetterSpacing,
                                     onDefaultHintTextLetterSpacing = { defaultHintTextLetterSpacing = it; persist() },
+                                    defaultShowHintTitle = defaultShowHintTitle,
+                                    onDefaultShowHintTitle = { defaultShowHintTitle = it; persist() },
+                                    defaultShowHintSubtitle = defaultShowHintSubtitle,
+                                    onDefaultShowHintSubtitle = { defaultShowHintSubtitle = it; persist() },
                                     folderHoverDelayMs = folderHoverDelayMs,
                                     onFolderHoverDelayMs = { folderHoverDelayMs = it; persist() },
                                     maxScale = maxScale,
@@ -1164,6 +1201,7 @@ fun HyperOpenApp(
                                     contentPadding = innerPadding,
                                     lazyListState = shortcutsListState,
                                     shortcuts = shortcuts,
+                                    treeState = shortcutsTreeState,
                                     onOpenPreview = {
                                         subPage = 3
                                     },
@@ -1179,10 +1217,46 @@ fun HyperOpenApp(
                                         requestEditBackTrigger = 0
                                         editingItem = item.copy()
                                         isNewShortcut = false
+                                        editingChildFolder = null
+                                        subPage = 2
+                                    },
+                                    onChildClick = { parent, child ->
+                                        // 从列表树形直接进入文件夹子项编辑（结束后返回列表）
+                                        requestEditBackTrigger = 0
+                                        editingChildFolderIsNew = false
+                                        editingChildReturnToEditor = false
+                                        editingChildFolder = parent.copy()
+                                        editingItem = child.copy()
+                                        isNewShortcut = false
                                         subPage = 2
                                     },
                                     onAddShortcut = {
                                         showNewShortcutPresetDialog = true
+                                    },
+                                    onCreateFolder = {
+                                        // 空白聚合文件夹：payload 必须 "[]"（空串会被 parseShortcutsJson 解析成默认项）
+                                        val folder = ShortcutItem(
+                                            java.util.UUID.randomUUID().toString(),
+                                            "新聚合文件夹",
+                                            "点击编辑子快捷方式与样式",
+                                            ShortcutItem.ACTION_FOLDER,
+                                            "[]",
+                                            "",
+                                            "remix:folder-fill",
+                                            0xFF2A82E4.toInt(),
+                                            true,
+                                            true,
+                                            0xFF2A82E4.toInt(),
+                                            1,
+                                        )
+                                        requestEditBackTrigger = 0
+                                        isNewShortcut = true
+                                        editingChildFolder = null
+                                        editingItem = folder
+                                        subPage = 2
+                                    },
+                                    onShortcutsChanged = {
+                                        persist()
                                     },
                                 )
                             }
@@ -1212,6 +1286,8 @@ fun HyperOpenApp(
                                 )
                             }
                         }
+                        }
+                        pagesContent()
                     }
                 }
             }
@@ -1544,6 +1620,39 @@ private fun AppBottomBar(
 }
 
 /**
+ * 底部操作栏控制器：在快捷项目页处于多选状态时，
+ * 暂时替代常规底部导航栏（自动适配悬浮胶囊底栏与贴底底栏样式）。
+ */
+@Composable
+private fun AppBottomBarOrMultiSelect(
+    items: List<NavigationItem>,
+    selectedPage: Int,
+    floating: Boolean,
+    shortcutsTreeState: ShortcutsTreeState,
+    onPageSelect: (Int) -> Unit,
+) {
+    if (selectedPage == 1 && shortcutsTreeState.multiSelect) {
+        ShortcutMultiSelectBottomBar(
+            floating = floating,
+            isAllSelected = shortcutsTreeState.isAllSelected,
+            hasSelection = shortcutsTreeState.selectedCount > 0,
+            onSelectAll = { shortcutsTreeState.selectAllOrNone() },
+            onMove = { shortcutsTreeState.showMoveDialog = true },
+            onCopy = { shortcutsTreeState.copySelected() },
+            onDelete = { shortcutsTreeState.showDeleteDialog = true },
+            onCancel = { shortcutsTreeState.interactionState.clearSelection() },
+        )
+    } else {
+        AppBottomBar(
+            items = items,
+            selectedPage = selectedPage,
+            floating = floating,
+            onPageSelect = onPageSelect,
+        )
+    }
+}
+
+/**
  * 参数页的分段式分页控件。
  *
  * 刻意不用 Miuix 的 [TabRow]：它的 `backgroundColor` 是按 Tab 逐项求值（带 selected 参数）
@@ -1591,5 +1700,148 @@ private fun ParamsTabBar(
                 )
             }
         }
+    }
+}
+
+/**
+ * 「快捷方式参数设置」编辑会话（从 HyperOpenApp 主体抽出，避免 Scaffold content 方法体超 64KB）。
+ * 承载两类会话：
+ *  1) 顶层快捷方式 / 聚合文件夹的编辑（childFolder = null）；
+ *  2) 聚合文件夹内子快捷方式的编辑（childFolder = 文件夹草稿，currentEdit = 子项）。
+ * 会话约定：子项保存时写回文件夹草稿并同步列表（文件夹已在列表时持久化）；
+ * 丢弃时子项回滚为最近保存态；exitAfter 后按 returnToEditor 返回文件夹编辑器或快捷项目列表。
+ */
+@Composable
+private fun ShortcutEditSession(
+    contentPadding: PaddingValues,
+    shortcuts: SnapshotStateList<ShortcutItem>,
+    currentEdit: ShortcutItem,
+    isNew: Boolean,
+    backTrigger: Int,
+    childFolder: ShortcutItem?,
+    returnToEditor: Boolean,
+    childFolderIsNew: Boolean,
+    persist: () -> Unit,
+    setEditingItem: (ShortcutItem?) -> Unit,
+    setEditingChildFolder: (ShortcutItem?) -> Unit,
+    setEditingChildFolderIsNew: (Boolean) -> Unit,
+    setNew: (Boolean) -> Unit,
+    resetBackTrigger: () -> Unit,
+    exitToList: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    // key：文件夹编辑 ↔ 子项编辑切换时重建编辑页状态
+    //（ShortcutEditPage 内部状态未按 initialItem 加 key，必须在此处兜底）
+    key(currentEdit.id, childFolder?.id ?: "") {
+        ShortcutEditPage(
+            contentPadding = contentPadding,
+            initialItem = currentEdit,
+            isNew = isNew,
+            backTrigger = backTrigger,
+            existingShortcuts = shortcuts,
+            onEditChild = { folderDraft, child ->
+                // 从文件夹编辑器进入子项编辑：保留文件夹草稿，切到子项
+                setEditingChildFolderIsNew(isNew)
+                resetBackTrigger()
+                setNew(false)
+                setEditingChildFolder(folderDraft)
+                setEditingItem(child.copy())
+            },
+            onSave = { updated, exitAfter ->
+                if (childFolder != null) {
+                    // ── 子快捷方式会话：把 updated 写回文件夹草稿 ──
+                    val children = childFolder.parseFolderChildren().toMutableList()
+                    val ci = children.indexOfFirst { it.id == updated.id }
+                    if (ci >= 0) children[ci] = updated.copy() else children.add(updated.copy())
+                    val newFolder = childFolder.copy().apply { setFolderChildren(children) }
+                    // 同步草稿（后续丢弃时以最近保存态回滚）
+                    setEditingChildFolder(newFolder)
+                    setEditingItem(updated.copy())
+                    if (!childFolderIsNew) {
+                        // 文件夹已在列表中：写回并持久化（「进入子级 = 隐式提交父级草稿」）
+                        val fi = shortcuts.indexOfFirst { it.id == newFolder.id }
+                        if (fi >= 0) shortcuts[fi] = newFolder.copy()
+                        persist()
+                    }
+                    if (exitAfter) {
+                        Toast.makeText(ctx, "已保存子快捷方式: ${updated.title}", Toast.LENGTH_SHORT).show()
+                        if (returnToEditor) {
+                            // 返回文件夹编辑器
+                            setNew(childFolderIsNew)
+                            setEditingItem(newFolder)
+                            setEditingChildFolder(null)
+                        } else {
+                            exitToList()
+                        }
+                    } else {
+                        // 「保存修改」：留在子项编辑界面
+                        Toast.makeText(ctx, "已保存参数设置", Toast.LENGTH_SHORT).show()
+                    }
+                } else if (isNew) {
+                    shortcuts.add(updated)
+                    Toast.makeText(ctx, "已添加快捷方式: ${updated.title}", Toast.LENGTH_SHORT).show()
+                    persist()
+                    if (exitAfter) exitToList()
+                } else {
+                    val idx = shortcuts.indexOfFirst { it.id == updated.id }
+                    if (idx >= 0) {
+                        shortcuts[idx] = updated.copy()
+                        Toast.makeText(ctx, "已保存参数设置", Toast.LENGTH_SHORT).show()
+                    }
+                    persist()
+                    if (exitAfter) exitToList()
+                    // exitAfter = false（「保存修改」）：留在编辑界面，editingItem 保持不变
+                }
+            },
+            onDelete = { toDelete ->
+                if (childFolder != null) {
+                    // ── 删除文件夹内子项 ──
+                    val children = childFolder.parseFolderChildren().toMutableList()
+                    children.removeAll { it.id == toDelete.id }
+                    val newFolder = childFolder.copy().apply { setFolderChildren(children) }
+                    if (!childFolderIsNew) {
+                        val fi = shortcuts.indexOfFirst { it.id == newFolder.id }
+                        if (fi >= 0) shortcuts[fi] = newFolder.copy()
+                        persist()
+                    }
+                    Toast.makeText(ctx, "已删除子快捷方式", Toast.LENGTH_SHORT).show()
+                    if (returnToEditor) {
+                        setNew(childFolderIsNew)
+                        setEditingItem(newFolder)
+                        setEditingChildFolder(null)
+                    } else {
+                        exitToList()
+                    }
+                } else {
+                    shortcuts.removeAll { it.id == toDelete.id }
+                    persist()
+                    Toast.makeText(ctx, "已删除快捷方式", Toast.LENGTH_SHORT).show()
+                    exitToList()
+                }
+            },
+            onExitWithoutSave = {
+                if (childFolder != null) {
+                    // ── 丢弃子项改动：子项回滚为最近保存态（currentEdit）──
+                    val children = childFolder.parseFolderChildren().toMutableList()
+                    val ci = children.indexOfFirst { it.id == currentEdit.id }
+                    if (ci >= 0) children[ci] = currentEdit.copy()
+                    val newFolder = childFolder.copy().apply { setFolderChildren(children) }
+                    if (returnToEditor) {
+                        if (!childFolderIsNew) {
+                            val fi = shortcuts.indexOfFirst { it.id == newFolder.id }
+                            if (fi >= 0) shortcuts[fi] = newFolder.copy()
+                            persist()
+                        }
+                        setNew(childFolderIsNew)
+                        setEditingItem(newFolder)
+                        setEditingChildFolder(null)
+                    } else {
+                        exitToList()
+                    }
+                } else {
+                    exitToList()
+                }
+            },
+        )
     }
 }

@@ -106,6 +106,8 @@ fun ParamsPage(
     defaultHintTextShadow: Float, onDefaultHintTextShadow: (Float) -> Unit,
     defaultHintTextWeight: Int, onDefaultHintTextWeight: (Int) -> Unit,
     defaultHintTextLetterSpacing: Float, onDefaultHintTextLetterSpacing: (Float) -> Unit,
+    defaultShowHintTitle: Boolean, onDefaultShowHintTitle: (Boolean) -> Unit,
+    defaultShowHintSubtitle: Boolean, onDefaultShowHintSubtitle: (Boolean) -> Unit,
     folderHoverDelayMs: Float, onFolderHoverDelayMs: (Float) -> Unit,
     maxScale: Float, onMaxScale: (Float) -> Unit,
     influenceRadius: Float, onInfluenceRadius: (Float) -> Unit,
@@ -758,6 +760,18 @@ fun ParamsPage(
                         )
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                         SmallTitle("全局文字版式与智能色彩（未单独指定的项均生效）")
+                        SwitchPreference(
+                            title = "默认显示提示标题",
+                            summary = "未单独设置的快捷方式，选中时默认在胶囊内展示主标题",
+                            checked = defaultShowHintTitle,
+                            onCheckedChange = onDefaultShowHintTitle,
+                        )
+                        SwitchPreference(
+                            title = "默认显示提示副标题",
+                            summary = "未单独设置的快捷方式，选中时默认在胶囊内展示副标题描述",
+                            checked = defaultShowHintSubtitle,
+                            onCheckedChange = onDefaultShowHintSubtitle,
+                        )
                         RadioButtonPreference(
                             title = "智能跟随图标底色 / 主题色（推荐）",
                             summary = "每个快捷方式激活时，提示文字自动提取该图标底垫色或主题色，灵动且高辨识度",

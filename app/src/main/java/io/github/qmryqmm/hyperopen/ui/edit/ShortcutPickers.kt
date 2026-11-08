@@ -495,7 +495,10 @@ val PRESET_ACTIONS = listOf(
 fun PresetActionPickerDialog(
     onDismiss: () -> Unit,
     onSelect: (PresetAction) -> Unit,
+    /** 可选过滤器（如添加文件夹子项时排除 FOLDER，避免嵌套） */
+    filter: ((PresetAction) -> Boolean)? = null,
 ) {
+    val presets = if (filter == null) PRESET_ACTIONS else PRESET_ACTIONS.filter(filter)
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -528,7 +531,7 @@ fun PresetActionPickerDialog(
                         .heightIn(max = 480.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(PRESET_ACTIONS) { action ->
+                    items(presets) { action ->
                         val vector = remember(action.iconGlyph) {
                             if (RemixIconRegistry.isRemixIcon(action.iconGlyph)) {
                                 RemixIconRegistry.find(action.iconGlyph)

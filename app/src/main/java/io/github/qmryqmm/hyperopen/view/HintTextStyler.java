@@ -39,13 +39,28 @@ public final class HintTextStyler {
     }
 
     public static void apply(TextView tv, ShortcutItem item, boolean isTitle, io.github.qmryqmm.hyperopen.config.HyperOpenConfig config) {
-        boolean show = isTitle ? item.showHintTitle : item.showHintSubtitle;
-        tv.setVisibility(show ? View.VISIBLE : View.GONE);
-
-        if (isTitle) {
-            tv.setText(item.title == null ? "" : item.title);
+        if (tv == null) return;
+        boolean show;
+        if (item != null && item.followGlobalHintStyle) {
+            show = isTitle ? (config == null || config.defaultShowHintTitle)
+                           : (config == null || config.defaultShowHintSubtitle);
+        } else if (item != null) {
+            show = isTitle ? item.showHintTitle : item.showHintSubtitle;
         } else {
-            tv.setText(item.subtitle == null ? "" : item.subtitle);
+            show = isTitle ? (config == null || config.defaultShowHintTitle)
+                           : (config == null || config.defaultShowHintSubtitle);
+        }
+        tv.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (!show) {
+            return;
+        }
+
+        if (item != null) {
+            if (isTitle) {
+                tv.setText(item.title == null ? "" : item.title);
+            } else {
+                tv.setText(item.subtitle == null ? "" : item.subtitle);
+            }
         }
 
         int color;
@@ -94,9 +109,14 @@ public final class HintTextStyler {
 
     /** 复位到 idle/默认样式（buildHeader 初始观感：白标题假粗体、0xAA 白副标题、无特效） */
     public static void reset(TextView tv, boolean isTitle) {
-        if (tv.getVisibility() != View.VISIBLE) {
-            tv.setVisibility(View.VISIBLE);
-        }
+        reset(tv, isTitle, null);
+    }
+
+    public static void reset(TextView tv, boolean isTitle, io.github.qmryqmm.hyperopen.config.HyperOpenConfig config) {
+        if (tv == null) return;
+        boolean show = isTitle ? (config == null || config.defaultShowHintTitle)
+                               : (config == null || config.defaultShowHintSubtitle);
+        tv.setVisibility(show ? View.VISIBLE : View.GONE);
         tv.setTextColor(isTitle ? Color.WHITE : 0xAAFFFFFF);
         tv.setShadowLayer(0f, 0f, 0f, 0);
         if (tv instanceof StrokeTextView) {

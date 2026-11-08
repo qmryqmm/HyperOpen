@@ -1045,8 +1045,8 @@ class HyperOpenPreviewView(
             it.animate().alpha(if (isRingSectorActive()) 0.5f else 1f).setDuration(200).start()
         }
 
-        HintTextStyler.reset(headerTitle, true)
-        HintTextStyler.reset(headerSubtitle, false)
+        HintTextStyler.reset(headerTitle, true, config)
+        HintTextStyler.reset(headerSubtitle, false, config)
         headerTitle.text = "自定义排版模式"
         headerTitle.setTextColor(0xFFFF9933.toInt())
         headerSubtitle.text = "长按并拖动图标交换位置，点击空白完成"
@@ -1084,8 +1084,8 @@ class HyperOpenPreviewView(
             }.start()
         }
 
-        HintTextStyler.reset(headerTitle, true)
-        HintTextStyler.reset(headerSubtitle, false)
+        HintTextStyler.reset(headerTitle, true, config)
+        HintTextStyler.reset(headerSubtitle, false, config)
         headerTitle.text = "滑动选择快捷方式"
         headerSubtitle.text = "移至目标图标后松手直接打开"
 
@@ -1456,8 +1456,8 @@ class HyperOpenPreviewView(
             if (currentSelectedBubble != null) {
                 currentSelectedBubble?.setSelectedState(false)
                 currentSelectedBubble = null
-                HintTextStyler.reset(headerTitle, true)
-                HintTextStyler.reset(headerSubtitle, false)
+                HintTextStyler.reset(headerTitle, true, config)
+                HintTextStyler.reset(headerSubtitle, false, config)
                 headerTitle.text = "滑动选择快捷方式"
                 headerSubtitle.text = "移至目标图标后松手直接打开"
             }
@@ -1475,8 +1475,8 @@ class HyperOpenPreviewView(
             b.applyScale(1.0f)
             b.setIconAlpha(config.iconAlpha)
         }
-        HintTextStyler.reset(headerTitle, true)
-        HintTextStyler.reset(headerSubtitle, false)
+        HintTextStyler.reset(headerTitle, true, config)
+        HintTextStyler.reset(headerSubtitle, false, config)
         headerTitle.text = "滑动选择快捷方式"
         headerSubtitle.text = "移至目标图标后松手直接打开"
         sectorOverlay.setHighlight(-1, 0, false)

@@ -208,6 +208,8 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putInt("default_hint_text_shadow", sp.getInt("default_hint_text_shadow", 0));
                 bundle.putInt("default_hint_text_weight", sp.getInt("default_hint_text_weight", 3));
                 bundle.putFloat("default_hint_text_letter_spacing", sp.getFloat("default_hint_text_letter_spacing", 0f));
+                bundle.putBoolean("default_show_hint_title", sp.getBoolean("default_show_hint_title", true));
+                bundle.putBoolean("default_show_hint_subtitle", sp.getBoolean("default_show_hint_subtitle", true));
                 bundle.putInt("folder_hover_delay_ms", sp.getInt("folder_hover_delay_ms", 250));
                 bundle.putFloat("max_scale", sp.getFloat("max_scale", 1.40f));
                 bundle.putInt("influence_radius", sp.getInt("influence_radius", 70));
