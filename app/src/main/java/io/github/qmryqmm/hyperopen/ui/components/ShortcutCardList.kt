@@ -110,6 +110,13 @@ class ShortcutListInteractionState {
      *  双重位移。拖拽锚定必须用窗口坐标——手指与滚动 clamp 都活在窗口坐标系里。 */
     val rowWindowY = mutableStateMapOf<String, Float>()
 
+    /** 拖拽锚定的「首个可见行 key」提供器（由宿主页面设置，如主列表用
+     *  lazyListState.firstVisibleItemIndex 映射）。首行（node0）滚出屏幕后其
+     *  rowWindowY 会被冻结、不再随滚动/滚动钳制更新——必须改锚到始终在屏内、
+     *  rowWindowY 每帧刷新的首个可见行，否则滚到底部叠起/折叠文件夹时整叠漂移。
+     *  未设置（如编辑页，子项全在单个 Column 内、node0 永不冻结）时回退锚定 node0。 */
+    var firstVisibleNodeKeyProvider: (() -> String?)? = null
+
     /** 相邻行之间的间距（density 感知像素值，由 shortcutRowGestures 在组合期写入）。 */
     var rowSpacingPx: Float by mutableFloatStateOf(10f)
     var selection: Set<String> by mutableStateOf(emptySet())
@@ -254,14 +261,19 @@ class ShortcutListInteractionState {
 
     /** 节点当前窗口坐标 Y。
      *  方向 A 拆解：窗口位置 = 内容原点窗口 Y + 内容坐标偏移。
-     *   - 内容原点窗口 Y（锚点）取首行 rowWindowY：只随「滚动/滚动钳制」变化（慢变化，
-     *     onGloballyPositioned 滞后一帧无妨——钳制是随叠起动画的平滑渐变，不产生闪烁）；
+     *   - 内容原点窗口 Y（锚点）取「首个可见行」rowWindowY（firstVisibleNodeKeyProvider 提供）：
+     *     只随「滚动/滚动钳制」变化（慢变化，onGloballyPositioned 滞后一帧无妨——钳制是
+     *     随叠起动画的平滑渐变，不产生闪烁）。锚首个可见行而非 node0：node0 滚出屏幕后
+     *     rowWindowY 被冻结、不再反映滚动钳制 → 滚到底部叠起/折叠文件夹时整叠漂离手指。
      *   - 内容偏移 getNodeTopY：纯同步累加（nodes 顺序即当前数据），交换当帧立刻反映新槽位，
      *     与布局位移「一增一减」同帧抵消——彻底消除交换闪烁。
      *  两者各管各的坐标系，互不拖累：快变化（交换）走同步内容坐标，慢变化（滚动钳制）走窗口锚点。 */
     fun windowTopOf(key: String, nodes: List<ShortcutRowNode>): Float {
-        val anchorWin = nodes.firstOrNull()?.let { rowWindowY[it.key] } ?: 0f
-        return anchorWin + getNodeTopY(key, nodes)
+        val anchorKey = firstVisibleNodeKeyProvider?.invoke()
+            ?.takeIf { nodes.any { n -> n.key == it } }
+            ?: nodes.firstOrNull()?.key
+        val anchorWin = anchorKey?.let { rowWindowY[it] } ?: 0f
+        return anchorWin + (getNodeTopY(key, nodes) - getNodeTopY(anchorKey!!, nodes))
     }
 
     /**

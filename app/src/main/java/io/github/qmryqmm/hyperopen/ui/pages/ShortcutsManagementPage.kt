@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
@@ -80,6 +81,18 @@ fun ShortcutsManagementPage(
     onShortcutsChanged: () -> Unit = {},
 ) {
     val state = treeState.interactionState
+
+    // 拖拽锚定改锚「首个可见行」：node0 滚出屏幕后 rowWindowY 被冻结，会丢滚动钳制位移，
+    // 导致滚到底部叠起/折叠文件夹时整叠漂离手指。firstVisibleItemIndex 组合期同步、永不冻结。
+    // 注意：LazyColumn 前 2 个 item 是 actions_card 与 list_header，快捷节点从 index 2 起，
+    // 需扣掉 2 才是 buildNodes() 里的下标。
+    SideEffect {
+        state.firstVisibleNodeKeyProvider = {
+            val nodes = treeState.buildNodes()
+            val nodeIndex = lazyListState.firstVisibleItemIndex - 2
+            nodes.getOrNull(nodeIndex)?.key
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(

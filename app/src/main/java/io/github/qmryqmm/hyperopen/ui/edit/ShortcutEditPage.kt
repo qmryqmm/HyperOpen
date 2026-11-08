@@ -590,50 +590,59 @@ fun ShortcutEditPage(
                             EditBadge()
                         }
                         Spacer(Modifier.height(14.dp))
-                        TextButton(
-                            text = "立即启动测试",
-                            onClick = {
-                                val testItem = initialItem.copy().apply {
-                                    this.title = title.trim().ifBlank { "测试快捷方式" }
-                                    this.actionType = actionType
-                                    this.actionPayload = when {
-                                        actionType == ShortcutItem.ACTION_ACTIVITY -> buildActPayload()
-                                        actionType == ShortcutItem.ACTION_FOLDER -> HyperOpenConfig.serializeShortcutsJson(folderChildren.toList())
-                                        else -> actionPayload.trim()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            TextButton(
+                                text = if (isNew) "确认添加" else "保存修改",
+                                onClick = {
+                                    val newItem = buildSavedItem()
+                                    if (isNew) {
+                                        // 新建：保存后退出编辑器，回到快捷方式列表
+                                        onSave(newItem, true)
+                                    } else {
+                                        // 编辑：保存后留在编辑界面继续调整（不自动退出）
+                                        savedBaseline = newItem
+                                        onSave(newItem, false)
                                     }
-                                }
-                                testItem.userId = pickedUser
-                                testItem.shellUseRoot = shellAsRoot
-                                if (testItem.actionType == ShortcutItem.ACTION_INTENT_URI) {
-                                    // 与保存一致：URI 同步写回用户标记，测试的就是最终生效的 payload
-                                    testItem.actionPayload = ShortcutItem.syncUserMarker(testItem.actionPayload, pickedUser)
-                                }
-                                testItem.executeAsync(ctx)
-                            },
-                        )
+                                },
+                                colors = ButtonDefaults.textButtonColorsPrimary(),
+                            )
+                            TextButton(
+                                text = "启动测试",
+                                onClick = {
+                                    val testItem = initialItem.copy().apply {
+                                        this.title = title.trim().ifBlank { "测试快捷方式" }
+                                        this.actionType = actionType
+                                        this.actionPayload = when {
+                                            actionType == ShortcutItem.ACTION_ACTIVITY -> buildActPayload()
+                                            actionType == ShortcutItem.ACTION_FOLDER -> HyperOpenConfig.serializeShortcutsJson(folderChildren.toList())
+                                            else -> actionPayload.trim()
+                                        }
+                                    }
+                                    testItem.userId = pickedUser
+                                    testItem.shellUseRoot = shellAsRoot
+                                    if (testItem.actionType == ShortcutItem.ACTION_INTENT_URI) {
+                                        // 与保存一致：URI 同步写回用户标记，测试的就是最终生效的 payload
+                                        testItem.actionPayload = ShortcutItem.syncUserMarker(testItem.actionPayload, pickedUser)
+                                    }
+                                    testItem.executeAsync(ctx)
+                                },
+                            )
+                            if (!isNew) {
+                                TextButton(
+                                    text = "删除此项",
+                                    onClick = {
+                                        onDelete(initialItem)
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
-        }
-
-        // ── 基础信息 ──
-        item(key = "basic_info_title") {
-            CollapsibleSectionTitle("基础参数", isOpen("basic_info")) { toggle("basic_info") }
-        }
-        if (isOpen("basic_info")) {
-        item(key = "basic_info_card") {
-            Card(
-                modifier = Modifier
-                    .padding(horizontal = 12.dp)
-                    .fillMaxWidth(),
-            ) {
-                SwitchPreference(
-                    title = "在指纹快捷面板中启用",
-                    checked = enabled,
-                    onCheckedChange = { enabled = it },
-                )
-            }
-        }
         }
 
         // ── 启动选项类型选择 ──
@@ -983,39 +992,6 @@ fun ShortcutEditPage(
                     }
                 }
             }
-            }
-        }
-
-        // ── 保存与删除按钮 ──
-        item(key = "confirm_buttons") {
-            Box(modifier = Modifier.padding(horizontal = 12.dp)) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    TextButton(
-                        text = if (isNew) "确认添加" else "保存修改",
-                        onClick = {
-                            val newItem = buildSavedItem()
-                            if (isNew) {
-                                // 新建：保存后退出编辑器，回到快捷方式列表
-                                onSave(newItem, true)
-                            } else {
-                                // 编辑：保存后留在编辑界面继续调整（不自动退出）
-                                savedBaseline = newItem
-                                onSave(newItem, false)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.textButtonColorsPrimary(),
-                    )
-                    if (!isNew) {
-                        TextButton(
-                            text = "删除此快捷方式",
-                            onClick = {
-                                onDelete(initialItem)
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
             }
         }
         item { Spacer(Modifier.height(30.dp)) }
