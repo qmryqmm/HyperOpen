@@ -198,7 +198,7 @@ fun SettingsPage(
                     onClick = onResetDefaults,
                 )
                 ArrowPreference(
-                    title = "恢复预设布局",
+                    title = "恢复预设快捷项目",
                     summary = "重置快捷项目列表为预设",
                     startAction = {
                         Icon(

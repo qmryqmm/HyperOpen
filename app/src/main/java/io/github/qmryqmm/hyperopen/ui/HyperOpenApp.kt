@@ -1397,7 +1397,7 @@ fun HyperOpenApp(
                             .padding(24.dp),
                     ) {
                         Text(
-                            text = "恢复预设布局？",
+                            text = "恢复预设快捷项目？",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = MiuixTheme.colorScheme.onSurface,
@@ -1427,7 +1427,7 @@ fun HyperOpenApp(
                                     shortcuts.clear()
                                     shortcuts.addAll(HyperOpenConfig.getDefaultShortcuts())
                                     persist()
-                                    Toast.makeText(ctx, "已恢复预设布局", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(ctx, "已恢复预设快捷项目", Toast.LENGTH_SHORT).show()
                                 },
                             )
                         }
