@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -58,7 +59,7 @@ import kotlin.math.abs
  * 交互约定（长按语义区分）：
  *  - 轻触卡片：点击回调（BasicComponent 原生点击，带水波纹）；
  *  - 长按后未位移抬起：进入/调整多选；
- *  - 长按后拖动：交换式拖拽排序（同级降阻穿透跨越）、直接移入目标文件夹、或拖拽移出文件夹。
+ *  - 长按后拖动：绝对坐标平滑拖拽排序（零顿挫、零跳跃）、直接移入目标文件夹、或拖拽移出文件夹。
  */
 
 /** 树形/卡片列表中的可视化行：key 用于拖拽与多选定位，scopeId 是「排序作用域」（同域才可交换位置）。 */
@@ -75,7 +76,13 @@ data class ShortcutRowNode(
 /** 拖拽排序 + 长按多选的共享状态机。 */
 class ShortcutListInteractionState {
     var draggingKey: String? by mutableStateOf(null)
-    var dragOffsetY: Float by mutableFloatStateOf(0f)
+
+    /** 拖拽开始时被拖拽项在整个列表中的初始基准 Y 坐标 */
+    var dragOriginTopY: Float by mutableFloatStateOf(0f)
+
+    /** 手指从长按被拖起那一刻开始累加的总垂直拖动物理距离（绝对物理输入） */
+    var totalDragY: Float by mutableFloatStateOf(0f)
+
     val rowHeights = mutableStateMapOf<String, Float>()
     val rowBounds = mutableStateMapOf<String, Pair<Float, Float>>() // key -> (topY, height)
     var selection: Set<String> by mutableStateOf(emptySet())
@@ -104,7 +111,7 @@ class ShortcutListInteractionState {
     fun clickSuppressed(): Boolean = suppressClick
 
     /**
-     * 辅助纯计算：获取指定 key 在当前节点排布中的相对 Y 坐标（避免依赖异步 callback 导致时序滞后）。
+     * 辅助纯计算：获取指定 key 在当前节点排布中的相对 Y 坐标（基于当前节点顺序及实测行高）。
      */
     fun getNodeTopY(targetKey: String, nodes: List<ShortcutRowNode>): Float {
         var acc = 0f
@@ -116,24 +123,26 @@ class ShortcutListInteractionState {
     }
 
     /**
-     * 拖拽位移增量 → 支持直接拖入文件夹检测 + 子项移出文件夹检测 + 稳定降阻穿透排序。
+     * 拖拽位移增量 → 绝对物理坐标驱动，中心线穿透判定，绝无异步时序跳动与震荡！
      */
     fun onDragDelta(
         dy: Float,
         nodes: List<ShortcutRowNode>,
         move: (node: ShortcutRowNode, dir: Int) -> Unit,
         canDropIntoFolder: Boolean = false,
+        onHapticTick: (() -> Unit)? = null,
     ) {
         val dk = draggingKey ?: return
-        dragOffsetY += dy
+        totalDragY += dy
 
         val curIdx = nodes.indexOfFirst { it.key == dk }
         if (curIdx < 0) return
         val draggedNode = nodes[curIdx]
 
-        val dragTopY = getNodeTopY(dk, nodes) + dragOffsetY
+        // 被拖拽卡片当前的绝对视觉顶部和中心坐标（严格跟随手指输入，与底层重绘彻底解耦）
+        val currentVisualTopY = dragOriginTopY + totalDragY
         val dragH = rowHeights[dk] ?: 180f
-        val dragCenterY = dragTopY + dragH / 2f
+        val dragCenterY = currentVisualTopY + dragH / 2f
 
         // ── 场景 1：拖拽子项（depth == 1）时的移出文件夹检测 ──
         if (canDropIntoFolder && draggedNode.depth == 1) {
@@ -152,7 +161,7 @@ class ShortcutListInteractionState {
                 if (dragCenterY < pTop || dragCenterY > pBottom + 20f) {
                     isDraggingOutOfFolder = true
                     targetFolderKey = null
-                    return // 准备移出到根列表，暂停内部子项顺序交换
+                    return // 处于准备移出到根列表状态，暂不触发内部子项交换
                 } else {
                     isDraggingOutOfFolder = false
                 }
@@ -190,9 +199,8 @@ class ShortcutListInteractionState {
         // 悬停在目标文件夹上准备移入时，暂不触发上下交换，方便平稳松手
         if (targetFolderKey != null) return
 
-        // ── 场景 3：同级交换排序（单次采样最多触发一次有序交换，杜绝 while 正负震荡死循环）──
-        if (dragOffsetY == 0f) return
-        val dir = if (dragOffsetY > 0f) 1 else -1
+        // ── 场景 3：同级卡片中心线穿透交换（优雅、自然、零顿挫）──
+        val dir = if (dy >= 0f) 1 else -1
 
         // 视觉方向上最近的同作用域行 = 作用域内相邻行
         var j = -1
@@ -206,22 +214,20 @@ class ShortcutListInteractionState {
         }
         if (j < 0) return
 
-        val hi = rowHeights[nodes[curIdx].key] ?: 180f
-        val hj = rowHeights[nodes[j].key] ?: 180f
+        val targetTopY = getNodeTopY(nodes[j].key, nodes)
+        val targetH = rowHeights[nodes[j].key] ?: 180f
+        val targetCenterY = targetTopY + targetH / 2f
 
-        // 交换门槛：普通相邻卡片中心距（降阻穿透，越过展开文件夹不再累加子项总高）
-        val threshold = (hi + hj) / 2f
-        if (abs(dragOffsetY) >= threshold) {
-            // 计算实际跨过的全部视觉块高，以便精确反向位移补偿，保持卡片无感吸附手指
-            var blockH = hj
-            if (dir > 0) {
-                for (t in curIdx + 1 until j) blockH += (rowHeights[nodes[t].key] ?: 180f) + 10f
-            } else {
-                for (t in j + 1 until curIdx) blockH += (rowHeights[nodes[t].key] ?: 180f) + 10f
-            }
+        // 当手指拖拽的中心线越过相邻卡片的中心线时，触发交换！
+        val shouldSwap = if (dir > 0) {
+            dragCenterY >= targetCenterY
+        } else {
+            dragCenterY <= targetCenterY
+        }
 
+        if (shouldSwap) {
             move(nodes[curIdx], dir)
-            dragOffsetY -= dir * blockH
+            onHapticTick?.invoke()
         }
     }
 }
@@ -268,7 +274,9 @@ fun Modifier.shortcutRowGestures(
             // ── 阶段二：长按已触发 → 手势独占 ──
             state.suppressClick = true
             state.draggingKey = nodeKey
-            state.dragOffsetY = 0f
+            val initialNodes = getNodes()
+            state.dragOriginTopY = state.getNodeTopY(nodeKey, initialNodes)
+            state.totalDragY = 0f
             state.targetFolderKey = null
             state.isDraggingOutOfFolder = false
             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
@@ -295,7 +303,15 @@ fun Modifier.shortcutRowGestures(
                         onDragStart?.invoke()
                     }
                     if (dp != Offset.Zero) {
-                        state.onDragDelta(dp.y, getNodes(), move, canDropIntoFolder)
+                        state.onDragDelta(
+                            dy = dp.y,
+                            nodes = getNodes(),
+                            move = move,
+                            canDropIntoFolder = canDropIntoFolder,
+                            onHapticTick = {
+                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            },
+                        )
                     }
                 }
             } finally {
@@ -303,7 +319,7 @@ fun Modifier.shortcutRowGestures(
                     onDragSettled()
                 }
                 state.draggingKey = null
-                state.dragOffsetY = 0f
+                state.totalDragY = 0f
                 state.targetFolderKey = null
                 state.isDraggingOutOfFolder = false
             }
@@ -311,7 +327,7 @@ fun Modifier.shortcutRowGestures(
     }
 }
 
-/** 拖拽中的行视觉反馈：整块（文件夹+子项）随手势平移，主行轻微放大并抬起。 */
+/** 拖拽中的行视觉反馈：整块（文件夹+子项）随手势平移，主行轻微放大并抬起，完美贴合圆角无黑边。 */
 @Composable
 fun Modifier.dragRowVisuals(
     state: ShortcutListInteractionState,
@@ -324,13 +340,26 @@ fun Modifier.dragRowVisuals(
     } else null
     val inDragBlock = dragKey == node.key || (draggedFolderId != null && node.parentFolderId == draggedFolderId)
     val isMain = dragKey == node.key
+
+    // 计算当前项为了绝对精确锚定在当前手指视觉坐标上所需的平移偏移
+    val anchorKey = if (draggedFolderId != null && node.parentFolderId == draggedFolderId) dragKey else node.key
+    val visualTranslationY = if (anchorKey != null) {
+        val anchorSlotY = state.getNodeTopY(anchorKey, nodes)
+        val targetAnchorTopY = state.dragOriginTopY + state.totalDragY
+        targetAnchorTopY - anchorSlotY
+    } else 0f
+
     return this
         .graphicsLayer {
-            if (inDragBlock) translationY = state.dragOffsetY
+            if (inDragBlock) {
+                translationY = visualTranslationY
+            }
             if (isMain) {
-                scaleX = 1.04f
-                scaleY = 1.04f
-                shadowElevation = 12f
+                scaleX = 1.02f
+                scaleY = 1.02f
+                shadowElevation = 14f
+                shape = RoundedCornerShape(16.dp)
+                clip = false
             }
         }
         .zIndex(if (isMain) 1f else if (inDragBlock) 0.5f else 0f)

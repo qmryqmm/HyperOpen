@@ -176,7 +176,7 @@ class ShortcutsTreeState(
         onShortcutsChanged()
         interactionState.targetFolderKey = null
         interactionState.draggingKey = null
-        interactionState.dragOffsetY = 0f
+        interactionState.totalDragY = 0f
         Toast.makeText(context, "已将「${draggedItem.title}」放入「${targetFolder.title}」", Toast.LENGTH_SHORT).show()
     }
 
@@ -208,7 +208,7 @@ class ShortcutsTreeState(
         version++
         onShortcutsChanged()
         interactionState.draggingKey = null
-        interactionState.dragOffsetY = 0f
+        interactionState.totalDragY = 0f
         interactionState.isDraggingOutOfFolder = false
         Toast.makeText(context, "已将「${draggedItem.title}」移出到快捷列表", Toast.LENGTH_SHORT).show()
     }

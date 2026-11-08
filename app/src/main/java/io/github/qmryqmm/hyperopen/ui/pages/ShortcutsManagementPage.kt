@@ -46,6 +46,8 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
+import top.yukonga.miuix.kmp.icon.extended.ExpandLess
+import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.icon.extended.ScreenMirroring
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -144,6 +146,7 @@ fun ShortcutsManagementPage(
                 val isLastChild = node.depth == 1 &&
                         (index == nodes.lastIndex || nodes[index + 1].parentFolderId != node.parentFolderId)
                 ShortcutRowEntry(
+                    modifier = if (node.key != state.draggingKey) Modifier.animateItem() else Modifier,
                     node = node,
                     isLastChild = isLastChild,
                     state = state,
@@ -229,6 +232,7 @@ fun ShortcutsManagementPage(
 /** 树形行（顶层卡片 / 文件夹子项缩进卡片），承载长按拖拽 + 多选手势。 */
 @Composable
 private fun ShortcutRowEntry(
+    modifier: Modifier = Modifier,
     node: ShortcutRowNode,
     isLastChild: Boolean,
     state: ShortcutListInteractionState,
@@ -279,7 +283,8 @@ private fun ShortcutRowEntry(
     }
 
     Box(
-        modifier = rowModifier
+        modifier = modifier
+            .then(rowModifier)
             .onGloballyPositioned { coordinates ->
                 val topY = coordinates.positionInParent().y
                 val h = coordinates.size.height.toFloat()
@@ -325,16 +330,17 @@ private fun ShortcutRowEntry(
                     if (node.depth == 0 && node.item.actionType == ShortcutItem.ACTION_FOLDER) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
+                                .size(38.dp)
                                 .clip(CircleShape)
                                 .background(MiuixTheme.colorScheme.surfaceVariant)
                                 .clickable(onClick = onToggleCollapsed),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(
-                                text = if (folderCollapsed) "▾" else "▴",
-                                fontSize = 15.sp,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            Icon(
+                                imageVector = if (folderCollapsed) MiuixIcons.ExpandMore else MiuixIcons.ExpandLess,
+                                contentDescription = if (folderCollapsed) "展开文件夹" else "收起文件夹",
+                                tint = MiuixTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp),
                             )
                         }
                         Spacer(modifier = Modifier.width(8.dp))
