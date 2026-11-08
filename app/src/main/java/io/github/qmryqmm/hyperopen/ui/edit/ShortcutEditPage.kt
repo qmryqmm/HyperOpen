@@ -50,7 +50,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -88,6 +90,7 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
+import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Photos
 import top.yukonga.miuix.kmp.icon.extended.Scan
@@ -1786,25 +1789,59 @@ private fun FolderChildrenEditor(
     var showPresetDialog by remember { mutableStateOf(false) }
     var showExistingPicker by remember { mutableStateOf(false) }
 
-    fun childNodes(): List<ShortcutRowNode> =
-        children.map { ShortcutRowNode("c:${it.id}", "children", it, 1, null) }
+    fun childNodes(): List<ShortcutRowNode> {
+        val seen = HashSet<String>()
+        return children.mapIndexed { idx, it ->
+            var k = "c:${it.id}"
+            if (!seen.add(k)) {
+                k = "c:${it.id}#$idx"
+                seen.add(k)
+            }
+            ShortcutRowNode(k, "children", it, 1, null)
+        }
+    }
 
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-        // ── 头部：标题 + 添加入口 ──
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // ── 头部：标题与提示 ──
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 text = "子快捷方式 (${children.size})",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
                 color = MiuixTheme.colorScheme.onSurface,
             )
             Spacer(modifier = Modifier.weight(1f))
-            TextButton(text = "从已有添加", onClick = { showExistingPicker = true })
-            Spacer(modifier = Modifier.width(6.dp))
-            TextButton(text = "从预设添加", onClick = { showPresetDialog = true })
-            Spacer(modifier = Modifier.width(6.dp))
-            TextButton(
-                text = "空白子项",
+            Text(
+                text = "长按拖拽排序",
+                fontSize = 12.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+
+        // ── 三种添加入口（均分宽度按钮组，带图标，绝不拥挤挤压）──
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ChildAddActionButton(
+                title = "从已有添加",
+                icon = MiuixIcons.Copy,
+                modifier = Modifier.weight(1f),
+                onClick = { showExistingPicker = true },
+            )
+            ChildAddActionButton(
+                title = "从预设添加",
+                icon = MiuixIcons.Tune,
+                modifier = Modifier.weight(1f),
+                onClick = { showPresetDialog = true },
+            )
+            ChildAddActionButton(
+                title = "空白子项",
+                icon = MiuixIcons.Add,
+                modifier = Modifier.weight(1f),
                 onClick = {
                     children.add(newBlankChildShortcut())
                     onChanged()
@@ -1865,54 +1902,61 @@ private fun FolderChildrenEditor(
             val nodes = childNodes()
             children.forEachIndexed { index, child ->
                 val node = nodes[index]
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 5.dp)
-                        .onSizeChanged { state.rowHeights[node.key] = it.height.toFloat() }
-                        .shortcutRowGestures(
-                            state = state,
-                            nodeKey = node.key,
-                            getNodes = ::childNodes,
-                            move = { n, dir ->
-                                val i = children.indexOfFirst { it.id == n.item.id }
-                                val j = i + dir
-                                if (i >= 0 && j >= 0 && j < children.size) {
-                                    val tmp = children[i]
-                                    children[i] = children[j]
-                                    children[j] = tmp
-                                    onChanged()
-                                }
-                            },
-                            onLongPressNoMove = { state.toggleSelection(node.key) },
-                        )
-                        .dragRowVisuals(state, node, nodes),
-                ) {
-                    ShortcutCard(
-                        item = child,
-                        selected = node.key in state.selection,
-                        endActions = {
-                            Switch(
-                                checked = child.enabled,
-                                onCheckedChange = { on ->
-                                    if (!state.clickSuppressed()) {
-                                        // 必须整体替换元素触发重组，不能原地改 Java 字段
-                                        children[index] = child.copy().also { it.enabled = on }
+                key(node.key) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 5.dp)
+                            .onGloballyPositioned { coordinates ->
+                                val topY = coordinates.positionInParent().y
+                                val h = coordinates.size.height.toFloat()
+                                state.rowBounds[node.key] = topY to h
+                                state.rowHeights[node.key] = h
+                            }
+                            .shortcutRowGestures(
+                                state = state,
+                                nodeKey = node.key,
+                                getNodes = ::childNodes,
+                                move = { n, dir ->
+                                    val i = children.indexOfFirst { it.id == n.item.id }
+                                    val j = i + dir
+                                    if (i >= 0 && j in children.indices) {
+                                        val tmp = children[i]
+                                        children[i] = children[j]
+                                        children[j] = tmp
                                         onChanged()
                                     }
                                 },
+                                onLongPressNoMove = { state.toggleSelection(node.key) },
                             )
-                        },
-                        onClick = {
-                            if (!state.clickSuppressed()) {
-                                if (state.multiSelect) {
-                                    state.toggleSelection(node.key)
-                                } else {
-                                    onEditChild(child)
+                            .dragRowVisuals(state, node, nodes),
+                    ) {
+                        ShortcutCard(
+                            item = child,
+                            selected = node.key in state.selection,
+                            endActions = {
+                                Switch(
+                                    checked = child.enabled,
+                                    onCheckedChange = { on ->
+                                        if (!state.clickSuppressed()) {
+                                            // 必须整体替换元素触发重组，不能原地改 Java 字段
+                                            children[index] = child.copy().also { it.enabled = on }
+                                            onChanged()
+                                        }
+                                    },
+                                )
+                            },
+                            onClick = {
+                                if (!state.clickSuppressed()) {
+                                    if (state.multiSelect) {
+                                        state.toggleSelection(node.key)
+                                    } else {
+                                        onEditChild(child)
+                                    }
                                 }
-                            }
-                        },
-                    )
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -2023,6 +2067,45 @@ private fun FolderChildrenEditor(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 聚合文件夹子项添加动作卡片按钮（均分宽度、带图标，保证窄屏下绝不挤压变形）。
+ */
+@Composable
+private fun ChildAddActionButton(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier = modifier,
+        onClick = onClick,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp, horizontal = 4.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MiuixTheme.colorScheme.primary,
+                modifier = Modifier.size(15.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = title,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = MiuixTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
         }
     }
 }

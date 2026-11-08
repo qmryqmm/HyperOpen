@@ -4,6 +4,7 @@ import android.content.Context
 import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -36,6 +37,7 @@ class ShortcutsTreeState(
     val onShortcutsChanged: () -> Unit,
     val context: Context,
 ) {
+    var version by mutableIntStateOf(0)
     var collapsedFolders by mutableStateOf<Set<String>>(emptySet())
     var showMoveDialog by mutableStateOf(false)
     var showDeleteDialog by mutableStateOf(false)
@@ -53,12 +55,28 @@ class ShortcutsTreeState(
         }
 
     fun buildNodes(): List<ShortcutRowNode> {
+        @Suppress("UNUSED_VARIABLE")
+        val v = version // 建立响应式依赖，确保子项变动时毫秒级重组
         val nodes = ArrayList<ShortcutRowNode>(shortcuts.size + 8)
+        val seenKeys = HashSet<String>()
+
+        fun uniqueKey(baseKey: String): String {
+            if (seenKeys.add(baseKey)) return baseKey
+            var count = 2
+            while (true) {
+                val candidate = "$baseKey#$count"
+                if (seenKeys.add(candidate)) return candidate
+                count++
+            }
+        }
+
         for (item in shortcuts) {
-            nodes.add(ShortcutRowNode("top:${item.id}", "root", item, 0, null))
+            val topKey = uniqueKey("top:${item.id}")
+            nodes.add(ShortcutRowNode(topKey, "root", item, 0, null))
             if (item.actionType == ShortcutItem.ACTION_FOLDER && item.id !in collapsedFolders) {
                 for (child in item.parseFolderChildren()) {
-                    nodes.add(ShortcutRowNode("child:${item.id}:${child.id}", "folder:${item.id}", child, 1, item.id))
+                    val childKey = uniqueKey("child:${item.id}:${child.id}")
+                    nodes.add(ShortcutRowNode(childKey, "folder:${item.id}", child, 1, item.id))
                 }
             }
         }
@@ -106,10 +124,93 @@ class ShortcutsTreeState(
             val tmp = children[i]
             children[i] = children[j]
             children[j] = tmp
-            folder.setFolderChildren(children)
-            shortcuts[fi] = folder
+            // 采用深拷贝新对象替换，确保 SnapshotStateList 派发重组
+            shortcuts[fi] = folder.copy().apply { setFolderChildren(children) }
         }
+        version++
         onShortcutsChanged()
+    }
+
+    /**
+     * 将拖拽的卡片直接移入目标聚合文件夹。
+     */
+    fun dropIntoFolder(draggedKey: String, targetFolderKey: String) {
+        val nodes = buildNodes()
+        val draggedNode = nodes.firstOrNull { it.key == draggedKey } ?: return
+        val targetNode = nodes.firstOrNull { it.key == targetFolderKey } ?: return
+        val draggedItem = draggedNode.item
+        val targetFolder = targetNode.item
+        if (targetFolder.actionType != ShortcutItem.ACTION_FOLDER) return
+        if (draggedItem.id == targetFolder.id) return
+
+        // 1) 从来源移除
+        if (draggedNode.depth == 0) {
+            shortcuts.removeAll { it.id == draggedItem.id }
+        } else {
+            val fromFolderId = draggedNode.parentFolderId ?: return
+            val fromFi = shortcuts.indexOfFirst { it.id == fromFolderId }
+            if (fromFi >= 0) {
+                val fromFolder = shortcuts[fromFi]
+                val fromChildren = fromFolder.parseFolderChildren().filter { it.id != draggedItem.id }
+                shortcuts[fromFi] = fromFolder.copy().apply { setFolderChildren(fromChildren) }
+            }
+        }
+
+        // 2) 移入目标文件夹（如果目标文件夹已存在完全相同的 id，自动生成新唯一 UUID，彻底防止 Compose key 碰撞闪退）
+        val toFi = shortcuts.indexOfFirst { it.id == targetFolder.id }
+        if (toFi >= 0) {
+            val toFolder = shortcuts[toFi]
+            val toChildren = toFolder.parseFolderChildren().toMutableList()
+            val finalItem = if (toChildren.any { it.id == draggedItem.id }) {
+                draggedItem.copy().also { it.id = UUID.randomUUID().toString() }
+            } else {
+                draggedItem
+            }
+            toChildren.add(finalItem)
+            shortcuts[toFi] = toFolder.copy().apply { setFolderChildren(toChildren) }
+            // 确保该目标文件夹展开，让用户直接看到移入效果
+            collapsedFolders = collapsedFolders - targetFolder.id
+        }
+
+        version++
+        onShortcutsChanged()
+        interactionState.targetFolderKey = null
+        interactionState.draggingKey = null
+        interactionState.dragOffsetY = 0f
+        Toast.makeText(context, "已将「${draggedItem.title}」放入「${targetFolder.title}」", Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * 将拖拽的子快捷方式移出文件夹，插入到根目录列表中。
+     */
+    fun dropOutOfFolder(draggedKey: String) {
+        val nodes = buildNodes()
+        val draggedNode = nodes.firstOrNull { it.key == draggedKey } ?: return
+        if (draggedNode.depth != 1) return
+        val draggedItem = draggedNode.item
+        val fromFolderId = draggedNode.parentFolderId ?: return
+        val fromFi = shortcuts.indexOfFirst { it.id == fromFolderId }
+        if (fromFi < 0) return
+
+        // 1) 从原文件夹中移除该子项
+        val fromFolder = shortcuts[fromFi]
+        val fromChildren = fromFolder.parseFolderChildren().filter { it.id != draggedItem.id }
+        shortcuts[fromFi] = fromFolder.copy().apply { setFolderChildren(fromChildren) }
+
+        // 2) 插入到根目录（插在该父文件夹后面；若根目录已有相同 id 则分配新 UUID）
+        val finalOutItem = if (shortcuts.any { it.id == draggedItem.id }) {
+            draggedItem.copy().also { it.id = UUID.randomUUID().toString() }
+        } else {
+            draggedItem
+        }
+        shortcuts.add(fromFi + 1, finalOutItem)
+
+        version++
+        onShortcutsChanged()
+        interactionState.draggingKey = null
+        interactionState.dragOffsetY = 0f
+        interactionState.isDraggingOutOfFolder = false
+        Toast.makeText(context, "已将「${draggedItem.title}」移出到快捷列表", Toast.LENGTH_SHORT).show()
     }
 
     /** 复制选中项（保持视觉顺序，逐个插到原位之后；文件夹深拷贝子项换新 id）。 */
@@ -128,12 +229,12 @@ class ShortcutsTreeState(
                     val ci = children.indexOfFirst { it.id == node.item.id }
                     if (ci >= 0) {
                         children.add(ci + 1, dup)
-                        folder.setFolderChildren(children)
-                        shortcuts[fi] = folder
+                        shortcuts[fi] = folder.copy().apply { setFolderChildren(children) }
                     }
                 }
             }
         }
+        version++
         onShortcutsChanged()
         interactionState.clearSelection()
         Toast.makeText(context, "已复制 ${nodes.size} 个快捷方式", Toast.LENGTH_SHORT).show()
@@ -150,10 +251,10 @@ class ShortcutsTreeState(
                 val folder = shortcuts[fi]
                 val ids = list.map { it.item.id }.toSet()
                 val children = folder.parseFolderChildren().filter { it.id !in ids }
-                folder.setFolderChildren(children)
-                shortcuts[fi] = folder
+                shortcuts[fi] = folder.copy().apply { setFolderChildren(children) }
             }
         }
+        version++
         onShortcutsChanged()
         interactionState.clearSelection()
         Toast.makeText(context, "已删除 ${nodes.size} 个快捷方式", Toast.LENGTH_SHORT).show()
@@ -187,8 +288,8 @@ class ShortcutsTreeState(
             if (fi >= 0) {
                 val folder = shortcuts[fi]
                 val ids = list.map { it.item.id }.toSet()
-                folder.setFolderChildren(folder.parseFolderChildren().filter { it.id !in ids })
-                shortcuts[fi] = folder
+                val children = folder.parseFolderChildren().filter { it.id !in ids }
+                shortcuts[fi] = folder.copy().apply { setFolderChildren(children) }
             }
         }
 
@@ -214,7 +315,14 @@ class ShortcutsTreeState(
                 Toast.makeText(context, "已移入新建聚合文件夹", Toast.LENGTH_SHORT).show()
             }
             "__root__" -> {
-                shortcuts.addAll(movedItems)
+                for (item in movedItems) {
+                    val finalItem = if (shortcuts.any { it.id == item.id }) {
+                        item.copy().also { it.id = UUID.randomUUID().toString() }
+                    } else {
+                        item
+                    }
+                    shortcuts.add(finalItem)
+                }
                 Toast.makeText(context, "已将 ${movedItems.size} 个快捷方式移到根目录", Toast.LENGTH_SHORT).show()
             }
             else -> {
@@ -222,13 +330,20 @@ class ShortcutsTreeState(
                 if (fi >= 0) {
                     val folder = shortcuts[fi]
                     val children = folder.parseFolderChildren().toMutableList()
-                    children.addAll(movedItems)
-                    folder.setFolderChildren(children)
-                    shortcuts[fi] = folder
+                    for (item in movedItems) {
+                        val finalItem = if (children.any { it.id == item.id }) {
+                            item.copy().also { it.id = UUID.randomUUID().toString() }
+                        } else {
+                            item
+                        }
+                        children.add(finalItem)
+                    }
+                    shortcuts[fi] = folder.copy().apply { setFolderChildren(children) }
                     Toast.makeText(context, "已移入「${folder.title}」", Toast.LENGTH_SHORT).show()
                 }
             }
         }
+        version++
         onShortcutsChanged()
         interactionState.clearSelection()
     }

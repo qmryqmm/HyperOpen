@@ -25,7 +25,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -147,6 +149,12 @@ fun ShortcutsManagementPage(
                     state = state,
                     getNodes = { treeState.buildNodes() },
                     move = { n, dir -> treeState.moveNode(n, dir) },
+                    onDropIntoFolder = { draggedKey, targetFolderKey ->
+                        treeState.dropIntoFolder(draggedKey, targetFolderKey)
+                    },
+                    onDropOutOfFolder = { draggedKey ->
+                        treeState.dropOutOfFolder(draggedKey)
+                    },
                     folderCollapsed = node.depth == 0 && node.item.actionType == ShortcutItem.ACTION_FOLDER &&
                             treeState.isFolderCollapsed(node.item.id),
                     onToggleCollapsed = {
@@ -175,7 +183,7 @@ fun ShortcutsManagementPage(
 
             item(key = "list_footer") {
                 Text(
-                    text = "提示：轻触卡片编辑参数；长按拖拽排序；长按不动进入多选，可在底栏全选、移动、复制、删除。文件夹点击右侧箭头展开或收起子项。",
+                    text = "提示：轻触卡片编辑参数；长按拖拽排序，可直接将卡片拖入文件夹或将子项拖出文件夹；长按不动进入多选，可在底栏全选、移动、复制、删除。文件夹点击右侧箭头展开或收起子项。",
                     fontSize = 12.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     lineHeight = 18.sp,
@@ -226,6 +234,8 @@ private fun ShortcutRowEntry(
     state: ShortcutListInteractionState,
     getNodes: () -> List<ShortcutRowNode>,
     move: (ShortcutRowNode, Int) -> Unit,
+    onDropIntoFolder: ((draggedKey: String, targetFolderKey: String) -> Unit)? = null,
+    onDropOutOfFolder: ((draggedKey: String) -> Unit)? = null,
     folderCollapsed: Boolean,
     onToggleCollapsed: () -> Unit,
     onToggle: (Boolean) -> Unit,
@@ -233,6 +243,8 @@ private fun ShortcutRowEntry(
     onLongPress: () -> Unit,
 ) {
     val selected = node.key in state.selection
+    val isDropTarget = (node.key == state.targetFolderKey)
+    val isDraggingOut = (node.key == state.draggingKey && state.isDraggingOutOfFolder)
     val nodes = getNodes()
 
     // 子项行：缩进 + 树形引导线（颜色在组合期取，drawBehind 内不可调用 MiuixTheme）
@@ -268,20 +280,38 @@ private fun ShortcutRowEntry(
 
     Box(
         modifier = rowModifier
-            .onSizeChanged { state.rowHeights[node.key] = it.height.toFloat() }
+            .onGloballyPositioned { coordinates ->
+                val topY = coordinates.positionInParent().y
+                val h = coordinates.size.height.toFloat()
+                state.rowBounds[node.key] = topY to h
+                state.rowHeights[node.key] = h
+            }
             .shortcutRowGestures(
                 state = state,
                 nodeKey = node.key,
                 getNodes = getNodes,
                 move = move,
                 onLongPressNoMove = onLongPress,
+                canDropIntoFolder = true,
+                onDragSettled = {
+                    val targetKey = state.targetFolderKey
+                    if (targetKey != null) {
+                        onDropIntoFolder?.invoke(node.key, targetKey)
+                    } else if (state.isDraggingOutOfFolder && node.depth == 1) {
+                        onDropOutOfFolder?.invoke(node.key)
+                    }
+                },
             )
             .dragRowVisuals(state, node, nodes),
     ) {
         ShortcutCard(
             item = node.item,
             selected = selected,
+            isDropTarget = isDropTarget,
+            isDraggingOut = isDraggingOut,
             summaryOverride = when {
+                isDropTarget -> "松手直接放入此文件夹"
+                isDraggingOut -> "松手移出到快捷列表"
                 node.depth == 1 -> node.item.subtitle.ifBlank { "点击编辑子快捷方式参数" }
                 node.item.actionType == ShortcutItem.ACTION_FOLDER -> {
                     val count = node.item.parseFolderChildren().size
