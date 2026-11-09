@@ -110,12 +110,14 @@ class ShortcutListInteractionState {
      *  双重位移。拖拽锚定必须用窗口坐标——手指与滚动 clamp 都活在窗口坐标系里。 */
     val rowWindowY = mutableStateMapOf<String, Float>()
 
-    /** 拖拽锚定的「首个可见行 key」提供器（由宿主页面设置，如主列表用
-     *  lazyListState.firstVisibleItemIndex 映射）。首行（node0）滚出屏幕后其
-     *  rowWindowY 会被冻结、不再随滚动/滚动钳制更新——必须改锚到始终在屏内、
-     *  rowWindowY 每帧刷新的首个可见行，否则滚到底部叠起/折叠文件夹时整叠漂移。
-     *  未设置（如编辑页，子项全在单个 Column 内、node0 永不冻结）时回退锚定 node0。 */
-    var firstVisibleNodeKeyProvider: (() -> String?)? = null
+    /** 拖拽窗口锚点「内容原点窗口 Y」提供器：返回 getNodeTopY==0 槽位（首个节点顶）的窗口 Y。
+     *  由宿主页面用 layoutInfo 槽位几何量计算——槽位偏移不含 animateItem 的换位动画位移
+     *  （onGloballyPositioned 的 rowWindowY 含动画：被换入首槽的卡在动画期间 rowWindowY
+     *  停留旧位，min 锚点被污染一整行 → 拖拽第一项下行时主卡被短暂回拉原位）；且交换只换
+     *  内容不移动槽位 → 换算出的原点交换稳定。滚动/滚动钳制经 layoutInfo 随帧更新（慢变化
+     *  滞后一帧无妨）。未设置（编辑页，Column 无 animateItem、rowWindowY 恒为槽位值）时
+     *  回退全部子项 rowWindowY 最小值。 */
+    var anchorOriginWindowYProvider: (() -> Float?)? = null
 
     /** 相邻行之间的间距（density 感知像素值，由 shortcutRowGestures 在组合期写入）。 */
     var rowSpacingPx: Float by mutableFloatStateOf(10f)
@@ -269,11 +271,14 @@ class ShortcutListInteractionState {
      *     与布局位移「一增一减」同帧抵消——彻底消除交换闪烁。
      *  两者各管各的坐标系，互不拖累：快变化（交换）走同步内容坐标，慢变化（滚动钳制）走窗口锚点。 */
     fun windowTopOf(key: String, nodes: List<ShortcutRowNode>): Float {
-        val anchorKey = firstVisibleNodeKeyProvider?.invoke()
-            ?.takeIf { nodes.any { n -> n.key == it } }
-            ?: nodes.firstOrNull()?.key
-        val anchorWin = anchorKey?.let { rowWindowY[it] } ?: 0f
-        return anchorWin + (getNodeTopY(key, nodes) - getNodeTopY(anchorKey!!, nodes))
+        // 首选：宿主提供的「内容原点窗口 Y」（主列表——槽位几何量，不受 animateItem
+        // 换位动画污染、交换时稳定）；回退（编辑页）：全部子项 rowWindowY 最小值
+        // （Column 无 animateItem，rowWindowY 恒为槽位值，min = 首槽窗口 Y，交换=位置
+        // 互换值集合不变 → min 稳定）。
+        val minWin = anchorOriginWindowYProvider?.invoke()
+            ?: rowWindowY.values.minOrNull()
+            ?: 0f
+        return minWin + getNodeTopY(key, nodes)
     }
 
     /**
@@ -463,6 +468,10 @@ fun Modifier.shortcutRowGestures(
             val pressedNode = initialNodes.firstOrNull { it.key == nodeKey }
             val groupDrag = state.multiSelect && nodeKey in state.selection && pressedNode != null &&
                 initialNodes.filter { it.key in state.selection }.all { it.scopeId == pressedNode.scopeId }
+            // 判断当前多选堆叠中是否包含文件夹
+            val groupContainsFolder = groupDrag && initialNodes.any {
+                it.key in state.selection && it.item.actionType == ShortcutItem.ACTION_FOLDER
+            }
             if (groupDrag) {
                 // 上一轮散开动画若未收敛，立即取消并冻结当前进度，作为本轮叠起起点（丝滑续接）
                 state.stackAnimJob?.cancel()
@@ -535,31 +544,48 @@ fun Modifier.shortcutRowGestures(
                                 scope.launch { state.stackProgress.snapTo(0f) }
                             }
                         } else {
+                            val droppingIntoFolder = state.targetFolderKey != null
+                            val droppingOutOfFolder = state.isDraggingOutOfFolder
                             if (groupDrag) {
-                                // ── 松手：把整叠的当前顺序写回数据层（散开后按新顺序落位，不回原位）──
-                                // 主卡已通过中途交换重排到新槽位；携带卡按叠中相对顺序紧随主卡插入。
-                                onGroupReorder?.invoke(nodeKey, state.carriedKeys.toList())
-                                // 冻结散开起始偏移：按重排后的节点序计算「松手视觉位置 − 新槽位」，
-                                // 散开动画从这无缝起步、精确滑向新槽位。
-                                val settledNodes = getNodes()
-                                val mainVisualTopY = state.mainVisualTopY()
-                                state.carriedKeys.forEach { key ->
-                                    val idx = state.stackIndices[key] ?: 0
-                                    // 与 dragRowVisuals 实时偏移同公式（含 stackGapComp）：
-                                    // 压缩系数不一致时松手瞬间携带卡跳 idx×gap×(1−comp)。
-                                    state.stackScatterOffsets[key] =
-                                        (mainVisualTopY - state.windowTopOf(key, settledNodes)) +
-                                            idx * state.stackGapPx * state.stackGapComp()
+                                if (!droppingIntoFolder && !droppingOutOfFolder) {
+                                    // ── 松手：把整叠的当前顺序写回数据层（散开后按新顺序落位，不回原位）──
+                                    // 主卡已通过中途交换重排到新槽位；携带卡按叠中相对顺序紧随主卡插入。
+                                    onGroupReorder?.invoke(nodeKey, state.carriedKeys.toList())
+                                    // 冻结散开起始偏移：按重排后的节点序计算「松手视觉位置 − 新槽位」，
+                                    // 散开动画从这无缝起步、精确滑向新槽位。
+                                    val settledNodes = getNodes()
+                                    val mainVisualTopY = state.mainVisualTopY()
+                                    state.carriedKeys.forEach { key ->
+                                        val idx = state.stackIndices[key] ?: 0
+                                        // 与 dragRowVisuals 实时偏移同公式（含 stackGapComp）：
+                                        // 压缩系数不一致时松手瞬间携带卡跳 idx×gap×(1−comp)。
+                                        state.stackScatterOffsets[key] =
+                                            (mainVisualTopY - state.windowTopOf(key, settledNodes)) +
+                                                idx * state.stackGapPx * state.stackGapComp()
+                                    }
+                                    // 主卡也参与散开：从松手视觉位置平滑滑向其新槽位
+                                    state.stackScatterOffsets[nodeKey] = mainVisualTopY -
+                                        state.windowTopOf(nodeKey, settledNodes)
+                                    // 主卡并入携带集参与散开位移，但 shrunkKeys 不含主卡：
+                                    // 拖拽期间主卡行高从未收缩，散开时不做行高恢复，
+                                    // 否则松手瞬间行高塌缩 0 → 下方卡片整体上跳一整行。
+                                    state.carriedKeys = state.carriedKeys + nodeKey
+                                    state.groupScattering = true
+                                    state.groupScatterAnchorY = mainVisualTopY
+                                } else {
+                                    // 移入或移出文件夹场景：无需执行顺序重排与散开动画，立即复位叠放状态
+                                    state.stackAnimJob?.cancel()
+                                    state.stackAnimJob = null
+                                    state.groupDragActive = false
+                                    state.groupScattering = false
+                                    state.carriedKeys = emptySet()
+                                    state.shrunkKeys = emptySet()
+                                    state.stackIndices.clear()
+                                    state.stackBaseOffsets.clear()
+                                    state.stackScatterOffsets.clear()
+                                    onGroupExpand()
+                                    scope.launch { state.stackProgress.snapTo(0f) }
                                 }
-                                // 主卡也参与散开：从松手视觉位置平滑滑向其新槽位
-                                state.stackScatterOffsets[nodeKey] = mainVisualTopY -
-                                    state.windowTopOf(nodeKey, settledNodes)
-                                // 主卡并入携带集参与散开位移，但 shrunkKeys 不含主卡：
-                                // 拖拽期间主卡行高从未收缩，散开时不做行高恢复，
-                                // 否则松手瞬间行高塌缩 0 → 下方卡片整体上跳一整行。
-                                state.carriedKeys = state.carriedKeys + nodeKey
-                                state.groupScattering = true
-                                state.groupScatterAnchorY = mainVisualTopY
                             }
                             if (dragStarted) {
                                 settledCalled = true
@@ -579,13 +605,13 @@ fun Modifier.shortcutRowGestures(
                     if (dp != Offset.Zero) {
                         // 手指位移始终累计（组合拖拽靠它驱动整叠移动与锚点换算）
                         state.totalDragY += dp.y
-                        // 组合拖拽也调用 onDragDelta：主卡照常与相邻卡交换位置（重排底层顺序），
-                        // 但禁用移入文件夹判定（整叠松手不应落入文件夹）。
+                        // 组合拖拽也调用 onDragDelta：主卡照常与相邻卡交换位置（重排底层顺序）。
+                        // 当叠起的卡片包含文件夹时，不触发添加进文件夹操作；无文件夹时允许拖入文件夹。
                         state.onDragDelta(
                             dy = dp.y,
                             nodes = getNodes(),
                             move = move,
-                            canDropIntoFolder = canDropIntoFolder && !groupDrag,
+                            canDropIntoFolder = canDropIntoFolder && (!groupDrag || !groupContainsFolder),
                             onHapticTick = {
                                 view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                             },

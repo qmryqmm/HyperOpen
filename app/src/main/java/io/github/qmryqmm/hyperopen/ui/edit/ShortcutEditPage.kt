@@ -355,6 +355,7 @@ fun ShortcutEditPage(
     var showMiuixIconPicker by remember { mutableStateOf(false) }
     var showRemixIconPicker by remember { mutableStateOf(false) }
     var showUnsavedDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
     var showIconDialog by remember { mutableStateOf(false) }
     var showTextDialog by remember { mutableStateOf(false) }
 
@@ -635,7 +636,7 @@ fun ShortcutEditPage(
                                 TextButton(
                                     text = "删除此项",
                                     onClick = {
-                                        onDelete(initialItem)
+                                        showDeleteDialog = true
                                     },
                                 )
                             }
@@ -1056,6 +1057,59 @@ fun ShortcutEditPage(
                 showRemixIconPicker = false
             },
         )
+    }
+
+    // ── 删除二次确认弹窗（样式与「恢复默认参数」弹窗一致） ──
+    if (showDeleteDialog) {
+        Dialog(
+            onDismissRequest = { showDeleteDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth(0.86f)
+                    .padding(vertical = 16.dp),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                ) {
+                    Text(
+                        text = "确认删除",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "确定要删除「${title.trim().ifBlank { "快捷方式" }}」吗？此操作不可撤销。",
+                        fontSize = 14.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        lineHeight = 20.sp,
+                    )
+                    Spacer(Modifier.height(22.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            text = "取消",
+                            onClick = { showDeleteDialog = false },
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        TextButton(
+                            text = "删除",
+                            colors = ButtonDefaults.textButtonColorsPrimary(),
+                            onClick = {
+                                showDeleteDialog = false
+                                onDelete(initialItem)
+                            },
+                        )
+                    }
+                }
+            }
+        }
     }
 
     // ── 退出时未保存确认弹窗（MIUIX 质感弹窗） ──

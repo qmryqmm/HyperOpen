@@ -302,12 +302,75 @@ class ShortcutsTreeState(
             collapsedFolders = collapsedFolders - targetFolder.id
         }
 
+        interactionState.clearSelection()
+
         version++
         onShortcutsChanged()
         interactionState.targetFolderKey = null
         interactionState.draggingKey = null
         interactionState.totalDragY = 0f
         Toast.makeText(context, "已将「${draggedItem.title}」放入「${targetFolder.title}」", Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * 将多个卡片批量移入目标聚合文件夹。
+     */
+    fun dropGroupIntoFolder(keys: List<String>, targetFolderKey: String) {
+        val nodes = buildNodes()
+        val targetNode = nodes.firstOrNull { it.key == targetFolderKey } ?: return
+        val targetFolder = targetNode.item
+        if (targetFolder.actionType != ShortcutItem.ACTION_FOLDER) return
+
+        // 收集待移入的节点（排除文件夹本身，且不能是目标文件夹本身）
+        val targetNodes = keys.mapNotNull { k -> nodes.firstOrNull { it.key == k } }
+            .filter { it.item.actionType != ShortcutItem.ACTION_FOLDER && it.item.id != targetFolder.id }
+        if (targetNodes.isEmpty()) return
+
+        // 1) 从来源移除
+        val rootIdsToRemove = targetNodes.filter { it.depth == 0 }.map { it.item.id }.toSet()
+        if (rootIdsToRemove.isNotEmpty()) {
+            shortcuts.removeAll { it.id in rootIdsToRemove }
+        }
+
+        val childNodesByFolder = targetNodes.filter { it.depth != 0 && it.parentFolderId != null }
+            .groupBy { it.parentFolderId!! }
+        for ((fromFolderId, childGroup) in childNodesByFolder) {
+            val fromFi = shortcuts.indexOfFirst { it.id == fromFolderId }
+            if (fromFi >= 0) {
+                val fromFolder = shortcuts[fromFi]
+                val groupIds = childGroup.map { it.item.id }.toSet()
+                val fromChildren = fromFolder.parseFolderChildren().filter { it.id !in groupIds }
+                shortcuts[fromFi] = fromFolder.copy().apply { setFolderChildren(fromChildren) }
+            }
+        }
+
+        // 2) 移入目标文件夹
+        val toFi = shortcuts.indexOfFirst { it.id == targetFolder.id }
+        if (toFi >= 0) {
+            val toFolder = shortcuts[toFi]
+            val toChildren = toFolder.parseFolderChildren().toMutableList()
+            for (node in targetNodes) {
+                val item = node.item
+                val finalItem = if (toChildren.any { it.id == item.id }) {
+                    item.copy().also { it.id = UUID.randomUUID().toString() }
+                } else {
+                    item
+                }
+                toChildren.add(finalItem)
+            }
+            shortcuts[toFi] = toFolder.copy().apply { setFolderChildren(toChildren) }
+            collapsedFolders = collapsedFolders - targetFolder.id
+        }
+
+        // 清理多选状态
+        interactionState.clearSelection()
+
+        version++
+        onShortcutsChanged()
+        interactionState.targetFolderKey = null
+        interactionState.draggingKey = null
+        interactionState.totalDragY = 0f
+        Toast.makeText(context, "已将 ${targetNodes.size} 个快捷方式放入「${targetFolder.title}」", Toast.LENGTH_SHORT).show()
     }
 
     /**
@@ -335,12 +398,61 @@ class ShortcutsTreeState(
         }
         shortcuts.add(fromFi + 1, finalOutItem)
 
+        // 清理多选状态
+        interactionState.clearSelection()
+
         version++
         onShortcutsChanged()
         interactionState.draggingKey = null
         interactionState.totalDragY = 0f
         interactionState.isDraggingOutOfFolder = false
         Toast.makeText(context, "已将「${draggedItem.title}」移出到快捷列表", Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * 将多个选中的子快捷方式批量移出文件夹，插入到根目录列表中。
+     */
+    fun dropGroupOutOfFolder(keys: List<String>) {
+        val nodes = buildNodes()
+        val targetNodes = keys.mapNotNull { k -> nodes.firstOrNull { it.key == k } }
+            .filter { it.depth == 1 && it.parentFolderId != null }
+        if (targetNodes.isEmpty()) return
+
+        // 统一按原文件夹分组处理移除
+        val byFolder = targetNodes.groupBy { it.parentFolderId!! }
+        for ((fromFolderId, childGroup) in byFolder) {
+            val fromFi = shortcuts.indexOfFirst { it.id == fromFolderId }
+            if (fromFi < 0) continue
+
+            // 1) 从原文件夹中移除这批子项
+            val fromFolder = shortcuts[fromFi]
+            val removeIds = childGroup.map { it.item.id }.toSet()
+            val fromChildren = fromFolder.parseFolderChildren().filter { it.id !in removeIds }
+            shortcuts[fromFi] = fromFolder.copy().apply { setFolderChildren(fromChildren) }
+
+            // 2) 依次插入到根目录父文件夹后面
+            var insertIndex = fromFi + 1
+            for (node in childGroup) {
+                val item = node.item
+                val finalOutItem = if (shortcuts.any { it.id == item.id }) {
+                    item.copy().also { it.id = UUID.randomUUID().toString() }
+                } else {
+                    item
+                }
+                shortcuts.add(insertIndex, finalOutItem)
+                insertIndex++
+            }
+        }
+
+        // 清理多选状态
+        interactionState.clearSelection()
+
+        version++
+        onShortcutsChanged()
+        interactionState.draggingKey = null
+        interactionState.totalDragY = 0f
+        interactionState.isDraggingOutOfFolder = false
+        Toast.makeText(context, "已将 ${targetNodes.size} 个快捷方式移出到快捷列表", Toast.LENGTH_SHORT).show()
     }
 
     /** 复制选中项（保持视觉顺序，逐个插到原位之后；文件夹深拷贝子项换新 id）。 */

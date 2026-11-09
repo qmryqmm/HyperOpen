@@ -20,7 +20,10 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,12 +37,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import io.github.qmryqmm.hyperopen.model.ShortcutItem
 import io.github.qmryqmm.hyperopen.ui.components.ShortcutCard
 import io.github.qmryqmm.hyperopen.ui.components.ShortcutListInteractionState
 import io.github.qmryqmm.hyperopen.ui.components.ShortcutRowNode
 import io.github.qmryqmm.hyperopen.ui.components.dragRowVisuals
 import io.github.qmryqmm.hyperopen.ui.components.shortcutRowGestures
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -82,21 +87,37 @@ fun ShortcutsManagementPage(
 ) {
     val state = treeState.interactionState
 
-    // 拖拽锚定改锚「首个可见行」：node0 滚出屏幕后 rowWindowY 被冻结，会丢滚动钳制位移，
-    // 导致滚到底部叠起/折叠文件夹时整叠漂离手指。firstVisibleItemIndex 组合期同步、永不冻结。
-    // 注意：LazyColumn 前 2 个 item 是 actions_card 与 list_header，快捷节点从 index 2 起，
-    // 需扣掉 2 才是 buildNodes() 里的下标。
+    // LazyColumn 视口顶的窗口 Y（OnGloballyPositioned 恒触发：容器常驻屏幕）。
+    var lazyViewportTopWindowY by remember { mutableFloatStateOf(0f) }
+
+    // 拖拽锚定「内容原点窗口 Y」：由 layoutInfo 槽位几何量计算（首个可见快捷节点的
+    // 窗口Y − 其内容偏移 getNodeTopY）。纯槽位值不含 animateItem 换位动画位移——被换入
+    // 首槽的卡在动画期间 rowWindowY 停留旧位，min/单 key 锚点都被污染一整行，导致
+    // 「拖拽第一项下行换位时第一项被短暂回拉原位」。layoutInfo 组合期同步、永不冻结，
+    // 仍精确反映滚动/滚动钳制。LazyColumn 前 2 个 item 是 actions_card 与 list_header，
+    // 快捷节点从 index 2 起，需扣 2。
     SideEffect {
-        state.firstVisibleNodeKeyProvider = {
+        state.anchorOriginWindowYProvider = {
             val nodes = treeState.buildNodes()
-            val nodeIndex = lazyListState.firstVisibleItemIndex - 2
-            nodes.getOrNull(nodeIndex)?.key
+            val firstNodeInfo = lazyListState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.index >= 2 }
+            val firstNodeKey = firstNodeInfo?.let { nodes.getOrNull(it.index - 2)?.key }
+            if (firstNodeInfo == null || firstNodeKey == null) {
+                null
+            } else {
+                lazyViewportTopWindowY + firstNodeInfo.offset -
+                    state.getNodeTopY(firstNodeKey, nodes)
+            }
         }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize().overScrollVertical().scrollEndHaptic(),
+            modifier = Modifier.fillMaxSize()
+                .onGloballyPositioned { coords ->
+                    lazyViewportTopWindowY = coords.positionInWindow().y
+                }
+                .overScrollVertical().scrollEndHaptic(),
             state = lazyListState,
             contentPadding = contentPadding,
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -181,8 +202,14 @@ fun ShortcutsManagementPage(
                     onDropIntoFolder = { draggedKey, targetFolderKey ->
                         treeState.dropIntoFolder(draggedKey, targetFolderKey)
                     },
+                    onDropGroupIntoFolder = { keys, targetFolderKey ->
+                        treeState.dropGroupIntoFolder(keys, targetFolderKey)
+                    },
                     onDropOutOfFolder = { draggedKey ->
                         treeState.dropOutOfFolder(draggedKey)
+                    },
+                    onDropGroupOutOfFolder = { keys ->
+                        treeState.dropGroupOutOfFolder(keys)
                     },
                     onDragStart = {
                         // 拖拽文件夹卡片时自动收起其子项（松手后恢复），减小拖拽块体积
@@ -267,8 +294,15 @@ fun ShortcutsManagementPage(
     }
 
     if (treeState.showDeleteDialog) {
-        Dialog(onDismissRequest = { treeState.showDeleteDialog = false }) {
-            Card(modifier = Modifier.fillMaxWidth(0.86f)) {
+        Dialog(
+            onDismissRequest = { treeState.showDeleteDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth(0.86f)
+                    .padding(vertical = 16.dp),
+            ) {
                 Column2(
                     title = "确认删除",
                     text = "确定要删除选中的 ${state.selection.size} 个快捷方式吗？此操作不可撤销。",
@@ -294,7 +328,9 @@ private fun ShortcutRowEntry(
     getNodes: () -> List<ShortcutRowNode>,
     move: (ShortcutRowNode, Int) -> Unit,
     onDropIntoFolder: ((draggedKey: String, targetFolderKey: String) -> Unit)? = null,
+    onDropGroupIntoFolder: ((keys: List<String>, targetFolderKey: String) -> Unit)? = null,
     onDropOutOfFolder: ((draggedKey: String) -> Unit)? = null,
+    onDropGroupOutOfFolder: ((keys: List<String>) -> Unit)? = null,
     onDragStart: (() -> Unit)? = null,
     onRestoreFolderExpanded: () -> Unit = {},
     onGroupReorder: ((mainKey: String, carriedKeys: List<String>) -> Unit)? = null,
@@ -368,9 +404,19 @@ private fun ShortcutRowEntry(
                     onRestoreFolderExpanded()
                     val targetKey = state.targetFolderKey
                     if (targetKey != null) {
-                        onDropIntoFolder?.invoke(node.key, targetKey)
+                        if (state.multiSelect && node.key in state.selection) {
+                            val keysToDrop = state.selection.toList()
+                            onDropGroupIntoFolder?.invoke(keysToDrop, targetKey)
+                        } else {
+                            onDropIntoFolder?.invoke(node.key, targetKey)
+                        }
                     } else if (state.isDraggingOutOfFolder && node.depth == 1) {
-                        onDropOutOfFolder?.invoke(node.key)
+                        if (state.multiSelect && node.key in state.selection) {
+                            val keysToDrop = state.selection.toList()
+                            onDropGroupOutOfFolder?.invoke(keysToDrop)
+                        } else {
+                            onDropOutOfFolder?.invoke(node.key)
+                        }
                     }
                 },
             )
@@ -530,27 +576,36 @@ private fun Column2(
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(24.dp),
+    ) {
         Text(
             text = title,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
             color = MiuixTheme.colorScheme.onSurface,
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(10.dp))
         Text(
             text = text,
             fontSize = 14.sp,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             lineHeight = 20.sp,
         )
+        Spacer(modifier = Modifier.height(22.dp))
         Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
             TextButton(text = "取消", onClick = onCancel)
-            Spacer(modifier = Modifier.width(8.dp))
-            TextButton(text = confirmText, onClick = onConfirm)
+            Spacer(modifier = Modifier.width(10.dp))
+            TextButton(
+                text = confirmText,
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+                onClick = onConfirm,
+            )
         }
     }
 }
