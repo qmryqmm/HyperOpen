@@ -25,6 +25,7 @@ import io.github.qmryqmm.hyperopen.layout.HollowRingPacking;
 import io.github.qmryqmm.hyperopen.layout.RingSectorPacking;
 import io.github.qmryqmm.hyperopen.layout.StockFanPacking;
 import io.github.qmryqmm.hyperopen.model.ShortcutItem;
+import io.github.qmryqmm.hyperopen.util.FisheyeScale;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -856,6 +857,102 @@ public class CustomHyperOpenContainer extends FrameLayout {
     }
 
     /**
+     * 扇区式命中（空心圆环扇区 / 系统原生 Region 扇形）的鱼眼缩放与透明度应用。
+     * <p>
+     * 这两条判定路径没有欧氏距离参与，命中完全由角度 / Region 多边形决定。旧实现只套用
+     * 选中强调倍率，导致「鱼眼最大放大倍率」在它们上面完全不生效。
+     * 现在统一走同一套鱼眼曲线：
+     * <ul>
+     *   <li>命中项：锁定峰值 {@code maxScale}（与手指在扇区内的位置无关）。扇面会一直延伸到
+     *       屏幕外，手指常离图标中心很远，若按距离衰减就会把峰值又抵消回去（这正是旧实现
+     *       失效的根因），因此命中即满峰值，最终倍率在所有布局下都等于 {@code maxScale}；</li>
+     *   <li>未命中邻居：按各自中心距离余弦衰减，衰减快慢由感应辐射半径决定（调小半径即可
+     *       逼近「只放大命中图标」）；手指在扇区边界时仍能看到相邻图标微放大，
+     *       鱼眼透镜感不再被扇区判定切断。</li>
+     * </ul>
+     * 未命中任何扇区（手指在中心取消区）时全部回到 1.0x 与常态透明度。
+     */
+    private void applySectorFisheye(float touchX, float touchY, CircularBubbleView closest,
+                                    float influenceRadiusPx, HyperOpenConfig cfg) {
+        // 命中已由角度 / Region 判定完成，这里只负责缩放与透明度的连续过渡
+        if (closest == null) {
+            // 手指落在中心取消区：完全回到常态，避免空放大造成「有目标」的错觉
+            for (int i = 0, n = bubbles.size(); i < n; i++) {
+                CircularBubbleView b = bubbles.get(i);
+                b.applyScale(1.0f);
+                b.setIconAlpha(cfg.iconAlpha);
+            }
+            return;
+        }
+
+        float maxScale = FisheyeScale.peakScale(cfg.maxScale);
+        for (int i = 0, n = bubbles.size(); i < n; i++) {
+            CircularBubbleView b = bubbles.get(i);
+            float dist = (float) Math.hypot(touchX - b.targetX, touchY - b.targetY);
+            // 命中项锁定峰值：扇区内手指可能离图标中心很远（扇面一直延伸到屏幕外），
+            // 若按距离衰减就会把 maxScale 又抵消回去，这正是旧实现失效的根因
+            float scale = (b == closest)
+                ? maxScale
+                : FisheyeScale.scaleForDistance(dist, influenceRadiusPx, cfg.maxScale);
+            b.applyScale(scale);
+
+            if (b == closest) {
+                b.setIconAlpha(cfg.fisheyeZoomAlpha);
+            } else {
+                // 邻居透明度按距离在「常态 → 其他图标透明度」之间插值，与距离型布局手感一致
+                float factor = FisheyeScale.cosineFactor(dist, influenceRadiusPx);
+                b.setIconAlpha(cfg.iconAlpha + (cfg.fisheyeOtherAlpha - cfg.iconAlpha) * factor);
+            }
+        }
+    }
+
+    /**
+     * 经典连续余弦鱼眼：缩放与透明度完全由各气泡中心到手指的距离决定。
+     * <p>
+     * 一级气泡（蜂窝 / 弧形扇面 / 非扇区圆环 / 非扇区系统扇形）与文件夹二级子气泡
+     * 共用这同一份实现，保证两类图标的手感与视觉效果完全一致，子气泡没有任何额外的绘制效果。
+     * <ul>
+     *   <li>缩放：每个气泡独立按 {@code scaleForDistance} 连续衰减（命中气泡因为在阈值内
+     *       距离很小，天然接近峰值）；</li>
+     *   <li>透明度：最近气泡（在有效半径内）在 iconAlpha → fisheyeZoomAlpha 间插值，
+     *       其余气泡统一在 iconAlpha → fisheyeOtherAlpha 间按焦点系数插值。</li>
+     * </ul>
+     */
+    private void applyDistanceFisheye(List<CircularBubbleView> targets, float touchX, float touchY,
+                                      CircularBubbleView closest, float minDistance,
+                                      float influenceRadiusPx, float hitDistanceThreshold,
+                                      HyperOpenConfig cfg) {
+        float effectiveRadiusPx = Math.max(influenceRadiusPx, hitDistanceThreshold);
+        float focusFactor = 0f;
+        if (closest != null && minDistance < effectiveRadiusPx) {
+            focusFactor = (minDistance < hitDistanceThreshold)
+                ? 1.0f
+                : FisheyeScale.cosineFactor(minDistance, effectiveRadiusPx);
+        }
+        float otherAlpha = cfg.iconAlpha + (cfg.fisheyeOtherAlpha - cfg.iconAlpha) * focusFactor;
+
+        for (int i = 0, n = targets.size(); i < n; i++) {
+            CircularBubbleView b = targets.get(i);
+            float dx = touchX - b.targetX;
+            float dy = touchY - b.targetY;
+            float dist = (float) Math.hypot(dx, dy);
+
+            float scale = FisheyeScale.scaleForDistance(dist, influenceRadiusPx, cfg.maxScale);
+            float currentAlpha;
+            if (b == closest && dist < effectiveRadiusPx) {
+                float alphaFactor = (dist < hitDistanceThreshold)
+                    ? 1.0f
+                    : FisheyeScale.cosineFactor(dist, effectiveRadiusPx);
+                currentAlpha = cfg.iconAlpha + (cfg.fisheyeZoomAlpha - cfg.iconAlpha) * alphaFactor;
+            } else {
+                currentAlpha = otherAlpha;
+            }
+            b.applyScale(scale);
+            b.setIconAlpha(currentAlpha);
+        }
+    }
+
+    /**
      * 手指滑动时调用：计算实时鱼眼动力学与命中目标
      */
     public void onFingerMove(float touchX, float touchY) {
@@ -880,7 +977,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 && config.ringSectorMode;
 
         if (useRingSector) {
-            // 空心圆环扇区触发：中心圆内取消，圆外按角度均分扇区命中，不做距离鱼眼
+            // 空心圆环扇区触发：中心圆内取消，圆外按角度均分扇区命中。
+            // 命中判定不看欧氏距离，但缩放仍走统一鱼眼曲线：命中项锁定 maxScale 峰值，
+            // 未命中邻居按余弦衰减（幅度再乘扩散强度），保证「鱼眼最大放大倍率」在本布局同样生效。
             float regionCenterY = fodCenterY - dpToPx(config.offsetY);
             int hitIndex = RingSectorPacking.findTouchedIndex(
                     ringSectorSpec, touchX, touchY, fodCenterX, regionCenterY);
@@ -888,15 +987,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 closest = bubbles.get(hitIndex);
                 minDistance = 0f;
             }
-            for (int i = 0, n = bubbles.size(); i < n; i++) {
-                CircularBubbleView b = bubbles.get(i);
-                b.applyScale(b == closest ? config.selectedIconScale : 1.0f);
-                if (closest != null) {
-                    b.setIconAlpha(b == closest ? config.fisheyeZoomAlpha : config.fisheyeOtherAlpha);
-                } else {
-                    b.setIconAlpha(config.iconAlpha);
-                }
-            }
+            applySectorFisheye(touchX, touchY, closest, influenceRadiusPx, config);
             int hlIdx = (closest != null) ? bubbles.indexOf(closest) : -1;
             int hlCol = (closest != null) ? closest.item.resolveIconPrimaryColor() : 0;
             sectorOverlay.setHighlight(hlIdx, hlCol, config.sectorHighlightEnabled);
@@ -908,17 +999,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 closest = bubbles.get(hitIndex);
                 minDistance = 0f; // 明确命中扇区
             }
-            // 系统原生模式下：对所有气泡应用基础尺寸，或被命中气泡应用选中倍率与对应透明度
-            for (int i = 0, n = bubbles.size(); i < n; i++) {
-                CircularBubbleView b = bubbles.get(i);
-                float scale = (b == closest) ? config.selectedIconScale : 1.0f;
-                b.applyScale(scale);
-                if (closest != null) {
-                    b.setIconAlpha(b == closest ? config.fisheyeZoomAlpha : config.fisheyeOtherAlpha);
-                } else {
-                    b.setIconAlpha(config.iconAlpha);
-                }
-            }
+            applySectorFisheye(touchX, touchY, closest, influenceRadiusPx, config);
         } else {
             // 经典连续余弦鱼眼动力学与欧氏距离判定模式（蜂窝、弧形扇面、非扇区圆环、非扇区系统扇形通用）
             for (int i = 0, n = bubbles.size(); i < n; i++) {
@@ -932,39 +1013,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 }
             }
 
-            float effectiveRadiusPx = Math.max(influenceRadiusPx, hitDistanceThreshold);
-            float focusFactor = 0f;
-            if (closest != null && minDistance < effectiveRadiusPx) {
-                focusFactor = (minDistance < hitDistanceThreshold)
-                    ? 1.0f
-                    : (float) Math.cos((minDistance / effectiveRadiusPx) * (Math.PI / 2.0));
-            }
-            float otherAlpha = config.iconAlpha + (config.fisheyeOtherAlpha - config.iconAlpha) * focusFactor;
-
-            for (int i = 0, n = bubbles.size(); i < n; i++) {
-                CircularBubbleView b = bubbles.get(i);
-                float dx = touchX - b.targetX;
-                float dy = touchY - b.targetY;
-                float dist = (float) Math.hypot(dx, dy);
-
-                float scale = 1.0f;
-                if (dist < influenceRadiusPx) {
-                    float factor = (float) Math.cos((dist / influenceRadiusPx) * (Math.PI / 2.0));
-                    scale = 1.0f + (config.maxScale - 1.0f) * factor;
-                }
-
-                float currentAlpha;
-                if (b == closest && dist < effectiveRadiusPx) {
-                    float alphaFactor = (dist < hitDistanceThreshold)
-                        ? 1.0f
-                        : (float) Math.cos((dist / effectiveRadiusPx) * (Math.PI / 2.0));
-                    currentAlpha = config.iconAlpha + (config.fisheyeZoomAlpha - config.iconAlpha) * alphaFactor;
-                } else {
-                    currentAlpha = otherAlpha;
-                }
-                b.applyScale(scale);
-                b.setIconAlpha(currentAlpha);
-            }
+            applyDistanceFisheye(bubbles, touchX, touchY, closest, minDistance,
+                    influenceRadiusPx, hitDistanceThreshold, config);
             sectorOverlay.setHighlight(-1, 0, false);
         }
 
@@ -1131,11 +1181,17 @@ public class CustomHyperOpenContainer extends FrameLayout {
     }
 
     /**
-     * 文件夹子气泡展开时的滑动命中计算
+     * 文件夹子气泡展开时的滑动命中计算。
+     * <p>
+     * 子气泡完全复用一级气泡的距离型鱼眼实现 {@link #applyDistanceFisheye}（缩放、透明度、
+     * 命中阈值均一致，无任何额外绘制效果），仅命中判定对象换成子气泡集合。
      */
     private void handleFolderSubBubbleMove(float touchX, float touchY) {
-        float iconSizePx = dpToPx(config != null ? config.iconSize : 60);
-        float threshold = iconSizePx * 1.1f;
+        HyperOpenConfig cfg = config != null ? config : new HyperOpenConfig();
+        float iconSizePx = dpToPx(cfg.iconSize);
+        float influenceRadiusPx = dpToPx(cfg.influenceRadius);
+        // 与一级气泡一致的命中阈值（旧版 1.1x 是子气泡专属的宽松判定，会造成两者手感不一致）
+        float threshold = iconSizePx * 0.95f;
         CircularBubbleView closestSub = null;
         float minDist = Float.MAX_VALUE;
 
@@ -1147,15 +1203,17 @@ public class CustomHyperOpenContainer extends FrameLayout {
             }
         }
 
+        // 子气泡与一级气泡共用同一份距离型鱼眼缩放与透明度插值
+        applyDistanceFisheye(folderSubBubbles, touchX, touchY, closestSub, minDist,
+                influenceRadiusPx, threshold, cfg);
+
         boolean hitSub = (closestSub != null && minDist < threshold);
         if (hitSub) {
             if (currentSelectedSubBubble != closestSub) {
                 if (currentSelectedSubBubble != null) {
                     currentSelectedSubBubble.setSelectedState(false);
-                    currentSelectedSubBubble.applyScale(1.0f);
                 }
                 closestSub.setSelectedState(true);
-                closestSub.applyScale(config != null ? config.selectedIconScale : 1.15f);
                 closestSub.bringToFront();
                 currentSelectedSubBubble = closestSub;
 
@@ -1166,7 +1224,6 @@ public class CustomHyperOpenContainer extends FrameLayout {
         } else {
             if (currentSelectedSubBubble != null) {
                 currentSelectedSubBubble.setSelectedState(false);
-                currentSelectedSubBubble.applyScale(1.0f);
                 currentSelectedSubBubble = null;
             }
             // 检查手指是否移回主文件夹气泡；若距离主气泡过远，关闭子菜单

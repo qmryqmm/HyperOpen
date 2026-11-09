@@ -925,6 +925,8 @@ fun ShortcutBubbleIcon(
     val cornerRadiusPercent = cfg.iconCornerRadius.coerceIn(0, 50)
     val iconAlpha = cfg.iconAlpha.coerceIn(0f, 1f)
     val bubblePaddingPercent = cfg.bubblePaddingPercent.coerceIn(0, 40)
+    // 留白 0% = 气泡整体关闭：底衬、模糊与压暗一并停用，仅显示图标
+    val bubbleEnabled = bubblePaddingPercent > 0
     val glowEnabled = cfg.iconGlowEffect
 
     val bubbleDrawable = remember(activeStyle, item.tintColor, isSelected, glowEnabled) {
@@ -933,7 +935,7 @@ fun ShortcutBubbleIcon(
         )
     }
     bubbleDrawable.setStyle(activeStyle)
-    bubbleDrawable.setDimAlpha(bubbleDimAlpha)
+    bubbleDrawable.setDimAlpha(if (bubbleEnabled) bubbleDimAlpha else 0f)
     bubbleDrawable.setCornerRadiusPercent(cornerRadiusPercent)
     bubbleDrawable.setSelected(isSelected)
     bubbleDrawable.setGlowEnabled(glowEnabled)
@@ -953,9 +955,11 @@ fun ShortcutBubbleIcon(
         if (w <= 0 || h <= 0) return@Canvas
         val nativeCanvas = drawContext.canvas.nativeCanvas
 
-        // 1. 绘制气泡底衬（液态玻璃/高斯模糊光学层、压暗、圆角与常态透明度）
-        bubbleDrawable.setBounds(0, 0, w, h)
-        bubbleDrawable.draw(nativeCanvas)
+        // 1. 绘制气泡底衬（液态玻璃/高斯模糊光学层、压暗、圆角与常态透明度）；留白 0% 气泡关闭时不绘制
+        if (bubbleEnabled) {
+            bubbleDrawable.setBounds(0, 0, w, h)
+            bubbleDrawable.draw(nativeCanvas)
+        }
 
         // 2. 绘制前景图标（应用常态透明度与内边距缩放）
         val padPx = (minOf(w, h) * (bubblePaddingPercent / 100f)).roundToInt()

@@ -1,11 +1,13 @@
 package io.github.qmryqmm.hyperopen.view;
 
-import android.animation.ValueAnimator;
 import android.content.Context;
+import android.graphics.Outline;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.LayerDrawable;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.View;
+import android.view.ViewOutlineProvider;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 
@@ -26,13 +28,14 @@ public class CircularBubbleView extends FrameLayout {
     public float targetY;
     public float currentScale = 1.0f;
     private float fisheyeScale = 1.0f;
-    private float selectedScale = 1.0f;
     private boolean isSelected = false;
 
     private int activeStyle;
     private final int sizePx;
     private float blurRadiusDp;
     private int paddingPercent;
+    /** 气泡留白区域压暗原始值（气泡关闭时实际应用为 0） */
+    private float dimAlpha;
     private int cornerRadiusPercent;
     private final HyperOpenConfig config;
     private final ImageView iconView;
@@ -45,8 +48,6 @@ public class CircularBubbleView extends FrameLayout {
     private WeakReference<Object> boundVriRef;
     private float lastBlurCornerRadiusPx = -1f;
     private boolean systemBlurEnabled = true;
-    @Nullable
-    private ValueAnimator selectedScaleAnimator;
     @Nullable
     private Runnable onScaleChangedListener;
 
@@ -64,10 +65,31 @@ public class CircularBubbleView extends FrameLayout {
         this.opticDrawable = new HyperOSMaterialFactory.CircularBubbleDrawable(
             activeStyle, item.tintColor, isSelected, glowEnabled
         );
-        this.opticDrawable.setDimAlpha(config != null ? config.bubbleDimAlpha : 0f);
+        this.dimAlpha = config != null ? config.bubbleDimAlpha : 0f;
+        this.opticDrawable.setDimAlpha(this.dimAlpha);
         this.opticDrawable.setCornerRadiusPercent(this.cornerRadiusPercent);
 
         setLayoutParams(new LayoutParams(sizePx, sizePx));
+        setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                int w = view.getWidth() > 0 ? view.getWidth() : sizePx;
+                int h = view.getHeight() > 0 ? view.getHeight() : sizePx;
+                float cx = w / 2f;
+                float cy = h / 2f;
+                float radius = Math.min(cx, cy) - 2.0f;
+                if (radius <= 0f) return;
+                float corner = radius * (Math.max(0, Math.min(50, cornerRadiusPercent)) / 50f);
+                outline.setRoundRect(
+                    Math.round(cx - radius),
+                    Math.round(cy - radius),
+                    Math.round(cx + radius),
+                    Math.round(cy + radius),
+                    corner
+                );
+            }
+        });
+        setClipToOutline(true);
         setClipChildren(false);
         setClipToPadding(false);
 
@@ -159,7 +181,8 @@ public class CircularBubbleView extends FrameLayout {
     }
 
     private int getBlurRadiusPx() {
-        if (!systemBlurEnabled || blurRadiusDp <= 0f) return 0;
+        // 留白 0% = 气泡整体关闭，气泡模糊跟随停用
+        if (!systemBlurEnabled || blurRadiusDp <= 0f || paddingPercent <= 0) return 0;
         return Math.round(TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP, blurRadiusDp, getResources().getDisplayMetrics()
         ));
@@ -205,6 +228,18 @@ public class CircularBubbleView extends FrameLayout {
         opticDrawable.setSelected(isSelected);
         opticDrawable.setGlowEnabled(glowEnabled);
         opticDrawable.setCornerRadiusPercent(cornerRadiusPercent);
+        applyEffectiveDim();
+
+        if (paddingPercent <= 0) {
+            // 留白 0% = 气泡整体关闭：不绘制气泡底衬，模糊与压暗一并停用，仅保留图标
+            systemBackdropBlurDrawable = null;
+            boundVriRef = null;
+            lastBlurCornerRadiusPx = -1f;
+            if (getBackground() != null) {
+                setBackground(null);
+            }
+            return;
+        }
 
         int blurPx = getBlurRadiusPx();
         if (blurPx > 0 && systemBackdropBlurDrawable == null && isAttachedToWindow()) {
@@ -245,9 +280,15 @@ public class CircularBubbleView extends FrameLayout {
         }
     }
 
-    /** 气泡留白区域背景压暗 (0.0 ~ 1.0) */
+    /** 气泡留白区域背景压暗 (0.0 ~ 1.0)；留白 0%（气泡关闭）时实际应用为 0 */
     public void setDimAlpha(float alpha) {
-        opticDrawable.setDimAlpha(alpha);
+        this.dimAlpha = alpha;
+        applyEffectiveDim();
+    }
+
+    /** 按气泡开关应用压暗：留白 0% 气泡关闭时压暗跟随停用 */
+    private void applyEffectiveDim() {
+        opticDrawable.setDimAlpha(paddingPercent > 0 ? dimAlpha : 0f);
     }
 
     public void setBlurRadius(float radiusDp) {
@@ -263,6 +304,8 @@ public class CircularBubbleView extends FrameLayout {
             this.paddingPercent = percent;
             applyIconPadding();
             invalidate();
+            // 留白变化会切换气泡开关（0% 关闭气泡）：重建底衬、模糊与压暗
+            ensureBlurAndRefreshBackground();
         }
     }
 
@@ -274,6 +317,7 @@ public class CircularBubbleView extends FrameLayout {
                 this.config.iconCornerRadius = clamped;
             }
             opticDrawable.setCornerRadiusPercent(clamped);
+            invalidateOutline();
             loadItemIcon();
             ensureBlurAndRefreshBackground();
         }
@@ -285,13 +329,8 @@ public class CircularBubbleView extends FrameLayout {
 
     public void resetBlur() {
         animate().cancel();
-        if (selectedScaleAnimator != null) {
-            selectedScaleAnimator.cancel();
-            selectedScaleAnimator = null;
-        }
         this.isSelected = false;
         this.fisheyeScale = 1.0f;
-        this.selectedScale = 1.0f;
         this.currentScale = 1.0f;
         setScaleX(1.0f);
         setScaleY(1.0f);
@@ -315,31 +354,16 @@ public class CircularBubbleView extends FrameLayout {
         return iconView != null ? iconView.getAlpha() : 1.0f;
     }
 
+    /**
+     * 选中状态只负责视觉反馈（辉光、气泡描边高亮）；缩放一律由鱼眼曲线经
+     * {@link #applyScale(float)} 下发，不再叠加独立选中倍率，避免 maxScale 之外的隐式乘法。
+     */
     public void setSelectedState(boolean selected) {
         if (this.isSelected != selected) {
             this.isSelected = selected;
             boolean glowEnabled = config == null || config.iconGlowEffect;
             opticDrawable.setGlowEnabled(glowEnabled);
             opticDrawable.setSelected(selected);
-
-            float targetSelectedScale = 1.0f;
-            if (selected) {
-                targetSelectedScale = config != null ? config.selectedIconScale : 1.15f;
-            }
-
-            if (selectedScaleAnimator != null) {
-                selectedScaleAnimator.cancel();
-            }
-            selectedScaleAnimator = ValueAnimator.ofFloat(this.selectedScale, targetSelectedScale);
-            selectedScaleAnimator.setDuration(120);
-            selectedScaleAnimator.addUpdateListener(anim -> {
-                this.selectedScale = (float) anim.getAnimatedValue();
-                applyEffectiveScale();
-                if (onScaleChangedListener != null) {
-                    onScaleChangedListener.run();
-                }
-            });
-            selectedScaleAnimator.start();
         }
     }
 
@@ -347,15 +371,17 @@ public class CircularBubbleView extends FrameLayout {
         if (Math.abs(this.fisheyeScale - scale) > 0.0005f) {
             this.fisheyeScale = scale;
             applyEffectiveScale();
+            if (onScaleChangedListener != null) {
+                onScaleChangedListener.run();
+            }
         }
     }
 
     private void applyEffectiveScale() {
-        float newScale = fisheyeScale * selectedScale;
-        if (Math.abs(this.currentScale - newScale) > 0.0005f || Math.abs(getScaleX() - newScale) > 0.0005f) {
-            this.currentScale = newScale;
-            setScaleX(newScale);
-            setScaleY(newScale);
+        if (Math.abs(this.currentScale - fisheyeScale) > 0.0005f || Math.abs(getScaleX() - fisheyeScale) > 0.0005f) {
+            this.currentScale = fisheyeScale;
+            setScaleX(fisheyeScale);
+            setScaleY(fisheyeScale);
             if (cornerRadiusPercent < 50) {
                 syncBlurCornerRadiusWithViewScale();
             }

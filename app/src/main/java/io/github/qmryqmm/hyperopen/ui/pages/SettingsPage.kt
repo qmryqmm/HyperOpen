@@ -134,7 +134,7 @@ fun SettingsPage(
             ) {
                 ArrowPreference(
                     title = "权限检测",
-                    summary = "Root · 应用列表 · 振动 · 勿扰 · 存储 · LSPosed 作用域",
+                    summary = "Root · 应用列表 · 振动 · 勿扰 · 存储",
                     startAction = {
                         Icon(
                             imageVector = MiuixIcons.Scan,

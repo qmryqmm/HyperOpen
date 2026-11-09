@@ -158,7 +158,9 @@ public class HyperOpenConfig {
     /** 文件夹二级气泡悬停展开延迟 (100 ~ 600 ms，默认 250 ms) */
     public int folderHoverDelayMs = 250;
 
-    public float maxScale = 1.40f;
+    /** 鱼眼最大放大倍率：所有布局下命中图标的统一最终倍率 (1.10x ~ 2.00x，默认 1.60x) */
+    public float maxScale = 1.60f;
+    /** 感应辐射半径 (dp)：离手指多远开始放大，超出后回到常态；调小可实现「只放大命中图标」 */
     public int influenceRadius = 70;  // dp
 
     /** 图标透明度 (0.0f ~ 1.0f，默认 1.0f) */
@@ -211,12 +213,10 @@ public class HyperOpenConfig {
 
     /** 图标分布紧凑度间距微调 (-10dp ~ 20dp，默认 5dp，负值更紧凑，正值更松散) */
     public int iconSpacingOffset = 5;
-    /** 气泡内部图标留白比例 (0% ~ 40%，默认 0%，0% 即全屏满铺) */
+    /** 气泡内部图标留白比例 (0% ~ 40%，默认 0%)；0% 图标满铺并直接关闭气泡：底衬、模糊与压暗一并停用 */
     public int bubblePaddingPercent = 0;
     /** 图标气泡留白区域高斯模糊半径 (0 ~ 50 dp，默认 25 dp，0 为关闭模糊，样式与圆形视界底衬一致) */
     public int bubbleBlurRadius = 25;
-    /** 手指选中图标时气泡内图标的缩放倍率 (1.00x ~ 1.50x，默认 1.15x) */
-    public float selectedIconScale = 1.15f;
 
     /** 应用图标裁切方案 (CROP_BITMAP_CIRCLE / CROP_ADAPTIVE_EXPAND) */
     public int appIconCropMode = CROP_ADAPTIVE_EXPAND;
@@ -414,7 +414,7 @@ public class HyperOpenConfig {
                     config.folderHoverDelayMs = bundle.getInt("folder_hover_delay_ms", 250);
                     config.stockSystemRegion = bundle.getBoolean("stock_system_region", true);
                     config.ringCount = bundle.getInt("ring_count", 2);
-                    config.maxScale = bundle.getFloat("max_scale", 1.40f);
+                    config.maxScale = bundle.getFloat("max_scale", 1.60f);
                     config.influenceRadius = bundle.getInt("influence_radius", 70);
                     config.iconAlpha = bundle.getFloat("icon_alpha", 1.0f);
                     config.fisheyeZoomAlpha = bundle.getFloat("fisheye_zoom_alpha", 1.0f);
@@ -448,7 +448,8 @@ public class HyperOpenConfig {
                     config.iconSpacingOffset = bundle.getInt("icon_spacing_offset", 5);
                     config.bubblePaddingPercent = bundle.getInt("bubble_padding_percent", 0);
                     config.bubbleBlurRadius = bundle.getInt("bubble_blur_radius", 25);
-                    config.selectedIconScale = bundle.getFloat("selected_icon_scale", 1.15f);
+                    // 旧版 selected_icon_scale 折算迁移：峰值 maxScale × selectedIconScale 一次性合并进 maxScale
+                    migrateLegacySelectedScale(config, bundle.getFloat("selected_icon_scale", 1.0f));
                     config.appIconCropMode = bundle.getInt("app_icon_crop_mode", CROP_ADAPTIVE_EXPAND);
                     config.glyphPadEnabled = bundle.getBoolean("glyph_pad_enabled", true);
                     config.glyphPadColor = bundle.getInt("glyph_pad_color", 0xFF2A82E4);
@@ -520,7 +521,7 @@ public class HyperOpenConfig {
         config.folderHoverDelayMs = xPrefs.getInt("folder_hover_delay_ms", 250);
         config.stockSystemRegion = xPrefs.getBoolean("stock_system_region", true);
         config.ringCount = xPrefs.getInt("ring_count", 2);
-        config.maxScale = xPrefs.getFloat("max_scale", 1.40f);
+        config.maxScale = xPrefs.getFloat("max_scale", 1.60f);
         config.influenceRadius = xPrefs.getInt("influence_radius", 70);
         config.iconAlpha = xPrefs.getFloat("icon_alpha", 1.0f);
         config.fisheyeZoomAlpha = xPrefs.getFloat("fisheye_zoom_alpha", 1.0f);
@@ -554,7 +555,8 @@ public class HyperOpenConfig {
         config.iconSpacingOffset = xPrefs.getInt("icon_spacing_offset", 5);
         config.bubblePaddingPercent = xPrefs.getInt("bubble_padding_percent", 0);
         config.bubbleBlurRadius = xPrefs.getInt("bubble_blur_radius", 25);
-        config.selectedIconScale = xPrefs.getFloat("selected_icon_scale", 1.15f);
+        // 旧版 selected_icon_scale 折算迁移：峰值 maxScale × selectedIconScale 一次性合并进 maxScale
+        migrateLegacySelectedScale(config, xPrefs.getFloat("selected_icon_scale", 1.0f));
         config.appIconCropMode = xPrefs.getInt("app_icon_crop_mode", CROP_ADAPTIVE_EXPAND);
         config.glyphPadEnabled = xPrefs.getBoolean("glyph_pad_enabled", true);
         config.glyphPadColor = xPrefs.getInt("glyph_pad_color", 0xFF2A82E4);
@@ -616,7 +618,7 @@ public class HyperOpenConfig {
         config.folderHoverDelayMs = sp.getInt("folder_hover_delay_ms", 250);
         config.stockSystemRegion = sp.getBoolean("stock_system_region", true);
         config.ringCount = sp.getInt("ring_count", 2);
-        config.maxScale = sp.getFloat("max_scale", 1.40f);
+        config.maxScale = sp.getFloat("max_scale", 1.60f);
         config.influenceRadius = sp.getInt("influence_radius", 70);
         config.iconAlpha = sp.getFloat("icon_alpha", 1.0f);
         config.fisheyeZoomAlpha = sp.getFloat("fisheye_zoom_alpha", 1.0f);
@@ -650,7 +652,8 @@ public class HyperOpenConfig {
         config.iconSpacingOffset = sp.getInt("icon_spacing_offset", 5);
         config.bubblePaddingPercent = sp.getInt("bubble_padding_percent", 0);
         config.bubbleBlurRadius = sp.getInt("bubble_blur_radius", 25);
-        config.selectedIconScale = sp.getFloat("selected_icon_scale", 1.15f);
+        // 旧版 selected_icon_scale 折算迁移：峰值 maxScale × selectedIconScale 一次性合并进 maxScale
+        migrateLegacySelectedScale(config, sp.getFloat("selected_icon_scale", 1.0f));
         config.appIconCropMode = sp.getInt("app_icon_crop_mode", CROP_ADAPTIVE_EXPAND);
         config.glyphPadEnabled = sp.getBoolean("glyph_pad_enabled", true);
         config.glyphPadColor = sp.getInt("glyph_pad_color", 0xFF2A82E4);
@@ -660,6 +663,19 @@ public class HyperOpenConfig {
         String jsonStr = sp.getString("shortcuts_json", null);
         config.shortcuts = parseShortcutsJson(jsonStr);
         return config;
+    }
+
+    /**
+     * 旧版参数迁移：命中图标最终倍率从 maxScale × selectedIconScale 改为 maxScale 单值，
+     * 老用户的旧 selected_icon_scale ≠ 1.0 时，把乘积一次性折算进 maxScale，保证命中峰值不缩水
+     * （如 1.40 × 1.15 ≈ 1.61x）。新装用户旧键缺失时传入 1.0f，等价于不迁移。
+     */
+    private static void migrateLegacySelectedScale(HyperOpenConfig config, float legacySelectedScale) {
+        if (legacySelectedScale > 1.001f) {
+            float merged = config.maxScale * legacySelectedScale;
+            // 上限对齐设置页滑块最大值 2.00x，避免极端旧配置折算出离谱倍率
+            config.maxScale = Math.min(2.0f, Math.max(1.0f, merged));
+        }
     }
 
     /**
@@ -744,7 +760,8 @@ public class HyperOpenConfig {
             .putInt("icon_spacing_offset", iconSpacingOffset)
             .putInt("bubble_padding_percent", bubblePaddingPercent)
             .putInt("bubble_blur_radius", bubbleBlurRadius)
-            .putFloat("selected_icon_scale", selectedIconScale)
+            // 旧版选中强调倍率已废弃：命中图标最终倍率统一为 max_scale 单值，写入时清掉遗留键
+            .remove("selected_icon_scale")
             .putInt("app_icon_crop_mode", appIconCropMode)
             .putBoolean("glyph_pad_enabled", glyphPadEnabled)
             .putInt("glyph_pad_color", glyphPadColor)

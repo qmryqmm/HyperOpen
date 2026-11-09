@@ -24,6 +24,7 @@ import io.github.qmryqmm.hyperopen.layout.HollowRingPacking
 import io.github.qmryqmm.hyperopen.layout.RingSectorPacking
 import io.github.qmryqmm.hyperopen.layout.StockFanPacking
 import io.github.qmryqmm.hyperopen.model.ShortcutItem
+import io.github.qmryqmm.hyperopen.util.FisheyeScale
 import io.github.qmryqmm.hyperopen.view.CircularBubbleView
 import io.github.qmryqmm.hyperopen.view.CircularRegionBackdropView
 import io.github.qmryqmm.hyperopen.view.SectorOverlayView
@@ -1318,6 +1319,111 @@ class HyperOpenPreviewView(
     }
 
     /**
+     * 扇区式命中（空心圆环扇区 / 系统原生 Region 扇形）的鱼眼缩放与透明度应用。
+     *
+     * 这两条判定路径没有欧氏距离参与，命中完全由角度 / Region 多边形决定。旧实现只套用
+     * 选中强调倍率，导致「鱼眼最大放大倍率」在它们上面完全不生效。
+     * 现在统一走同一套鱼眼曲线：
+     * - 命中项：锁定峰值 [HyperOpenConfig.maxScale]（与手指在扇区内的位置无关）。扇面会一直
+     *   延伸到屏幕外，手指常离图标中心很远，若按距离衰减就会把峰值又抵消回去（这正是旧实现
+     *   失效的根因），因此命中即满峰值，最终倍率在所有布局下都等于 maxScale；
+     * - 未命中邻居：按各自中心距离余弦衰减，衰减快慢由感应辐射半径决定（调小半径即可
+     *   逼近「只放大命中图标」）；手指在扇区边界时仍能看到相邻图标微放大，
+     *   鱼眼透镜感不再被扇区判定切断。
+     *
+     * 未命中任何扇区（手指在中心取消区）时全部回到 1.0x 与常态透明度。
+     */
+    private fun applySectorFisheye(
+        touchX: Float,
+        touchY: Float,
+        closest: CircularBubbleView?,
+        influenceRadiusPx: Float
+    ) {
+        // 命中已由角度 / Region 判定完成，这里只负责缩放与透明度的连续过渡
+        val hit = closest
+        if (hit == null) {
+            // 手指落在中心取消区：完全回到常态，避免空放大造成「有目标」的错觉
+            for (b in bubbleViews) {
+                b.applyScale(1.0f)
+                b.setIconAlpha(config.iconAlpha)
+            }
+            return
+        }
+
+        val maxScale = FisheyeScale.peakScale(config.maxScale)
+        for (b in bubbleViews) {
+            val dist = Math.hypot((touchX - b.targetX).toDouble(), (touchY - b.targetY).toDouble()).toFloat()
+            // 命中项锁定峰值：扇区内手指可能离图标中心很远（扇面一直延伸到屏幕外），
+            // 若按距离衰减就会把 maxScale 又抵消回去，这正是旧实现失效的根因
+            val scale = if (b == hit) {
+                maxScale
+            } else {
+                FisheyeScale.scaleForDistance(dist, influenceRadiusPx, config.maxScale)
+            }
+            b.applyScale(scale)
+
+            b.setIconAlpha(
+                if (b == hit) {
+                    config.fisheyeZoomAlpha
+                } else {
+                    // 邻居透明度按距离在「常态 → 其他图标透明度」之间插值，与距离型布局手感一致
+                    val factor = FisheyeScale.cosineFactor(dist, influenceRadiusPx)
+                    config.iconAlpha + (config.fisheyeOtherAlpha - config.iconAlpha) * factor
+                }
+            )
+        }
+    }
+
+    /**
+     * 经典连续余弦鱼眼：缩放与透明度完全由各气泡中心到手指的距离决定。
+     *
+     * 一级气泡（蜂窝 / 弧形扇面 / 非扇区圆环 / 非扇区系统扇形）与文件夹二级子气泡
+     * 共用这同一份实现，保证两类图标的手感与视觉效果完全一致，子气泡没有任何额外的绘制效果。
+     * - 缩放：每个气泡独立按 scaleForDistance 连续衰减（命中气泡因为在阈值内距离很小，天然接近峰值）；
+     * - 透明度：最近气泡（在有效半径内）在 iconAlpha → fisheyeZoomAlpha 间插值，
+     *   其余气泡统一在 iconAlpha → fisheyeOtherAlpha 间按焦点系数插值。
+     */
+    private fun applyDistanceFisheye(
+        targets: List<CircularBubbleView>,
+        touchX: Float,
+        touchY: Float,
+        closest: CircularBubbleView?,
+        minDistance: Float,
+        influenceRadiusPx: Float,
+        hitDistanceThreshold: Float
+    ) {
+        val effectiveRadiusPx = maxOf(influenceRadiusPx, hitDistanceThreshold)
+        var focusFactor = 0f
+        if (closest != null && minDistance < effectiveRadiusPx) {
+            focusFactor = if (minDistance < hitDistanceThreshold) {
+                1.0f
+            } else {
+                FisheyeScale.cosineFactor(minDistance, effectiveRadiusPx)
+            }
+        }
+        val otherAlpha = config.iconAlpha + (config.fisheyeOtherAlpha - config.iconAlpha) * focusFactor
+
+        for (b in targets) {
+            val dist = Math.hypot((touchX - b.targetX).toDouble(), (touchY - b.targetY).toDouble()).toFloat()
+
+            val scale = FisheyeScale.scaleForDistance(dist, influenceRadiusPx, config.maxScale)
+
+            val currentAlpha = if (b == closest && dist < effectiveRadiusPx) {
+                val alphaFactor = if (dist < hitDistanceThreshold) {
+                    1.0f
+                } else {
+                    FisheyeScale.cosineFactor(dist, effectiveRadiusPx)
+                }
+                config.iconAlpha + (config.fisheyeZoomAlpha - config.iconAlpha) * alphaFactor
+            } else {
+                otherAlpha
+            }
+            b.applyScale(scale)
+            b.setIconAlpha(currentAlpha)
+        }
+    }
+
+    /**
      * 模拟指纹滑动物理动力学
      */
     private fun handleFingerHover(touchX: Float, touchY: Float) {
@@ -1340,7 +1446,8 @@ class HyperOpenPreviewView(
         val useRingSector = isRingSectorActive() && sectorSpec != null
 
         if (useRingSector) {
-            // 空心圆环扇区触发：中心圆内取消，圆外按角度均分扇区命中，不做距离鱼眼
+            // 空心圆环扇区触发：中心圆内取消，圆外按角度均分扇区命中。
+            // 命中不依赖欧氏距离，但缩放仍走统一鱼眼曲线，保证「鱼眼最大放大倍率」在本布局生效
             val hitIndex = RingSectorPacking.findTouchedIndex(
                 sectorSpec,
                 touchX,
@@ -1352,17 +1459,10 @@ class HyperOpenPreviewView(
                 closest = bubbleViews[hitIndex]
                 minDistance = 0f
             }
+            applySectorFisheye(touchX, touchY, closest, influenceRadiusPx)
             val hlIdx = if (closest != null) bubbleViews.indexOf(closest) else -1
             val hlCol = closest?.item?.resolveIconPrimaryColor() ?: 0
             sectorOverlay.setHighlight(hlIdx, hlCol, config.sectorHighlightEnabled)
-            for (b in bubbleViews) {
-                b.applyScale(if (b == closest) config.selectedIconScale else 1.0f)
-                if (closest != null) {
-                    b.setIconAlpha(if (b == closest) config.fisheyeZoomAlpha else config.fisheyeOtherAlpha)
-                } else {
-                    b.setIconAlpha(config.iconAlpha)
-                }
-            }
         } else if (useStockRegion && stockSpecs.isNotEmpty()) {
             sectorOverlay.setHighlight(-1, 0, false)
             val hitIndex = StockFanPacking.findTouchedIndex(stockSpecs, touchX, touchY, lastFodX, lastFodY)
@@ -1370,15 +1470,7 @@ class HyperOpenPreviewView(
                 closest = bubbleViews[hitIndex]
                 minDistance = 0f
             }
-            for (b in bubbleViews) {
-                val scale = if (b == closest) config.selectedIconScale else 1.0f
-                b.applyScale(scale)
-                if (closest != null) {
-                    b.setIconAlpha(if (b == closest) config.fisheyeZoomAlpha else config.fisheyeOtherAlpha)
-                } else {
-                    b.setIconAlpha(config.iconAlpha)
-                }
-            }
+            applySectorFisheye(touchX, touchY, closest, influenceRadiusPx)
         } else {
             sectorOverlay.setHighlight(-1, 0, false)
             for (b in bubbleViews) {
@@ -1389,39 +1481,7 @@ class HyperOpenPreviewView(
                 }
             }
 
-            val effectiveRadiusPx = maxOf(influenceRadiusPx, hitDistanceThreshold)
-            var focusFactor = 0f
-            if (closest != null && minDistance < effectiveRadiusPx) {
-                focusFactor = if (minDistance < hitDistanceThreshold) {
-                    1.0f
-                } else {
-                    Math.cos((minDistance / effectiveRadiusPx) * (Math.PI / 2.0)).toFloat()
-                }
-            }
-            val otherAlpha = config.iconAlpha + (config.fisheyeOtherAlpha - config.iconAlpha) * focusFactor
-
-            for (b in bubbleViews) {
-                val dist = Math.hypot((touchX - b.targetX).toDouble(), (touchY - b.targetY).toDouble()).toFloat()
-
-                var scale = 1.0f
-                if (dist < influenceRadiusPx) {
-                    val factor = Math.cos((dist / influenceRadiusPx) * (Math.PI / 2.0)).toFloat()
-                    scale = 1.0f + (config.maxScale - 1.0f) * factor
-                }
-
-                val currentAlpha = if (b == closest && dist < effectiveRadiusPx) {
-                    val alphaFactor = if (dist < hitDistanceThreshold) {
-                        1.0f
-                    } else {
-                        Math.cos((dist / effectiveRadiusPx) * (Math.PI / 2.0)).toFloat()
-                    }
-                    config.iconAlpha + (config.fisheyeZoomAlpha - config.iconAlpha) * alphaFactor
-                } else {
-                    otherAlpha
-                }
-                b.applyScale(scale)
-                b.setIconAlpha(currentAlpha)
-            }
+            applyDistanceFisheye(bubbleViews, touchX, touchY, closest, minDistance, influenceRadiusPx, hitDistanceThreshold)
         }
 
         val isSelected = if (useRingSector || useStockRegion) (closest != null) else (closest != null && minDistance < hitDistanceThreshold)
@@ -1544,14 +1604,24 @@ class HyperOpenPreviewView(
                 .setInterpolator(android.view.animation.OvershootInterpolator(1.2f))
                 .setDuration(180)
                 .setStartDelay(i * 15L)
+                .setUpdateListener { notifyBlurSceneChanged() }
+                .withEndAction { notifyBlurSceneChanged() }
                 .start()
         }
         notifyBlurSceneChanged()
     }
 
+    /**
+     * 文件夹子气泡展开时的滑动命中计算。
+     *
+     * 子气泡完全复用一级气泡的距离型鱼眼实现 [applyDistanceFisheye]（缩放、透明度、
+     * 命中阈值均一致，无任何额外绘制效果），仅命中判定对象换成子气泡集合。
+     */
     private fun handleFolderSubBubbleMove(touchX: Float, touchY: Float) {
         val iconSizePx = dpToPx(config.iconSize.toFloat())
-        val threshold = iconSizePx * 1.1f
+        val influenceRadiusPx = dpToPx(config.influenceRadius.toFloat())
+        // 与一级气泡一致的命中阈值（旧版 1.1x 是子气泡专属的宽松判定，会造成两者手感不一致）
+        val threshold = iconSizePx * 0.95f
         var closestSub: CircularBubbleView? = null
         var minDist = Float.MAX_VALUE
 
@@ -1563,14 +1633,15 @@ class HyperOpenPreviewView(
             }
         }
 
+        // 子气泡与一级气泡共用同一份距离型鱼眼缩放与透明度插值
+        applyDistanceFisheye(folderSubBubbles, touchX, touchY, closestSub, minDist, influenceRadiusPx, threshold)
+
         val hitSub = (closestSub != null && minDist < threshold)
         if (hitSub) {
             if (currentSelectedSubBubble != closestSub) {
                 currentSelectedSubBubble?.setSelectedState(false)
-                currentSelectedSubBubble?.applyScale(1.0f)
 
                 closestSub!!.setSelectedState(true)
-                closestSub.applyScale(config.selectedIconScale)
                 closestSub.bringToFront()
                 currentSelectedSubBubble = closestSub
 
@@ -1581,7 +1652,6 @@ class HyperOpenPreviewView(
         } else {
             if (currentSelectedSubBubble != null) {
                 currentSelectedSubBubble?.setSelectedState(false)
-                currentSelectedSubBubble?.applyScale(1.0f)
                 currentSelectedSubBubble = null
             }
             val folder = activeFolderBubble
@@ -1620,16 +1690,18 @@ class HyperOpenPreviewView(
             val lp = b.layoutParams as? LayoutParams
             val cx = if (lp != null) lp.leftMargin + iconSizePx / 2f + b.translationX else b.targetX
             val cy = if (lp != null) lp.topMargin + iconSizePx / 2f + b.translationY else b.targetY
-            val scale = b.currentScale.coerceAtLeast(0.1f)
-            // 内缩 3px (直径减 6px) 使预览毛玻璃圆严格收拢在 2.2px 气泡描边内侧，放大时绝不溢出边框
-            val effectiveDiameter = (iconSizePx - 6f).coerceAtLeast(1f) * scale
+            // 模糊斑点必须等于图标实际渲染缩放：scaleX 即视图变换后的最终倍率（稳态下与 currentScale 一致，
+            // 入场/退场动画期间则是动画值），保证模糊与图标放大的倍率始终同步
+            val scale = b.scaleX.coerceAtLeast(0.1f)
+            // 充满整个气泡尺寸，确保任意圆角（如 25% 圆角矩形）下毛玻璃均完整铺满气泡
+            val effectiveDiameter = iconSizePx * scale
             spots.add(
                 BubbleBlurSpot(
                     id = b.item.id,
                     centerX = cx,
                     centerY = cy,
                     diameterPx = effectiveDiameter,
-                    alpha = b.iconAlpha,
+                    alpha = (b.iconAlpha * b.alpha).coerceIn(0f, 1f),
                 )
             )
         }
@@ -1637,15 +1709,18 @@ class HyperOpenPreviewView(
             val lp = sub.layoutParams as? LayoutParams
             val cx = if (lp != null) lp.leftMargin + iconSizePx / 2f + sub.translationX else sub.targetX
             val cy = if (lp != null) lp.topMargin + iconSizePx / 2f + sub.translationY else sub.targetY
-            val scale = sub.currentScale.coerceAtLeast(0.1f)
-            val effectiveDiameter = (iconSizePx - 6f).coerceAtLeast(1f) * scale
+            // 与一级气泡完全同一公式：旧实现 currentScale × scaleX 在鱼眼稳态下双重相乘
+            // （scaleX == currentScale == s，模糊直径变成 iconSize × s²，比图标实际放大的 s 倍多涨一倍）
+            val scale = sub.scaleX.coerceAtLeast(0.1f)
+            val effectiveDiameter = iconSizePx * scale
+            val effectiveAlpha = (sub.iconAlpha * sub.alpha).coerceIn(0f, 1f)
             spots.add(
                 BubbleBlurSpot(
                     id = "sub_" + sub.item.id,
                     centerX = cx,
                     centerY = cy,
                     diameterPx = effectiveDiameter,
-                    alpha = sub.iconAlpha,
+                    alpha = effectiveAlpha,
                 )
             )
         }

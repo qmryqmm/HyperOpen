@@ -141,7 +141,6 @@ fun ParamsPage(
     iconSpacingOffset: Float, onIconSpacingOffset: (Float) -> Unit,
     bubblePaddingPercent: Float, onBubblePaddingPercent: (Float) -> Unit,
     bubbleBlurRadius: Float, onBubbleBlurRadius: (Float) -> Unit,
-    selectedIconScale: Float, onSelectedIconScale: (Float) -> Unit,
     iconGlowEffect: Boolean, onIconGlowEffect: (Boolean) -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -927,24 +926,19 @@ fun ParamsPage(
                     )
                     SliderPreference(
                         title = "鱼眼最大放大倍率",
+                        summary = "手指命中图标的最终放大倍率，所有布局统一生效，不再叠加其他倍率",
                         valueText = "%.2f x".format(maxScale),
                         value = maxScale,
-                        valueRange = 1.10f..1.80f,
+                        valueRange = 1.10f..2.00f,
                         onValueChange = onMaxScale,
                     )
                     SliderPreference(
                         title = "感应辐射范围",
+                        summary = "鱼眼衰减半径：离手指多远开始放大，超出后回到常态；调小可只放大命中图标",
                         valueText = "${influenceRadius.toInt()} dp",
                         value = influenceRadius,
                         valueRange = 60f..200f,
                         onValueChange = onInfluenceRadius,
-                    )
-                    SliderPreference(
-                        title = "选中时图标缩放倍率",
-                        valueText = "%.2f x".format(selectedIconScale),
-                        value = selectedIconScale,
-                        valueRange = 1.00f..1.50f,
-                        onValueChange = onSelectedIconScale,
                     )
                     SwitchPreference(
                         title = "图标激活呼吸辉光动效",
@@ -961,7 +955,11 @@ fun ParamsPage(
                     title = "气泡与动效",
                     expanded = isOpen("bubble"),
                     onToggle = { toggle("bubble") },
-                    summary = "留白 ${bubblePaddingPercent.toInt()}% · 模糊 ${bubbleBlurRadius.toInt()} dp · 压暗 ${(bubbleDimAlpha * 100).toInt()}%",
+                    summary = if (bubblePaddingPercent <= 0) {
+                        "留白 0% · 气泡已关闭（模糊与压暗随之停用）"
+                    } else {
+                        "留白 ${bubblePaddingPercent.toInt()}% · 模糊 ${bubbleBlurRadius.toInt()} dp · 压暗 ${(bubbleDimAlpha * 100).toInt()}%"
+                    },
                 )
             }
             if (isOpen("bubble")) item(key = "bubble_card") {
@@ -972,6 +970,7 @@ fun ParamsPage(
                 ) {
                     SliderPreference(
                         title = "气泡内部留白比例",
+                        summary = "图标与气泡边缘的空隙；0% 时直接关闭气泡：底衬、模糊与压暗一并停用，仅显示图标",
                         valueText = "${bubblePaddingPercent.toInt()} %",
                         value = bubblePaddingPercent,
                         valueRange = 0f..40f,
@@ -980,7 +979,11 @@ fun ParamsPage(
                     SliderPreference(
                         title = "气泡留白区域模糊半径",
                         summary = "与圆形视界区域底衬统一的高斯模糊毛玻璃样式",
-                        valueText = if (bubbleBlurRadius.toInt() == 0) "已关闭模糊" else "${bubbleBlurRadius.toInt()} dp",
+                        valueText = when {
+                            bubblePaddingPercent <= 0 -> "已随气泡关闭"
+                            bubbleBlurRadius.toInt() == 0 -> "已关闭模糊"
+                            else -> "${bubbleBlurRadius.toInt()} dp"
+                        },
                         value = bubbleBlurRadius,
                         valueRange = 0f..50f,
                         onValueChange = onBubbleBlurRadius,
@@ -988,7 +991,11 @@ fun ParamsPage(
                     SliderPreference(
                         title = "气泡留白区域压暗程度",
                         summary = "在每个图标气泡的毛玻璃底衬之上叠加黑色压暗",
-                        valueText = if (kotlin.math.round(bubbleDimAlpha * 100f) <= 0.5f) "不压暗" else "${kotlin.math.round(bubbleDimAlpha * 100f).toInt()} %",
+                        valueText = when {
+                            bubblePaddingPercent <= 0 -> "已随气泡关闭"
+                            kotlin.math.round(bubbleDimAlpha * 100f) <= 0.5f -> "不压暗"
+                            else -> "${kotlin.math.round(bubbleDimAlpha * 100f).toInt()} %"
+                        },
                         value = bubbleDimAlpha * 100f,
                         valueRange = 0f..100f,
                         onValueChange = { onBubbleDimAlpha(it / 100f) },
