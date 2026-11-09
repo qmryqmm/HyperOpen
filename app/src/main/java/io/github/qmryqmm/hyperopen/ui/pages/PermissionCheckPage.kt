@@ -69,8 +69,8 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
  *   1. Root 授权（重启 SystemUI、Shell 动作、跨用户启动与壁纸读取兜底）；
  *   2. 已安装应用读取权限（应用选择列表、图标加载）；
  *   3. 勿扰访问策略权限；
- *   4. 所有文件存储访问权限（自定义图标选择）；
- *   5. LSPosed 作用域与启用状态检测。
+ *   4. 所有文件存储访问权限（自定义图标选择）。
+ * 注：模块在 LSPosed 中的启用状态与作用域勾选已由「模块运行状态」卡片检测，此处不再重复校验。
  */
 
 @Composable
@@ -88,7 +88,6 @@ fun PermissionCheckPage(
             Triple("packages", "应用列表", "用途：快捷方式「从已安装应用选取」列表、应用图标获取与图标裁切缓存、APP 动作启动目标解析。"),
             Triple("dnd", "勿扰策略访问", "用途：快捷动作切换勿扰与响铃模式。本项仅反映本应用自身授权状态，有root无需授权"),
             Triple("storage", "所有文件访问", "用途：直接读取本地图片作为自定义图标；经系统相册 / 文件选择器选图时无需此权限。"),
-            Triple("lsposed", "LSPosed 模块与作用域", "用途：模块需在 LSPosed 中启用并勾选作用域 com.android.systemui，否则锁屏快捷面板不生效；读取 LSPosed 数据校验依赖 Root。"),
         )
     }
 
@@ -98,15 +97,14 @@ fun PermissionCheckPage(
         ActivityResultContracts.StartActivityForResult()
     ) { detectTick++ }
 
-    fun refreshKey(key: String, rootOk: Boolean) {
+    fun refreshKey(key: String) {
         permScope.launch {
             status[key] = withContext(Dispatchers.IO) {
                 when (key) {
                     "root" -> detectRootAccess()
                     "packages" -> detectPackageVisibility(ctx)
                     "dnd" -> detectDndAccess(ctx)
-                    "storage" -> detectStorageAccess()
-                    else -> detectLsposedScope(ctx, rootOk)
+                    else -> detectStorageAccess()
                 }
             }
         }
@@ -118,7 +116,7 @@ fun PermissionCheckPage(
             "root" -> {
                 status[key] = null to "正在请求 Root 授权…"
                 Toast.makeText(ctx, "已唤起 Root 授权请求，请在弹窗中允许", Toast.LENGTH_SHORT).show()
-                refreshKey("root", false)
+                refreshKey("root")
             }
             "packages" -> Toast.makeText(
                 ctx,
@@ -141,22 +139,6 @@ fun PermissionCheckPage(
                     Toast.makeText(ctx, "未找到文件访问授权设置页", Toast.LENGTH_SHORT).show()
                 }
             }
-            else -> { // lsposed：打开 LSPosed 管理器，装不上则退回复检
-                val managerIntent = listOf("org.lsposed.manager", "io.github.lsposed.manager")
-                    .firstNotNullOfOrNull { pkg -> ctx.packageManager.getLaunchIntentForPackage(pkg) }
-                if (managerIntent != null) {
-                    Toast.makeText(ctx, "已打开 LSPosed 管理器，请确认模块已启用并勾选作用域", Toast.LENGTH_SHORT).show()
-                    runCatching {
-                        managerIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        ctx.startActivity(managerIntent)
-                    }
-                    status[key] = null to "已打开 LSPosed 管理器，切换回来后复检…"
-                } else {
-                    Toast.makeText(ctx, "未安装 LSPosed 管理器，改用 Root 复检", Toast.LENGTH_SHORT).show()
-                    status[key] = null to "未检测到管理器，尝试 Root 复检…"
-                }
-                refreshKey(key, status["root"]?.first == true)
-            }
         }
     }
 
@@ -169,7 +151,6 @@ fun PermissionCheckPage(
         status["packages"] = withContext(Dispatchers.IO) { detectPackageVisibility(ctx) }
         status["dnd"] = withContext(Dispatchers.IO) { detectDndAccess(ctx) }
         status["storage"] = withContext(Dispatchers.IO) { detectStorageAccess() }
-        status["lsposed"] = withContext(Dispatchers.IO) { detectLsposedScope(ctx, root.first == true) }
         running = false
     }
 
@@ -203,7 +184,7 @@ fun PermissionCheckPage(
                         color = MiuixTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = "绿色 ✓ 已满足 · 红色 ✗ 未满足（点击可尝试申请） · 黄色 … 检测中或需在 LSPosed 中人工确认",
+                        text = "绿色 ✓ 已满足 · 红色 ✗ 未满足（点击可尝试申请） · 黄色 … 检测中",
                         fontSize = 12.sp,
                         color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         modifier = Modifier.padding(top = 4.dp),
@@ -352,44 +333,5 @@ private fun detectStorageAccess(): Pair<Boolean?, String> {
         }
     } catch (e: Exception) {
         false to "检测失败：${e.message}"
-    }
-}
-
-private fun detectLsposedScope(ctx: android.content.Context, hasRoot: Boolean): Pair<Boolean?, String> {
-    val managerInstalled = listOf("org.lsposed.manager", "io.github.lsposed.manager").any { pkg ->
-        try {
-            ctx.packageManager.getPackageInfo(pkg, 0)
-            true
-        } catch (e: Exception) {
-            false
-        }
-    }
-    if (!hasRoot) {
-        return if (managerInstalled) {
-            null to "已装 LSPosed 管理器；读取作用域需 Root，通过 Root 检测后点「重新检测」"
-        } else {
-            false to "未检测到 LSPosed 管理器，且无 Root 无法校验作用域"
-        }
-    }
-    return try {
-        val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "grep -r -l io.github.qmryqmm.hyperopen /data/adb/lspd 2>/dev/null"))
-        p.outputStream.close()
-        val finished = p.waitFor(8, java.util.concurrent.TimeUnit.SECONDS)
-        if (!finished) {
-            p.destroyForcibly()
-            null to "读取 LSPosed 数据超时，点「重新检测」重试"
-        } else {
-            val out = p.inputStream.bufferedReader().readText().trim()
-            when {
-                p.exitValue() == 0 && out.isNotEmpty() ->
-                    true to "LSPosed 数据中找到本模块记录：${out.lineSequence().first().take(60)}"
-                p.exitValue() == 0 ->
-                    false to if (managerInstalled) "未找到本模块记录；请在 LSPosed 中启用模块并勾选作用域 com.android.systemui" else "未找到本模块记录，且未安装 LSPosed 管理器"
-                else ->
-                    false to "/data/adb/lspd 下未找到本模块（LSPosed 未安装或模块未启用）"
-            }
-        }
-    } catch (e: Exception) {
-        false to (e.message ?: "读取 LSPosed 数据失败")
     }
 }
