@@ -72,6 +72,7 @@ import io.github.qmryqmm.hyperopen.ui.IconPainter
 import io.github.qmryqmm.hyperopen.ui.MiuixIconRegistry
 import io.github.qmryqmm.hyperopen.ui.RemixIconRegistry
 import io.github.qmryqmm.hyperopen.ui.components.CollapsibleSectionTitle
+import io.github.qmryqmm.hyperopen.ui.components.ShortcutBubbleIcon
 import io.github.qmryqmm.hyperopen.ui.components.ShortcutCard
 import io.github.qmryqmm.hyperopen.ui.components.ShortcutListInteractionState
 import io.github.qmryqmm.hyperopen.ui.components.ShortcutRowNode
@@ -480,20 +481,26 @@ fun ShortcutEditPage(
         }
     }
     val isAppIcon = rawAppIconDrawable != null
-    val appDrawablePainter = remember(rawAppIconDrawable, iconGlyph, appIconCropMode, initialItem.tintColor) {
-        if (vectorIcon != null) {
-            null
-        } else {
-            val processed = if (rawAppIconDrawable != null) {
-                io.github.qmryqmm.hyperopen.view.AppIconCropProcessor.process(rawAppIconDrawable, appIconCropMode) ?: rawAppIconDrawable
-            } else {
-                IconGlyphFactory.createGlyph(iconGlyph.ifBlank { "sparkle" }, initialItem.tintColor)
+
+    val previewItem = remember(
+        initialItem, title, subtitle, actionType, actionPayload,
+        iconPackage, iconGlyph, appIconCropMode, glyphPadEnabled, glyphPadColor, glyphPadMode
+    ) {
+        initialItem.copy().apply {
+            this.title = title.trim().ifBlank { "快捷方式" }
+            this.subtitle = subtitle.trim()
+            this.actionType = actionType
+            this.actionPayload = when {
+                actionType == ShortcutItem.ACTION_ACTIVITY -> buildActPayload()
+                actionType == ShortcutItem.ACTION_FOLDER -> HyperOpenConfig.serializeShortcutsJson(folderChildren.toList())
+                else -> actionPayload.trim()
             }
-            val bmp = android.graphics.Bitmap.createBitmap(96, 96, android.graphics.Bitmap.Config.ARGB_8888)
-            val canvas = android.graphics.Canvas(bmp)
-            processed.setBounds(0, 0, 96, 96)
-            processed.draw(canvas)
-            BitmapPainter(bmp.toComposeImageBitmap())
+            this.iconPackage = iconPackage.trim()
+            this.iconGlyph = iconGlyph.trim()
+            this.appIconCropMode = appIconCropMode
+            this.glyphPadEnabled = glyphPadEnabled
+            this.glyphPadColor = glyphPadColor
+            this.glyphPadMode = glyphPadMode
         }
     }
 
@@ -522,49 +529,14 @@ fun ShortcutEditPage(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                     ) {
-                        val isVectorSelected = vectorIcon != null && iconPackage.isBlank()
-                        val previewPadBg = if (isVectorSelected && glyphPadEnabled) {
-                            when (glyphPadMode) {
-                                HyperOpenConfig.GLYPH_PAD_MODE_SOLID -> Color(glyphPadColor)
-                                HyperOpenConfig.GLYPH_PAD_MODE_INVERTED -> Color(0x30FFFFFF)
-                                else -> Color(glyphPadColor).copy(alpha = 0.65f)
-                            }
-                        } else {
-                            MiuixTheme.colorScheme.surfaceVariant
-                        }
-                        val previewIconTint = if (isVectorSelected && glyphPadEnabled) {
-                            if (glyphPadMode == HyperOpenConfig.GLYPH_PAD_MODE_INVERTED) Color(glyphPadColor)
-                            else Color.White
-                        } else {
-                            MiuixTheme.colorScheme.primary
-                        }
-
                         Box(
                             modifier = Modifier.clickable { showIconDialog = true },
                             contentAlignment = Alignment.TopEnd,
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(64.dp)
-                                    .clip(CircleShape)
-                                    .background(previewPadBg),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                if (vectorIcon != null) {
-                                    Icon(
-                                        imageVector = vectorIcon,
-                                        contentDescription = title,
-                                        tint = previewIconTint,
-                                        modifier = Modifier.size(if (glyphPadEnabled) 32.dp else 38.dp),
-                                    )
-                                } else if (appDrawablePainter != null) {
-                                    Image(
-                                        painter = appDrawablePainter,
-                                        contentDescription = title,
-                                        modifier = Modifier.size(52.dp),
-                                    )
-                                }
-                            }
+                            ShortcutBubbleIcon(
+                                item = previewItem,
+                                modifier = Modifier.size(64.dp),
+                            )
                             EditBadge()
                         }
                         Spacer(Modifier.height(10.dp))
@@ -1201,50 +1173,16 @@ fun ShortcutEditPage(
                     ) {
                         // ── 实时预览圆 ──
                         item(key = "icon_dialog_preview") {
-                            val isVectorSelected = vectorIcon != null && iconPackage.isBlank()
-                            val previewPadBg = if (isVectorSelected && glyphPadEnabled) {
-                                when (glyphPadMode) {
-                                    HyperOpenConfig.GLYPH_PAD_MODE_SOLID -> Color(glyphPadColor)
-                                    HyperOpenConfig.GLYPH_PAD_MODE_INVERTED -> Color(0x30FFFFFF)
-                                    else -> Color(glyphPadColor).copy(alpha = 0.65f)
-                                }
-                            } else {
-                                MiuixTheme.colorScheme.surfaceVariant
-                            }
-                            val previewIconTint = if (isVectorSelected && glyphPadEnabled) {
-                                if (glyphPadMode == HyperOpenConfig.GLYPH_PAD_MODE_INVERTED) Color(glyphPadColor)
-                                else Color.White
-                            } else {
-                                MiuixTheme.colorScheme.primary
-                            }
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 8.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(64.dp)
-                                        .clip(CircleShape)
-                                        .background(previewPadBg),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    if (vectorIcon != null) {
-                                        Icon(
-                                            imageVector = vectorIcon,
-                                            contentDescription = title,
-                                            tint = previewIconTint,
-                                            modifier = Modifier.size(if (glyphPadEnabled) 32.dp else 38.dp),
-                                        )
-                                    } else if (appDrawablePainter != null) {
-                                        Image(
-                                            painter = appDrawablePainter,
-                                            contentDescription = title,
-                                            modifier = Modifier.size(52.dp),
-                                        )
-                                    }
-                                }
+                                ShortcutBubbleIcon(
+                                    item = previewItem,
+                                    modifier = Modifier.size(64.dp),
+                                )
                             }
                         }
 

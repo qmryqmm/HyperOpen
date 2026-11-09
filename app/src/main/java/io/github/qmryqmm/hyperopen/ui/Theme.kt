@@ -17,6 +17,11 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
 
 /**
+ * 全局实时配置 CompositionLocal，供卡片图标与预览组件实时响应参数变化。
+ */
+val LocalHyperOpenConfig = androidx.compose.runtime.staticCompositionLocalOf<io.github.qmryqmm.hyperopen.config.HyperOpenConfig?> { null }
+
+/**
  * 主题模式常量（与 HyperOpenConfig.THEME_* 对齐）
  */
 object ThemeMode {

@@ -648,6 +648,9 @@ public class HyperOSMaterialFactory {
             highlightPaint.setAlpha(alpha);
             glowPaint.setAlpha(alpha);
             outerAuraPaint.setAlpha(alpha);
+            if (dimAlpha > 0.001f) {
+                dimPaint.setAlpha(Math.round((alpha / 255f) * dimAlpha * 255f));
+            }
         }
 
         @Override

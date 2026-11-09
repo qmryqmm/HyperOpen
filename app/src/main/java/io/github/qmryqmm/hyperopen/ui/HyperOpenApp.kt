@@ -597,11 +597,31 @@ fun HyperOpenApp(
         }
     }
 
+    val currentLiveConfig = remember(
+        materialStyle, bubbleDimAlpha, iconCornerRadius, iconAlpha,
+        bubblePaddingPercent, iconGlowEffect, glyphPadEnabled, glyphPadColor, glyphPadMode
+    ) {
+        HyperOpenConfig.loadFromApp(ctx).apply {
+            this.materialStyle = materialStyle
+            this.bubbleDimAlpha = bubbleDimAlpha
+            this.iconCornerRadius = iconCornerRadius.toInt().coerceIn(0, 50)
+            this.iconAlpha = iconAlpha
+            this.bubblePaddingPercent = bubblePaddingPercent.toInt().coerceIn(0, 40)
+            this.iconGlowEffect = iconGlowEffect
+            this.glyphPadEnabled = glyphPadEnabled
+            this.glyphPadColor = glyphPadColor
+            this.glyphPadMode = glyphPadMode
+        }
+    }
+
     HyperOpenTheme(
         themeMode = themeMode,
         monet = monetColors,
     ) {
-        val topAppBarScrollBehavior = MiuixScrollBehavior()
+        androidx.compose.runtime.CompositionLocalProvider(
+            LocalHyperOpenConfig provides currentLiveConfig
+        ) {
+            val topAppBarScrollBehavior = MiuixScrollBehavior()
         val title = when (subPage) {
             1 -> "主题设置"
             2 -> when {
@@ -1572,6 +1592,7 @@ fun HyperOpenApp(
             }
         }
     }
+}
 }
 
 // ─────────────────────────────────────────────────────────────────────

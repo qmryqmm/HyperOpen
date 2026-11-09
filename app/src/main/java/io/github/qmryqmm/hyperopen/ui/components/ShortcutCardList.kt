@@ -48,11 +48,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.nativeCanvas
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
+import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory
 import io.github.qmryqmm.hyperopen.model.ShortcutItem
 import io.github.qmryqmm.hyperopen.ui.IconPainter
+import io.github.qmryqmm.hyperopen.ui.LocalHyperOpenConfig
 import io.github.qmryqmm.hyperopen.ui.MiuixIconRegistry
 import io.github.qmryqmm.hyperopen.ui.RemixIconRegistry
+import io.github.qmryqmm.hyperopen.view.IconGlyphFactory
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -889,66 +894,76 @@ fun ShortcutCard(
     }
 }
 
-/** 38dp 圆形底垫图标：矢量图标（Remix/Miuix）或应用图标位图。 */
+/** 38dp 快捷方式卡片图标：与实际唤出的悬浮球气泡 (CircularBubbleView) 渲染 100% 完全一致。 */
 @Composable
 fun ShortcutIconBox(item: ShortcutItem) {
+    ShortcutBubbleIcon(
+        item = item,
+        modifier = Modifier.size(38.dp),
+    )
+}
+
+/**
+ * 快捷方式气泡图标：与 SystemUI / HyperOpenPreviewView (CircularBubbleView) 实际渲染完全一致。
+ * 复用 HyperOSMaterialFactory.CircularBubbleDrawable 绘制真实气泡底衬（光学折射、高光、双层边框镜面光晕、压暗 dimAlpha），
+ * 以及 IconGlyphFactory.resolve 统一解析裁切应用图标/自定义图片/矢量底垫。
+ * 支持圆角 (iconCornerRadius)、常态透明度 (iconAlpha)、内边距 (bubblePaddingPercent) 等参数。
+ */
+@Composable
+fun ShortcutBubbleIcon(
+    item: ShortcutItem,
+    modifier: Modifier = Modifier,
+    config: HyperOpenConfig? = null,
+    isSelected: Boolean = false,
+) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    val vectorIcon = androidx.compose.runtime.remember(item.iconPackage, item.iconGlyph) {
-        if (item.iconPackage.isBlank()) {
-            if (RemixIconRegistry.isRemixIcon(item.iconGlyph)) {
-                RemixIconRegistry.find(item.iconGlyph)
-            } else {
-                MiuixIconRegistry.find(item.iconGlyph)
-            }
-        } else null
+    val liveConfig = LocalHyperOpenConfig.current
+    val cfg = config ?: liveConfig ?: remember(ctx) { HyperOpenConfig.loadFromApp(ctx) }
+
+    val activeStyle = cfg.materialStyle
+    val bubbleDimAlpha = cfg.bubbleDimAlpha
+    val cornerRadiusPercent = cfg.iconCornerRadius.coerceIn(0, 50)
+    val iconAlpha = cfg.iconAlpha.coerceIn(0f, 1f)
+    val bubblePaddingPercent = cfg.bubblePaddingPercent.coerceIn(0, 40)
+    val glowEnabled = cfg.iconGlowEffect
+
+    val bubbleDrawable = remember(activeStyle, item.tintColor, isSelected, glowEnabled) {
+        HyperOSMaterialFactory.CircularBubbleDrawable(
+            activeStyle, item.tintColor, isSelected, glowEnabled
+        )
     }
-    val painter = androidx.compose.runtime.remember(
-        item.id, item.iconPackage, item.iconGlyph, item.appIconCropMode, item.actionType, item.actionPayload
+    bubbleDrawable.setStyle(activeStyle)
+    bubbleDrawable.setDimAlpha(bubbleDimAlpha)
+    bubbleDrawable.setCornerRadiusPercent(cornerRadiusPercent)
+    bubbleDrawable.setSelected(isSelected)
+    bubbleDrawable.setGlowEnabled(glowEnabled)
+    bubbleDrawable.setAlpha((iconAlpha * 255f).roundToInt().coerceIn(0, 255))
+
+    val iconDrawable = remember(
+        item.id, item.iconPackage, item.iconGlyph, item.actionType, item.actionPayload,
+        item.appIconCropMode, item.glyphPadEnabled, item.glyphPadColor, item.glyphPadMode,
+        item.tintColor, cfg.appIconCropMode, cornerRadiusPercent
     ) {
-        if (item.iconPackage.isBlank() && vectorIcon != null) {
-            null
-        } else {
-            IconPainter.resolve(item, ctx, item.appIconCropMode)
-        }
+        IconGlyphFactory.resolve(ctx, item, cfg).mutate()
     }
 
-    val itemPadBg = if (vectorIcon != null && item.glyphPadEnabled) {
-        when (item.glyphPadMode) {
-            HyperOpenConfig.GLYPH_PAD_MODE_SOLID -> Color(item.glyphPadColor)
-            HyperOpenConfig.GLYPH_PAD_MODE_INVERTED -> Color(0x30FFFFFF)
-            else -> Color(item.glyphPadColor).copy(alpha = 0.65f)
-        }
-    } else {
-        MiuixTheme.colorScheme.surfaceVariant
-    }
-    val itemIconTint = if (vectorIcon != null && item.glyphPadEnabled) {
-        if (item.glyphPadMode == HyperOpenConfig.GLYPH_PAD_MODE_INVERTED) Color(item.glyphPadColor)
-        else Color.White
-    } else {
-        MiuixTheme.colorScheme.primary
-    }
+    Canvas(modifier = modifier) {
+        val w = size.width.toInt()
+        val h = size.height.toInt()
+        if (w <= 0 || h <= 0) return@Canvas
+        val nativeCanvas = drawContext.canvas.nativeCanvas
 
-    Box(
-        modifier = Modifier
-            .size(38.dp)
-            .clip(CircleShape)
-            .background(itemPadBg),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (vectorIcon != null) {
-            Icon(
-                imageVector = vectorIcon,
-                contentDescription = item.title,
-                tint = itemIconTint,
-                modifier = Modifier.size(if (item.glyphPadEnabled) 20.dp else 24.dp),
-            )
-        } else if (painter != null) {
-            Image(
-                painter = painter,
-                contentDescription = item.title,
-                modifier = Modifier.size(32.dp),
-            )
-        }
+        // 1. 绘制气泡底衬（液态玻璃/高斯模糊光学层、压暗、圆角与常态透明度）
+        bubbleDrawable.setBounds(0, 0, w, h)
+        bubbleDrawable.draw(nativeCanvas)
+
+        // 2. 绘制前景图标（应用常态透明度与内边距缩放）
+        val padPx = (minOf(w, h) * (bubblePaddingPercent / 100f)).roundToInt()
+        val iconW = (w - 2 * padPx).coerceAtLeast(1)
+        val iconH = (h - 2 * padPx).coerceAtLeast(1)
+        iconDrawable.setBounds(padPx, padPx, padPx + iconW, padPx + iconH)
+        iconDrawable.alpha = (iconAlpha * 255f).roundToInt().coerceIn(0, 255)
+        iconDrawable.draw(nativeCanvas)
     }
 }
 
