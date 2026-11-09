@@ -527,17 +527,6 @@ public final class IconGlyphFactory {
                     cornerRadius,
                     padPaint
                 );
-                float borderHalf = halfRadius - 1.25f;
-                float borderCorner = Math.max(0f, cornerRadius - 1.25f);
-                canvas.drawRoundRect(
-                    cx - borderHalf,
-                    cy - borderHalf,
-                    cx + borderHalf,
-                    cy + borderHalf,
-                    borderCorner,
-                    borderCorner,
-                    padBorderPaint
-                );
             }
 
             float contentFactor = padEnabled ? 0.58f : 0.82f;

@@ -88,7 +88,7 @@ class MiuixVectorDrawable @JvmOverloads constructor(
         val b: Rect = bounds
         if (b.width() <= 0 || b.height() <= 0) return
 
-        // 1) 绘制圆角/圆形底垫（如启用）
+        // 1) 绘制圆角/圆形底垫（如启用，不叠加多余描边，保持与气泡材质一致的纯净底色）
         if (padEnabled) {
             val cx = b.exactCenterX()
             val cy = b.exactCenterY()
@@ -102,17 +102,6 @@ class MiuixVectorDrawable @JvmOverloads constructor(
                 cornerRadius,
                 cornerRadius,
                 padPaint,
-            )
-            val borderHalf = halfRadius - 1.25f
-            val borderCorner = (cornerRadius - 1.25f).coerceAtLeast(0f)
-            canvas.drawRoundRect(
-                cx - borderHalf,
-                cy - borderHalf,
-                cx + borderHalf,
-                cy + borderHalf,
-                borderCorner,
-                borderCorner,
-                padBorderPaint,
             )
         }
 

@@ -1544,6 +1544,8 @@ class HyperOpenPreviewView(
                 .setInterpolator(android.view.animation.OvershootInterpolator(1.2f))
                 .setDuration(180)
                 .setStartDelay(i * 15L)
+                .setUpdateListener { notifyBlurSceneChanged() }
+                .withEndAction { notifyBlurSceneChanged() }
                 .start()
         }
         notifyBlurSceneChanged()
@@ -1621,8 +1623,8 @@ class HyperOpenPreviewView(
             val cx = if (lp != null) lp.leftMargin + iconSizePx / 2f + b.translationX else b.targetX
             val cy = if (lp != null) lp.topMargin + iconSizePx / 2f + b.translationY else b.targetY
             val scale = b.currentScale.coerceAtLeast(0.1f)
-            // 内缩 3px (直径减 6px) 使预览毛玻璃圆严格收拢在 2.2px 气泡描边内侧，放大时绝不溢出边框
-            val effectiveDiameter = (iconSizePx - 6f).coerceAtLeast(1f) * scale
+            // 充满整个气泡尺寸，确保任意圆角（如 25% 圆角矩形）下毛玻璃均完整铺满气泡
+            val effectiveDiameter = iconSizePx * scale
             spots.add(
                 BubbleBlurSpot(
                     id = b.item.id,
@@ -1637,15 +1639,17 @@ class HyperOpenPreviewView(
             val lp = sub.layoutParams as? LayoutParams
             val cx = if (lp != null) lp.leftMargin + iconSizePx / 2f + sub.translationX else sub.targetX
             val cy = if (lp != null) lp.topMargin + iconSizePx / 2f + sub.translationY else sub.targetY
-            val scale = sub.currentScale.coerceAtLeast(0.1f)
-            val effectiveDiameter = (iconSizePx - 6f).coerceAtLeast(1f) * scale
+            val animScale = if (sub.scaleX > 0f) sub.scaleX else 1.0f
+            val scale = (sub.currentScale * animScale).coerceAtLeast(0.01f)
+            val effectiveDiameter = iconSizePx * scale
+            val effectiveAlpha = (sub.iconAlpha * sub.alpha).coerceIn(0f, 1f)
             spots.add(
                 BubbleBlurSpot(
                     id = "sub_" + sub.item.id,
                     centerX = cx,
                     centerY = cy,
                     diameterPx = effectiveDiameter,
-                    alpha = sub.iconAlpha,
+                    alpha = effectiveAlpha,
                 )
             )
         }

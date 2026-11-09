@@ -2,10 +2,13 @@ package io.github.qmryqmm.hyperopen.view;
 
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.graphics.Outline;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.LayerDrawable;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.View;
+import android.view.ViewOutlineProvider;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 
@@ -68,6 +71,26 @@ public class CircularBubbleView extends FrameLayout {
         this.opticDrawable.setCornerRadiusPercent(this.cornerRadiusPercent);
 
         setLayoutParams(new LayoutParams(sizePx, sizePx));
+        setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                int w = view.getWidth() > 0 ? view.getWidth() : sizePx;
+                int h = view.getHeight() > 0 ? view.getHeight() : sizePx;
+                float cx = w / 2f;
+                float cy = h / 2f;
+                float radius = Math.min(cx, cy) - 2.0f;
+                if (radius <= 0f) return;
+                float corner = radius * (Math.max(0, Math.min(50, cornerRadiusPercent)) / 50f);
+                outline.setRoundRect(
+                    Math.round(cx - radius),
+                    Math.round(cy - radius),
+                    Math.round(cx + radius),
+                    Math.round(cy + radius),
+                    corner
+                );
+            }
+        });
+        setClipToOutline(true);
         setClipChildren(false);
         setClipToPadding(false);
 
@@ -274,6 +297,7 @@ public class CircularBubbleView extends FrameLayout {
                 this.config.iconCornerRadius = clamped;
             }
             opticDrawable.setCornerRadiusPercent(clamped);
+            invalidateOutline();
             loadItemIcon();
             ensureBlurAndRefreshBackground();
         }
