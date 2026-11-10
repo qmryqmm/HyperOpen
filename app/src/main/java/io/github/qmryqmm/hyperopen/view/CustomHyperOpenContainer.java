@@ -25,6 +25,7 @@ import io.github.qmryqmm.hyperopen.layout.HollowRingPacking;
 import io.github.qmryqmm.hyperopen.layout.RingSectorPacking;
 import io.github.qmryqmm.hyperopen.layout.StockFanPacking;
 import io.github.qmryqmm.hyperopen.model.ShortcutItem;
+import io.github.qmryqmm.hyperopen.util.BubblePanelAnimator;
 import io.github.qmryqmm.hyperopen.util.FisheyeScale;
 
 import java.util.ArrayList;
@@ -730,64 +731,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
     }
 
     private void playExpandAnimation() {
-        boolean isStockSystem = (config != null && config.layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK);
-        boolean useStockAnim = isStockSystem && config.stockSystemAnim;
-        int duration = (config != null) ? Math.max(0, config.animDurationMs) : 320;
-
-        for (int i = 0; i < bubbles.size(); i++) {
-            final CircularBubbleView b = bubbles.get(i);
-            b.animate().cancel();
-            float startTranslationX = fodCenterX - b.targetX;
-            float startTranslationY = fodCenterY - b.targetY;
-
-            b.setTranslationX(startTranslationX);
-            b.setTranslationY(startTranslationY);
-
-            if (duration == 0) {
-                // 0ms 极速瞬开：无过渡动画，直接满状态呈现
-                b.setTranslationX(0f);
-                b.setTranslationY(0f);
-                b.setScaleX(1.0f);
-                b.setScaleY(1.0f);
-                b.setAlpha(1.0f);
-                b.applyScale(1.0f);
-            } else if (useStockAnim) {
-                // 系统原生动画规格：从指纹中心直线平移飞出，配合透明度渐入 (Scale 保持 1.0)
-                b.setScaleX(1.0f);
-                b.setScaleY(1.0f);
-                b.setAlpha(0f);
-                b.animate()
-                    .translationX(0f)
-                    .translationY(0f)
-                    .scaleX(1.0f)
-                    .scaleY(1.0f)
-                    .alpha(1.0f)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                    .setDuration(duration)
-                    .setStartDelay(0L)
-                    .setUpdateListener(null)
-                    .withEndAction(() -> b.applyScale(1.0f))
-                    .start();
-            } else {
-                b.setScaleX(0.1f);
-                b.setScaleY(0.1f);
-                b.setAlpha(0f);
-                b.syncBlurCornerRadiusWithViewScale();
-
-                b.animate()
-                    .translationX(0f)
-                    .translationY(0f)
-                    .scaleX(1.0f)
-                    .scaleY(1.0f)
-                    .alpha(1.0f)
-                    .setInterpolator(EXPAND_INTERPOLATOR)
-                    .setDuration(duration)
-                    .setStartDelay(Math.min(i * 12L, 80L))
-                    .setUpdateListener(null)
-                    .withEndAction(() -> b.applyScale(1.0f))
-                    .start();
-            }
-        }
+        // 与应用内整体预览同源（BubblePanelAnimator 单一数据源）
+        BubblePanelAnimator.playExpand(bubbles, fodCenterX, fodCenterY, config);
     }
 
     /**
@@ -799,45 +744,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
             if (onComplete != null) onComplete.run();
             return;
         }
-        int total = bubbles.size();
-        final java.util.concurrent.atomic.AtomicInteger finishedCount = new java.util.concurrent.atomic.AtomicInteger(0);
-        final java.util.concurrent.atomic.AtomicBoolean called = new java.util.concurrent.atomic.AtomicBoolean(false);
-
-        Runnable finishOne = () -> {
-            if (finishedCount.incrementAndGet() >= total) {
-                if (called.compareAndSet(false, true)) {
-                    if (onComplete != null) onComplete.run();
-                }
-            }
-        };
-
-        for (int i = 0; i < total; i++) {
-            CircularBubbleView b = bubbles.get(i);
-            b.animate().cancel();
-            if (b == currentSelectedBubble) {
-                // 选中气泡：轻微弹跳放大后淡出
-                b.animate()
-                    .scaleX(1.30f)
-                    .scaleY(1.30f)
-                    .alpha(0f)
-                    .setDuration(120)
-                    .withEndAction(finishOne)
-                    .start();
-            } else {
-                // 其余气泡：向圆心回拢并收缩
-                float toX = fodCenterX - b.targetX;
-                float toY = fodCenterY - b.targetY;
-                b.animate()
-                    .translationX(toX * 0.7f)
-                    .translationY(toY * 0.7f)
-                    .scaleX(0.2f)
-                    .scaleY(0.2f)
-                    .alpha(0f)
-                    .setDuration(110)
-                    .withEndAction(finishOne)
-                    .start();
-            }
-        }
+        // 与应用内整体预览同源（BubblePanelAnimator 单一数据源）
+        BubblePanelAnimator.playDismiss(bubbles, currentSelectedBubble, fodCenterX, fodCenterY, config, onComplete);
     }
 
     /**

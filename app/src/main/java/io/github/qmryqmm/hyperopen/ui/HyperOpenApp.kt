@@ -103,6 +103,7 @@ import top.yukonga.miuix.kmp.basic.NavigationBarItem
 import top.yukonga.miuix.kmp.basic.NavigationItem
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
@@ -819,7 +820,11 @@ fun HyperOpenApp(
                             this.shortcuts = ArrayList(shortcuts)
                         }
 
-                        var blurScene by remember { mutableStateOf(PreviewBlurSceneState()) }
+                        var blurScene by remember {
+                            mutableStateOf(PreviewBlurSceneState(panelVisible = false))
+                        }
+                        /** 「始终显示指纹快捷方式面板」开关（预览页专用，不写入配置） */
+                        var alwaysShowPanel by remember { mutableStateOf(false) }
 
                         val previewBackdrop = rememberLayerBackdrop {
                             drawRect(Color(0xFF0C0E14))
@@ -897,7 +902,8 @@ fun HyperOpenApp(
                                 }
 
                                 // 2. 全屏毛玻璃遮罩层与独立黑色压暗层 (与全屏遮罩/压暗滑块实时联动，与真实锁屏 GxzwWindowFrameLayout 1:1 对齐)
-                                if (currentConfig.fullscreenBlurMaskAlpha > 0.001f) {
+                                // 面板隐藏态（按住指纹按钮之前）不绘制任何遮罩，只露出壁纸 + 指纹按钮
+                                if (blurScene.panelVisible && currentConfig.fullscreenBlurMaskAlpha > 0.001f) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
@@ -915,7 +921,7 @@ fun HyperOpenApp(
                                                 )
                                             )
                                     )
-                                } else if (currentConfig.fullscreenDimAlpha > 0.001f) {
+                                } else if (blurScene.panelVisible && currentConfig.fullscreenDimAlpha > 0.001f) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
@@ -924,7 +930,7 @@ fun HyperOpenApp(
                                 }
 
                                 // 3. 圆形视界区域的统一毛玻璃底衬 (与真实锁屏 CircularRegionBackdropView 及气泡底衬完全一致)
-                                if (currentConfig.showRegionBg && currentConfig.regionBlurRadius > 0) {
+                                if (blurScene.panelVisible && currentConfig.showRegionBg && currentConfig.regionBlurRadius > 0) {
                                     val screenH = ctx.resources.displayMetrics.heightPixels
                                     val screenW = ctx.resources.displayMetrics.widthPixels
                                     val fallbackCenterX = screenW / 2.0f
@@ -955,7 +961,7 @@ fun HyperOpenApp(
                             }
 
                             // 4. 顶部提示胶囊与左上角返回按钮的毛玻璃底衬
-                            if (currentConfig.showHeaderPill && currentConfig.showHeaderPillBg && currentConfig.headerBlurRadius > 0 && blurScene.headerWidthPx > 0f && blurScene.headerHeightPx > 0f) {
+                            if (blurScene.panelVisible && currentConfig.showHeaderPill && currentConfig.showHeaderPillBg && currentConfig.headerBlurRadius > 0 && blurScene.headerWidthPx > 0f && blurScene.headerHeightPx > 0f) {
                                 // 与真实锁屏 createCompositeHeaderPillDrawable 的 layerInset(2px) 对齐：模糊层四周内缩 2px
                                 val headerInsetPx = 2f
                                 Box(
@@ -977,7 +983,7 @@ fun HyperOpenApp(
                                 )
                             }
 
-                            if (currentConfig.regionBlurRadius > 0 && blurScene.backBtnSizePx > 0f) {
+                            if (blurScene.panelVisible && currentConfig.regionBlurRadius > 0 && blurScene.backBtnSizePx > 0f) {
                                 val backSizeDp = with(density) { blurScene.backBtnSizePx.toDp() }
                                 Box(
                                     modifier = Modifier
@@ -997,7 +1003,7 @@ fun HyperOpenApp(
 
                             // 5. 图标气泡留白区域的独立毛玻璃底衬 (固定 key 复用 GPU 模糊纹理，不随手指滑动重建 Shader，彻底消除轻微闪烁；且底色恒定与真实锁屏 1:1 一致)
                             // 模糊开关规格统一由 BubbleBlurSpec 提供（留白 0% = 气泡整体关闭，模糊跟随停用）
-                            if (BubbleBlurSpec.isEnabled(currentConfig.bubbleBlurRadius.toFloat(), currentConfig.bubblePaddingPercent)) {
+                            if (blurScene.panelVisible && BubbleBlurSpec.isEnabled(currentConfig.bubbleBlurRadius.toFloat(), currentConfig.bubblePaddingPercent)) {
                                 val cornerPercent = currentConfig.iconCornerRadius.coerceIn(0, 50)
                                 val bubbleBlurShape = if (cornerPercent >= 50) CircleShape else RoundedCornerShape(percent = cornerPercent)
                                 blurScene.bubbles.forEach { spot ->
@@ -1053,9 +1059,41 @@ fun HyperOpenApp(
                                         onBlurSceneChanged = { scene ->
                                             blurScene = scene
                                         },
+                                        alwaysShowPanel = alwaysShowPanel,
                                     ).also { previewViewRef = it }
                                 },
+                                update = { pv ->
+                                    pv.setAlwaysShowPanel(alwaysShowPanel)
+                                    pv.updateConfig(currentConfig)
+                                },
                             )
+
+                            // 「始终显示指纹快捷方式面板」开关：开启后面板常驻，
+                            // 无需按住指纹按钮，可直接长按进入排版模式 / 滑动预览图标效果
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(top = 96.dp, start = 18.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(percent = 50))
+                                        .background(Color.Black.copy(alpha = 0.35f))
+                                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = "始终显示面板",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Switch(
+                                        checked = alwaysShowPanel,
+                                        onCheckedChange = { alwaysShowPanel = it },
+                                    )
+                                }
+                            }
                         }
                         }
                         previewContent()
