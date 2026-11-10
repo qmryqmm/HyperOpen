@@ -86,7 +86,6 @@ fun SettingsPage(
     safetyTick: Int,
     onSafetyRefresh: () -> Unit,
     onOpenThemePage: () -> Unit,
-    onOpenSoftGlassPage: () -> Unit,
     onOpenPermissionPage: () -> Unit,
     onResetDefaults: () -> Unit,
     onResetShortcuts: () -> Unit,
@@ -122,19 +121,6 @@ fun SettingsPage(
                         )
                     },
                     onClick = onOpenThemePage,
-                )
-                ArrowPreference(
-                    title = "柔光玻璃设置",
-                    summary = "系统桌面柔光 · 拟真光学 · 硬件渲染",
-                    startAction = {
-                        Icon(
-                            imageVector = MiuixIcons.ScreenMirroring,
-                            contentDescription = null,
-                            tint = MiuixTheme.colorScheme.primary,
-                            modifier = Modifier.padding(end = 8.dp),
-                        )
-                    },
-                    onClick = onOpenSoftGlassPage,
                 )
             }
         }

@@ -54,13 +54,7 @@ public class HyperOSMaterialFactory {
         public static GlassParams fromConfig(@Nullable HyperOpenConfig config) {
             GlassParams p = new GlassParams();
             if (config == null) return p;
-            if (config.glassPreset == HyperOpenConfig.GLASS_PRESET_DESKTOP) {
-                p.ior = 1.0f;
-                p.thickness = 1.2f;
-                p.specular = 0.45f;
-                p.matteAlpha = 0.16f;
-                p.borderLight = 0.30f;
-            } else if (config.glassPreset == HyperOpenConfig.GLASS_PRESET_SYSTEMUI) {
+            if (config.glassPreset == HyperOpenConfig.GLASS_PRESET_DEFAULT) {
                 p.ior = 1.12f;
                 p.thickness = 1.5f;
                 p.specular = 0.8f;
@@ -194,7 +188,7 @@ public class HyperOSMaterialFactory {
 
             float cx = width / 2f;
             float cy = height / 2f;
-            float radius = Math.min(cx, cy) - 2.0f;
+            float radius = Math.min(cx, cy);
             if (radius <= 0f) return;
 
             GlassParams p = params != null ? params : new GlassParams();
@@ -227,7 +221,7 @@ public class HyperOSMaterialFactory {
                 int bottomReflectAlpha = Math.round(Math.min(0.28f, (isSelected ? 0.16f : 0.08f) * specFactor) * 255f);
 
                 specularAndCaustic = new LinearGradient(
-                    0, cy - radius, 0, cy + radius,
+                    0, 0, 0, height,
                     new int[]{(topSpecularAlpha << 24) | 0x00FFFFFF, (topFadeAlpha << 24) | 0x00FFFFFF, 0x00FFFFFF, 0x00FFFFFF, (bottomReflectAlpha << 24) | 0x00FFFFFF},
                     new float[]{0f, 0.32f, 0.55f, 0.82f, 1f},
                     Shader.TileMode.CLAMP
@@ -241,7 +235,7 @@ public class HyperOSMaterialFactory {
                 int bBottomAlpha = Math.round(Math.min(0.50f, (isSelected ? 0.35f : 0.18f) * borderFactor) * 255f);
 
                 borderGrad = new LinearGradient(
-                    cx - radius * 0.2f, cy - radius, cx + radius * 0.2f, cy + radius,
+                    cx - radius * 0.2f, 0, cx + radius * 0.2f, height,
                     new int[]{(bTopAlpha << 24) | 0x00FFFFFF, (bMidAlpha << 24) | 0x00FFFFFF, (bWaistAlpha << 24) | 0x00FFFFFF, (bBottomAlpha << 24) | 0x00FFFFFF},
                     new float[]{0f, 0.38f, 0.72f, 1f},
                     Shader.TileMode.CLAMP
@@ -314,36 +308,33 @@ public class HyperOSMaterialFactory {
         @Nullable GlassParams params
     ) {
         if (width <= 0 || height <= 0) return;
-        float cx = width / 2f;
-        float cy = height / 2f;
-        float radius = Math.min(cx, cy) - 2.0f;
-        if (radius <= 0f) return;
-
+        float w = width;
+        float h = height;
         int clampedPercent = Math.max(0, Math.min(50, cornerRadiusPercent));
-        float cornerRadius = radius * (clampedPercent / 50f);
-        float left = cx - radius;
-        float top = cy - radius;
-        float right = cx + radius;
-        float bottom = cy + radius;
+        float maxR = Math.min(w, h) / 2f;
+        float cornerRadius = maxR * (clampedPercent / 50f);
 
         cache.ensure(width, height, style, isSelected, params);
 
+        float halfStroke = borderPaint.getStrokeWidth() / 2f;
+        float strokeCornerRadius = Math.max(0f, cornerRadius - halfStroke);
+
         if (style == STYLE_SOFT_GLASS) {
             bgPaint.setShader(cache.lensRefraction);
-            canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, bgPaint);
+            canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, bgPaint);
 
             highlightPaint.setShader(cache.specularAndCaustic);
-            canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, highlightPaint);
+            canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, highlightPaint);
 
             borderPaint.setShader(cache.borderGrad);
-            canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, borderPaint);
+            canvas.drawRoundRect(halfStroke, halfStroke, w - halfStroke, h - halfStroke, strokeCornerRadius, strokeCornerRadius, borderPaint);
         } else {
             bgPaint.setShader(cache.radialMatte);
-            canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, bgPaint);
+            canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, bgPaint);
 
             borderPaint.setShader(null);
             borderPaint.setColor(cache.gaussianBorderColor);
-            canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, borderPaint);
+            canvas.drawRoundRect(halfStroke, halfStroke, w - halfStroke, h - halfStroke, strokeCornerRadius, strokeCornerRadius, borderPaint);
         }
     }
 
@@ -377,10 +368,12 @@ public class HyperOSMaterialFactory {
         if (width <= 0 || height <= 0) return;
         float cx = width / 2f;
         float cy = height / 2f;
-        float radius = Math.min(cx, cy) - 2.0f;
+        float radius = Math.min(cx, cy);
         if (radius <= 0f) return;
 
         GlassParams p = params != null ? params : new GlassParams();
+        float halfStroke = borderPaint.getStrokeWidth() / 2f;
+        float strokeRadius = Math.max(0f, radius - halfStroke);
 
         if (style == STYLE_SOFT_GLASS) {
             // ================= 桌面/系统级柔光玻璃 (Soft Light Glass) =================
@@ -431,7 +424,7 @@ public class HyperOSMaterialFactory {
                 Shader.TileMode.CLAMP
             );
             borderPaint.setShader(borderGrad);
-            canvas.drawCircle(cx, cy, radius, borderPaint);
+            canvas.drawCircle(cx, cy, strokeRadius, borderPaint);
         } else {
             int d0 = isSelected ? 0x28FFFFFF : 0x14FFFFFF;
             int d1 = isSelected ? 0x14FFFFFF : 0x0AFFFFFF;
@@ -446,7 +439,7 @@ public class HyperOSMaterialFactory {
 
             borderPaint.setShader(null);
             borderPaint.setColor(isSelected ? 0x98FFFFFF : 0x45FFFFFF);
-            canvas.drawCircle(cx, cy, radius, borderPaint);
+            canvas.drawCircle(cx, cy, strokeRadius, borderPaint);
         }
     }
 
@@ -734,19 +727,14 @@ public class HyperOSMaterialFactory {
             int height = getBounds().height();
             if (width <= 0 || height <= 0) return;
 
-            float cx = width / 2f;
-            float cy = height / 2f;
-            float radius = Math.min(cx, cy) - 2.0f;
-            if (radius <= 0f) return;
-
-            float cornerRadius = radius * (cornerRadiusPercent / 50f);
-            float left = cx - radius;
-            float top = cy - radius;
-            float right = cx + radius;
-            float bottom = cy + radius;
+            float w = width;
+            float h = height;
+            float maxR = Math.min(w, h) / 2f;
+            int clampedPercent = Math.max(0, Math.min(50, cornerRadiusPercent));
+            float cornerRadius = maxR * (clampedPercent / 50f);
 
             if (dimAlpha > 0.001f) {
-                canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, dimPaint);
+                canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, dimPaint);
             }
 
             drawUnifiedCircularOpticsCached(
@@ -754,9 +742,9 @@ public class HyperOSMaterialFactory {
             );
 
             if (isSelected && glowEnabled) {
-                ensureGlowShaders(width, height, cx, cy, radius);
-                canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, glowPaint);
-                canvas.drawRoundRect(left, top, right, bottom, cornerRadius, cornerRadius, outerAuraPaint);
+                ensureGlowShaders(width, height, w / 2f, h / 2f, maxR);
+                canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, glowPaint);
+                canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, outerAuraPaint);
             }
         }
 

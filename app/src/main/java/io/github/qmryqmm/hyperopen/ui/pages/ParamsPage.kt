@@ -74,6 +74,7 @@ fun ParamsPage(
     lazyListState: LazyListState,
     selectedTab: Int,
     materialStyle: Int, onMaterialStyle: (Int) -> Unit,
+    onOpenSoftGlassPage: () -> Unit = {},
     offsetY: Float, onOffsetY: (Float) -> Unit,
     regionDiameter: Float, onRegionDiameter: (Float) -> Unit,
     showRegionBg: Boolean, onShowRegionBg: (Boolean) -> Unit,
@@ -657,6 +658,13 @@ fun ParamsPage(
                         },
                         onClick = { onMaterialStyle(HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR) },
                     )
+                    if (materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) {
+                        ArrowPreference(
+                            title = "柔光玻璃参数微调",
+                            summary = "系统默认值 · 光学折射 · 漫射雾度微调",
+                            onClick = onOpenSoftGlassPage,
+                        )
+                    }
                     SliderPreference(
                         title = "全屏模糊遮罩程度",
                         summary = "控制呼出面板时全屏背景高斯模糊强度",

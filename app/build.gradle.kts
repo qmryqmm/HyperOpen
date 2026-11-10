@@ -58,4 +58,7 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-preference-android:0.9.4")
     implementation("top.yukonga.miuix.kmp:miuix-icons-android:0.9.4")
     implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.4")
+    // 隐藏 API 豁免：让 App 进程也能反射 ViewRootImpl.createBackgroundBlurDrawable，
+    // 与 SystemUI 侧真实渲染完全同源（SurfaceFlinger 硬件毛玻璃）
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:4.3")
 }

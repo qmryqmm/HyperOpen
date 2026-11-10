@@ -47,7 +47,7 @@ fun SoftGlassSettingsPage(
     glassMatteAlpha: Float, onGlassMatteAlpha: (Float) -> Unit,
     glassBorderLight: Float, onGlassBorderLight: (Float) -> Unit,
     glassUseNative: Boolean, onGlassUseNative: (Boolean) -> Unit,
-    onResetToDesktopPreset: () -> Unit,
+    onResetToDefaultPreset: () -> Unit,
 ) {
     LazyColumn(
         state = lazyListState,
@@ -67,24 +67,14 @@ fun SoftGlassSettingsPage(
                     .fillMaxWidth(),
             ) {
                 ArrowPreference(
-                    title = "系统桌面柔光 (推荐)",
-                    summary = "对齐澎湃OS桌面文件夹质感 · 极低折射、温润漫射微光、柔和低反差边缘",
+                    title = "系统默认值 (推荐)",
+                    summary = "对齐澎湃OS系统界面 Glass_Common_Small_Thin 原生光学规范与参数",
                     endActions = {
-                        if (glassPreset == HyperOpenConfig.GLASS_PRESET_DESKTOP) {
+                        if (glassPreset == HyperOpenConfig.GLASS_PRESET_DEFAULT) {
                             Text("✓", color = MiuixTheme.colorScheme.primary, fontSize = 16.sp)
                         }
                     },
-                    onClick = { onGlassPreset(HyperOpenConfig.GLASS_PRESET_DESKTOP) },
-                )
-                ArrowPreference(
-                    title = "系统界面拟真",
-                    summary = "对齐锁屏控制台与通知栏 · 采用 Glass_Common_Small_Thin 原生参数",
-                    endActions = {
-                        if (glassPreset == HyperOpenConfig.GLASS_PRESET_SYSTEMUI) {
-                            Text("✓", color = MiuixTheme.colorScheme.primary, fontSize = 16.sp)
-                        }
-                    },
-                    onClick = { onGlassPreset(HyperOpenConfig.GLASS_PRESET_SYSTEMUI) },
+                    onClick = { onGlassPreset(HyperOpenConfig.GLASS_PRESET_DEFAULT) },
                 )
                 ArrowPreference(
                     title = "自定义参数微调",
@@ -189,12 +179,12 @@ fun SoftGlassSettingsPage(
                     .fillMaxWidth(),
             ) {
                 TextButton(
-                    text = "重置为系统桌面柔光推荐参数",
+                    text = "重置为系统默认值参数",
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp),
                     colors = ButtonDefaults.textButtonColorsPrimary(),
-                    onClick = onResetToDesktopPreset,
+                    onClick = onResetToDefaultPreset,
                 )
             }
         }

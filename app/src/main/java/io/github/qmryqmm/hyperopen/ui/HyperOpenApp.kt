@@ -356,7 +356,9 @@ fun HyperOpenApp(
     /** 排版预览页的统一返回出口：存在未保存的排版修改时弹「是否保存」，否则直接退出 */
     fun requestPreviewExit() {
         val pv = previewViewRef
-        if (pv != null && pv.hasUnsavedLayoutChanges()) {
+        // 排版模式（isEditMode）本身就意味着"正在修改"，即便签名容差内也弹确认框，
+        // 保证排版界面返回永远触发二次确认弹窗
+        if (pv != null && (pv.isEditMode || pv.hasUnsavedLayoutChanges())) {
             showLayoutSaveDialog = true
         } else {
             pv?.discardLayoutChanges()
@@ -866,17 +868,6 @@ fun HyperOpenApp(
                         // 壁纸位图（供 SurfaceView 绘制到窗口后方 Surface 上）
                         val liveWallpaperBitmap by io.github.qmryqmm.hyperopen.util.LiveWallpaperLoader.rememberLiveWallpaper(ctx)
 
-                        // 全屏模糊半径：与真实侧 BlurUtils.blurRadiusOfRatio(alpha) 同构
-                        // （近似 alpha * 250px，覆盖系统典型 MAX_BLUR_RADIUS 区间）
-                        androidx.compose.runtime.LaunchedEffect(currentConfig.fullscreenBlurMaskAlpha) {
-                            val w = activity?.window ?: return@LaunchedEffect
-                            val lp = w.attributes
-                            lp.setBlurBehindRadius(
-                                (currentConfig.fullscreenBlurMaskAlpha.coerceIn(0f, 1f) * 250f).toInt()
-                            )
-                            w.attributes = lp
-                        }
-
                         Box(
                             modifier = Modifier.fillMaxSize(),
                         ) {
@@ -888,6 +879,35 @@ fun HyperOpenApp(
                                     }
                                 },
                                 update = { it.redraw() },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+
+                            // 全屏毛玻璃遮罩（BackgroundBlurDrawable 全屏区域，与真实侧 BlurUtils.applyBlur 同构：
+                            // 模糊窗口后方壁纸；圆角 0 = 矩形全屏。半径与真实侧 blurRadiusOfRatio 同构近似）
+                            AndroidView(
+                                factory = { viewCtx -> android.view.View(viewCtx) },
+                                update = { view ->
+                                    // 与真实侧 BlurUtils.blurRadiusOfRatio 完全同构：
+                                    // lerp(min_window_blur_radius=1px, max_window_blur_radius=100px, ratio)
+                                    // = 1 + 99 * ratio（ratio=0 时为 0）
+                                    val ratio = currentConfig.fullscreenBlurMaskAlpha.coerceIn(0f, 1f)
+                                    val blurPx = if (blurScene.panelVisible && ratio > 0f) {
+                                        (1f + 99f * ratio).toInt()
+                                    } else 0
+                                    val prev = view.tag as? Int ?: -1
+                                    if (prev != blurPx) {
+                                        view.tag = blurPx
+                                        view.post {
+                                            if (blurPx > 0) {
+                                                view.background =
+                                                    io.github.qmryqmm.hyperopen.factory.HyperOSBlurHelper
+                                                        .createSystemBackdropBlurDrawable(view, 0f, blurPx, 0)
+                                            } else {
+                                                view.background = null
+                                            }
+                                        }
+                                    }
+                                },
                                 modifier = Modifier.fillMaxSize(),
                             )
 
@@ -962,13 +982,13 @@ fun HyperOpenApp(
                             onGlassBorderLight = { glassBorderLight = it; persist() },
                             glassUseNative = glassUseNative,
                             onGlassUseNative = { glassUseNative = it; persist() },
-                            onResetToDesktopPreset = {
-                                glassPreset = HyperOpenConfig.GLASS_PRESET_DESKTOP
-                                glassRefractIor = 1.0f
-                                glassThickness = 1.2f
-                                glassSpecular = 0.45f
-                                glassMatteAlpha = 0.16f
-                                glassBorderLight = 0.30f
+                            onResetToDefaultPreset = {
+                                glassPreset = HyperOpenConfig.GLASS_PRESET_DEFAULT
+                                glassRefractIor = 1.12f
+                                glassThickness = 1.5f
+                                glassSpecular = 0.8f
+                                glassMatteAlpha = 0.12f
+                                glassBorderLight = 0.45f
                                 persist()
                             },
                         )
@@ -984,6 +1004,7 @@ fun HyperOpenApp(
                                     selectedTab = paramsTab,
                                     materialStyle = materialStyle,
                                     onMaterialStyle = { materialStyle = it; persist() },
+                                    onOpenSoftGlassPage = { subPage = 5 },
                                     offsetY = offsetY,
                                     onOffsetY = { offsetY = it; persist() },
                                     regionDiameter = regionDiameter,
@@ -1193,7 +1214,6 @@ fun HyperOpenApp(
                                     safetyTick = safetyTick,
                                     onSafetyRefresh = { safetyTick++ },
                                     onOpenThemePage = { subPage = 1 },
-                                    onOpenSoftGlassPage = { subPage = 5 },
                                     onOpenPermissionPage = { subPage = 4 },
                                     onResetDefaults = { showResetDefaultsDialog = true },
                                     onResetShortcuts = { showResetShortcutsDialog = true },

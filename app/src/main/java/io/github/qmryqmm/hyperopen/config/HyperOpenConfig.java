@@ -230,22 +230,21 @@ public class HyperOpenConfig {
     public boolean iconGlowEffect = true;
 
     // ── 柔光玻璃系统级细调参数 ──
-    public static final int GLASS_PRESET_DESKTOP = 0;
-    public static final int GLASS_PRESET_SYSTEMUI = 1;
-    public static final int GLASS_PRESET_CUSTOM = 2;
+    public static final int GLASS_PRESET_DEFAULT = 0;
+    public static final int GLASS_PRESET_CUSTOM = 1;
 
-    /** 柔光玻璃预设 (0=系统桌面柔光, 1=系统界面拟真, 2=自定义调参) */
-    public int glassPreset = GLASS_PRESET_DESKTOP;
-    /** 折射率 / 光学畸变曲率 (1.0 ~ 2.0，桌面柔光通常为 1.0f，无夸张水珠形变) */
-    public float glassRefractIor = 1.0f;
-    /** 边缘光学厚度 (0.5 ~ 4.0，控制边缘光圈凝聚范围) */
+    /** 柔光玻璃预设 (0=系统默认值, 1=自定义调参) */
+    public int glassPreset = GLASS_PRESET_DEFAULT;
+    /** 折射率 / 光学畸变曲率 (1.0 ~ 2.0，系统默认 1.12f) */
+    public float glassRefractIor = 1.12f;
+    /** 边缘光学厚度 (0.5 ~ 4.0，系统默认 1.5f) */
     public float glassThickness = 1.5f;
-    /** 镜面反射与高光强度 (0.0 ~ 2.0，桌面柔光为温和漫光 0.6f) */
-    public float glassSpecular = 0.6f;
-    /** 雾面底色不透明度 (0.05 ~ 0.40，模拟磨砂微晶微透质感) */
-    public float glassMatteAlpha = 0.15f;
-    /** 边缘微光描边亮度 (0.10 ~ 1.00，桌面柔光为低反差 0.35f) */
-    public float glassBorderLight = 0.35f;
+    /** 镜面反射与高光强度 (0.0 ~ 2.0，系统默认 0.8f) */
+    public float glassSpecular = 0.8f;
+    /** 雾面底色不透明度 (0.05 ~ 0.40，系统默认 0.12f) */
+    public float glassMatteAlpha = 0.12f;
+    /** 边缘微光描边亮度 (0.10 ~ 1.00，系统默认 0.45f) */
+    public float glassBorderLight = 0.45f;
     /** 在系统界面 (SystemUI) 内部是否优先调用硬件原生 MiGlass 材质引擎 */
     public boolean glassUseNative = true;
 
@@ -476,12 +475,12 @@ public class HyperOpenConfig {
                     config.glyphPadMode = bundle.getInt("glyph_pad_mode", GLYPH_PAD_MODE_TRANSLUCENT);
                     config.iconGlowEffect = bundle.getBoolean("icon_glow_effect", true);
 
-                    config.glassPreset = bundle.getInt("glass_preset", GLASS_PRESET_DESKTOP);
-                    config.glassRefractIor = bundle.getFloat("glass_refract_ior", 1.0f);
+                    config.glassPreset = bundle.getInt("glass_preset", GLASS_PRESET_DEFAULT);
+                    config.glassRefractIor = bundle.getFloat("glass_refract_ior", 1.12f);
                     config.glassThickness = bundle.getFloat("glass_thickness", 1.5f);
-                    config.glassSpecular = bundle.getFloat("glass_specular", 0.6f);
-                    config.glassMatteAlpha = bundle.getFloat("glass_matte_alpha", 0.15f);
-                    config.glassBorderLight = bundle.getFloat("glass_border_light", 0.35f);
+                    config.glassSpecular = bundle.getFloat("glass_specular", 0.8f);
+                    config.glassMatteAlpha = bundle.getFloat("glass_matte_alpha", 0.12f);
+                    config.glassBorderLight = bundle.getFloat("glass_border_light", 0.45f);
                     config.glassUseNative = bundle.getBoolean("glass_use_native", true);
 
                     String jsonStr = bundle.getString("shortcuts_json", null);
@@ -591,12 +590,12 @@ public class HyperOpenConfig {
         config.glyphPadMode = xPrefs.getInt("glyph_pad_mode", GLYPH_PAD_MODE_TRANSLUCENT);
         config.iconGlowEffect = xPrefs.getBoolean("icon_glow_effect", true);
 
-        config.glassPreset = xPrefs.getInt("glass_preset", GLASS_PRESET_DESKTOP);
-        config.glassRefractIor = xPrefs.getFloat("glass_refract_ior", 1.0f);
+        config.glassPreset = xPrefs.getInt("glass_preset", GLASS_PRESET_DEFAULT);
+        config.glassRefractIor = xPrefs.getFloat("glass_refract_ior", 1.12f);
         config.glassThickness = xPrefs.getFloat("glass_thickness", 1.5f);
-        config.glassSpecular = xPrefs.getFloat("glass_specular", 0.6f);
-        config.glassMatteAlpha = xPrefs.getFloat("glass_matte_alpha", 0.15f);
-        config.glassBorderLight = xPrefs.getFloat("glass_border_light", 0.35f);
+        config.glassSpecular = xPrefs.getFloat("glass_specular", 0.8f);
+        config.glassMatteAlpha = xPrefs.getFloat("glass_matte_alpha", 0.12f);
+        config.glassBorderLight = xPrefs.getFloat("glass_border_light", 0.45f);
         config.glassUseNative = xPrefs.getBoolean("glass_use_native", true);
 
         String jsonStr = xPrefs.getString("shortcuts_json", null);
@@ -696,12 +695,12 @@ public class HyperOpenConfig {
         config.glyphPadMode = sp.getInt("glyph_pad_mode", GLYPH_PAD_MODE_TRANSLUCENT);
         config.iconGlowEffect = sp.getBoolean("icon_glow_effect", true);
 
-        config.glassPreset = sp.getInt("glass_preset", GLASS_PRESET_DESKTOP);
-        config.glassRefractIor = sp.getFloat("glass_refract_ior", 1.0f);
+        config.glassPreset = sp.getInt("glass_preset", GLASS_PRESET_DEFAULT);
+        config.glassRefractIor = sp.getFloat("glass_refract_ior", 1.12f);
         config.glassThickness = sp.getFloat("glass_thickness", 1.5f);
-        config.glassSpecular = sp.getFloat("glass_specular", 0.6f);
-        config.glassMatteAlpha = sp.getFloat("glass_matte_alpha", 0.15f);
-        config.glassBorderLight = sp.getFloat("glass_border_light", 0.35f);
+        config.glassSpecular = sp.getFloat("glass_specular", 0.8f);
+        config.glassMatteAlpha = sp.getFloat("glass_matte_alpha", 0.12f);
+        config.glassBorderLight = sp.getFloat("glass_border_light", 0.45f);
         config.glassUseNative = sp.getBoolean("glass_use_native", true);
 
         String jsonStr = sp.getString("shortcuts_json", null);
