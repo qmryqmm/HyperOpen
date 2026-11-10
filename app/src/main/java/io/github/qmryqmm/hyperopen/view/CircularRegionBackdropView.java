@@ -35,6 +35,7 @@ public class CircularRegionBackdropView extends FrameLayout {
     private float blurRadiusDp = 25f;
     private float dimAlpha = 0f;
     private float currentRadiusPx = 0f;
+    private HyperOSMaterialFactory.GlassParams glassParams = null;
 
     private OverlayDrawView overlayView;
     private Drawable systemBackdropBlurDrawable;
@@ -134,6 +135,14 @@ public class CircularRegionBackdropView extends FrameLayout {
         }
     }
 
+    public void setGlassParams(@Nullable HyperOSMaterialFactory.GlassParams params) {
+        this.glassParams = params;
+        refreshVisuals();
+        if (currentRadiusPx > 0) {
+            updateGeometry(currentRadiusPx);
+        }
+    }
+
     public void setBlurRadius(float radiusDp) {
         float clamped = Math.max(0f, radiusDp);
         if (Math.abs(this.blurRadiusDp - clamped) > 0.01f) {
@@ -173,7 +182,7 @@ public class CircularRegionBackdropView extends FrameLayout {
         int blurPx = !systemBlurEnabled ? 0 : Math.round(TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP, blurRadiusDp, getResources().getDisplayMetrics()
         ));
-        int tint = HyperOSMaterialFactory.getUnifiedBlurTint(style);
+        int tint = HyperOSMaterialFactory.getUnifiedBlurTint(style, glassParams);
 
         if (blurPx <= 0) {
             systemBackdropBlurDrawable = null;
@@ -219,7 +228,7 @@ public class CircularRegionBackdropView extends FrameLayout {
         int blurPx = !systemBlurEnabled ? 0 : Math.round(TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP, blurRadiusDp, getResources().getDisplayMetrics()
         ));
-        int tint = HyperOSMaterialFactory.getUnifiedBlurTint(style);
+        int tint = HyperOSMaterialFactory.getUnifiedBlurTint(style, glassParams);
 
         if (blurPx <= 0) {
             if (systemBackdropBlurDrawable != null) {
@@ -263,7 +272,7 @@ public class CircularRegionBackdropView extends FrameLayout {
                 canvas.drawCircle(getWidth() / 2f, getHeight() / 2f, Math.min(getWidth(), getHeight()) / 2f, dimPaint);
             }
             HyperOSMaterialFactory.drawUnifiedCircularOpticsCached(
-                canvas, getWidth(), getHeight(), style, false, bgPaint, highlightPaint, borderPaint, opticsCache
+                canvas, getWidth(), getHeight(), style, false, bgPaint, highlightPaint, borderPaint, opticsCache, 50, glassParams
             );
         }
     }

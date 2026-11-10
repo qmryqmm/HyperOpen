@@ -28,6 +28,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 隐藏 API 豁免（L 前缀 = 全部类）：让 App 进程能反射 ViewRootImpl.createBackgroundBlurDrawable，
+        // 与 SystemUI 侧的 SurfaceFlinger 硬件毛玻璃完全同源。必须在任何反射之前调用。
+        try {
+            org.lsposed.hiddenapibypass.HiddenApiBypass.addHiddenApiExemptions("L")
+        } catch (_: Throwable) {}
         // Direct Boot：入口先补一次 CE→DE 数据迁移（幂等；已迁移时为进程内短路）
         try {
             DePrefs.migrateCeToDe(this, HyperOpenConfig.PREF_NAME)

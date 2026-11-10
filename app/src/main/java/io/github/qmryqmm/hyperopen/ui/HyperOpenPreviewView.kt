@@ -166,6 +166,7 @@ class HyperOpenPreviewView(
     var snapEnabled: Boolean = true
         private set
     private var snapToggleButton: TextView? = null
+    private var alwaysShowToggleButton: TextView? = null
     private val freePlacedBubbles = mutableSetOf<CircularBubbleView>()
 
     // 会话布局快照：进入界面/保存后捕获，用于返回键退出时判断是否存在未保存的排版修改
@@ -229,9 +230,9 @@ class HyperOpenPreviewView(
         // 1. 顶部提示胶囊与编辑提示
         buildHeader()
 
-        // 2. 蜂窝圆形区域底衬（预览界面由 Compose 的 textureBlur 统一渲染实时壁纸模糊，禁用窗口级 BackgroundBlur 避免双层底色叠加）
+        // 2. 蜂窝圆形区域底衬（与真实侧同源：BackgroundBlurDrawable 硬件模糊，经 HiddenApiBypass 豁免后 App 进程可用）
         regionBackdrop = CircularRegionBackdropView(context)
-        regionBackdrop.setSystemBlurEnabled(false)
+        regionBackdrop.setSystemBlurEnabled(true)
         regionBackdrop.setStyle(resolvedStyle)
         addView(regionBackdrop)
 
@@ -252,7 +253,10 @@ class HyperOpenPreviewView(
         // 4.1 右上角吸附开关（仅排版模式可见）
         buildSnapToggleButton()
 
-        // 4.2 指纹按钮：位于 FOD 指纹中心，按住 showDelayMs 后展开面板，松手播放退场动画
+        // 4.2 右上角「面板常驻」开关（吸附开关正下方，常显）
+        buildAlwaysShowToggleButton()
+
+        // 4.3 指纹按钮：位于 FOD 指纹中心，按住 showDelayMs 后展开面板，松手播放退场动画
         buildFingerprintButton()
 
         // 5. 在首次测量前提前建立蜂窝气泡视图树
@@ -303,6 +307,9 @@ class HyperOpenPreviewView(
         else -> "图标吸附：关"
     }
 
+    private fun alwaysShowToggleText(): String =
+        if (alwaysShowPanel) "面板常驻：开" else "面板常驻：关"
+
     private fun buildSnapToggleButton() {
         val btn = TextView(context).apply {
             text = snapToggleText()
@@ -347,6 +354,46 @@ class HyperOpenPreviewView(
         }
         addView(btn, lp)
         snapToggleButton = btn
+    }
+
+    /**
+     * 「面板常驻」开关：与图标吸附开关同款胶囊样式，置于其正下方。
+     * 开启后面板常驻可见（无需按住指纹按钮），可直接长按排版 / 滑动预览；
+     * 关闭后回到按住指纹按钮触发展开的模式。
+     */
+    private fun buildAlwaysShowToggleButton() {
+        val btn = TextView(context).apply {
+            text = alwaysShowToggleText()
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextColor(Color.WHITE)
+            paint.isFakeBoldText = true
+            gravity = Gravity.CENTER
+            val padH = dpToPx(14f).toInt()
+            setPadding(padH, 0, padH, 0)
+            background = HyperOSMaterialFactory.createHeaderPillDrawable(resolvedStyle, config.headerDimAlpha)
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) {
+                    if (view.width <= 0 || view.height <= 0) return
+                    outline.setRoundRect(0, 0, view.width, view.height, Math.min(view.width, view.height) / 2f)
+                    outline.alpha = 0f
+                }
+            }
+            clipToOutline = true
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                setAlwaysShowPanel(!alwaysShowPanel)
+                triggerHaptic()
+            }
+        }
+        // 位于图标吸附开关正下方（吸附开关 46dp 顶距 + 40dp 高 + 8dp 间距）
+        val lp = LayoutParams(LayoutParams.WRAP_CONTENT, dpToPx(40f).toInt()).apply {
+            gravity = Gravity.TOP or Gravity.END
+            rightMargin = dpToPx(18f).toInt()
+            topMargin = dpToPx(94f).toInt()
+        }
+        addView(btn, lp)
+        alwaysShowToggleButton = btn
     }
 
     /**
@@ -422,11 +469,37 @@ class HyperOpenPreviewView(
         btn.layoutParams = lp
     }
 
+    /**
+     * 指纹按钮视觉/触摸状态统一管理：
+     * - 常驻模式：按钮彻底隐藏（无需按住）；
+     * - 按住模式 + 面板展开中：alpha=0 视觉隐藏但**保持 VISIBLE**——
+     *   若直接 GONE，Android 会向手势序列内收不到 UP 的目标补发 ACTION_CANCEL，
+     *   导致「展开瞬间立即退场」，表现为按住按钮根本打不开面板；
+     * - 按住模式 + 面板隐藏：正常显示。
+     */
+    private fun updateFingerprintButtonState() {
+        val btn = fingerprintButton ?: return
+        when {
+            alwaysShowPanel -> {
+                btn.visibility = View.GONE
+                btn.alpha = 1f
+            }
+            panelVisible -> {
+                btn.visibility = View.VISIBLE
+                btn.alpha = 0f
+            }
+            else -> {
+                btn.visibility = View.VISIBLE
+                btn.alpha = 1f
+            }
+        }
+    }
+
     /** 展开面板：播放与真实同源的入场动画，并通知 Compose 层恢复毛玻璃。 */
     private fun showPanel(animated: Boolean) {
         isDismissing = false
         panelVisible = true
-        fingerprintButton?.visibility = View.GONE
+        updateFingerprintButtonState()
         setPanelChromeVisible(true)
         if (animated) {
             BubblePanelAnimator.playExpand(bubbleViews, lastFodX, lastFodY, config)
@@ -463,7 +536,7 @@ class HyperOpenPreviewView(
             ) {
                 isDismissing = false
                 panelVisible = false
-                fingerprintButton?.visibility = View.VISIBLE
+                updateFingerprintButtonState()
                 setPanelChromeVisible(false)
                 BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
                 notifyBlurSceneChanged()
@@ -482,7 +555,7 @@ class HyperOpenPreviewView(
             })
         } else {
             panelVisible = false
-            fingerprintButton?.visibility = View.VISIBLE
+            updateFingerprintButtonState()
             setPanelChromeVisible(false)
             BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
             notifyBlurSceneChanged()
@@ -501,33 +574,37 @@ class HyperOpenPreviewView(
             sectorOverlay.visibility = if (visible) View.VISIBLE else View.GONE
         }
         snapToggleButton?.let { if (!visible) it.visibility = View.GONE }
+        // 「面板常驻」开关永远可见，便于随时切回按住模式
     }
 
-    /** 由外部「始终显示面板」开关驱动。 */
+    /** 由「面板常驻」开关驱动。 */
     fun setAlwaysShowPanel(enabled: Boolean) {
         // 不因值相同而早退：AndroidView 首次 update 可能在 initViews 之后才执行，
         // 需要保证构造时 alwaysShowPanel=true 的初始态也被正确应用
         val changed = alwaysShowPanel != enabled
         alwaysShowPanel = enabled
+        alwaysShowToggleButton?.let {
+            it.text = alwaysShowToggleText()
+            if (!changed) return@let
+        }
         if (!changed && panelVisible == enabled) return
         removeCallbacks(expandRunnable)
         fingerprintHolding = false
         if (enabled) {
             // 常驻：直接显示终态，可继续长按排版 / 滑动预览
             showPanel(animated = false)
-            fingerprintButton?.visibility = View.GONE
         } else {
             // 回到按住触发：收起面板，露出指纹按钮
             panelVisible = false
             isDismissing = false
-            fingerprintButton?.visibility = View.VISIBLE
             setPanelChromeVisible(false)
             BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
-            notifyBlurSceneChanged()
         }
+        updateFingerprintButtonState()
+        notifyBlurSceneChanged()
     }
 
-    /** 当前面板是否可见（供 Compose 层读取，决定毛玻璃层是否绘制）。 */
+    /** 当前面板是否可见（供 Compose 层读取，决定压暗层是否绘制）。 */
     fun isPanelVisible(): Boolean = panelVisible
 
     /**
@@ -700,7 +777,11 @@ class HyperOpenPreviewView(
         if (!::headerPill.isInitialized) return
         val show = config.showHeaderPill && config.showHeaderPillBg
         if (show) {
-            headerPill.background = HyperOSMaterialFactory.createHeaderPillDrawable(resolvedStyle, config.headerDimAlpha)
+            // 与真实侧 createCompositeHeaderPillDrawable 同源：系统 BackgroundBlur + 光学层复合
+            val blurPx = if (config.headerBlurRadius > 0) dpToPx(config.headerBlurRadius.toFloat()).toInt() else 0
+            headerPill.background = HyperOSMaterialFactory.createCompositeHeaderPillDrawable(
+                headerPill, resolvedStyle, blurPx, config.headerDimAlpha
+            )
             headerPill.clipToOutline = true
         } else {
             headerPill.background = null
@@ -789,7 +870,7 @@ class HyperOpenPreviewView(
         } catch (_: Throwable) {}
         val realW = if (realSize.x > 0) realSize.x.toFloat() else targetW
         val realH = if (realSize.y > 0) realSize.y.toFloat() else targetH
-        return PointF(realW / 2.0f - viewOffsetX, realH * 0.795f - viewOffsetY)
+        return PointF(realW / 2.0f - viewOffsetX, realH * BubbleBlurSpec.FOD_CENTER_Y_RATIO - viewOffsetY)
     }
 
     private fun refreshBackdropMask() {
@@ -821,13 +902,25 @@ class HyperOpenPreviewView(
             old.layoutStyle != newConfig.layoutStyle ||
             old.ringSectorMode != newConfig.ringSectorMode ||
             old.ringCount != newConfig.ringCount ||
+            old.iconGlowEffect != newConfig.iconGlowEffect ||
+            old.glyphPadEnabled != newConfig.glyphPadEnabled ||
+            old.glyphPadColor != newConfig.glyphPadColor ||
+            old.glyphPadMode != newConfig.glyphPadMode ||
+            old.glassPreset != newConfig.glassPreset ||
+            old.glassRefractIor != newConfig.glassRefractIor ||
+            old.glassThickness != newConfig.glassThickness ||
+            old.glassSpecular != newConfig.glassSpecular ||
+            old.glassMatteAlpha != newConfig.glassMatteAlpha ||
+            old.glassBorderLight != newConfig.glassBorderLight ||
             old.shortcuts.size != newConfig.shortcuts.size
 
         this.config = newConfig
         this.resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(context, config.materialStyle)
+        val glassParams = HyperOSMaterialFactory.GlassParams.fromConfig(config)
         refreshBackdropMask()
         if (::regionBackdrop.isInitialized) {
             regionBackdrop.setStyle(resolvedStyle)
+            regionBackdrop.setGlassParams(glassParams)
             regionBackdrop.setBlurRadius(if (config.showRegionBg) config.regionBlurRadius.toFloat() else 0f)
             regionBackdrop.setDimAlpha(if (config.showRegionBg) config.regionDimAlpha else 0f)
             // 扇区分隔线样式（颜色/透明度/虚线规格）热生效
@@ -853,9 +946,14 @@ class HyperOpenPreviewView(
         applyHeaderPillStyleAndLayout()
         refreshFloatingBackButtonBackground()
         for (b in bubbleViews) {
+            // 与真实侧 setupBubbles 复用分支的 setter 全集保持一致（含材质/模糊/留白/玻璃刷新）
+            b.setMaterialStyle(resolvedStyle)
+            b.setBlurRadius(config.bubbleBlurRadius.toFloat())
+            b.setBubblePaddingPercent(config.bubblePaddingPercent)
             b.setDimAlpha(config.bubbleDimAlpha)
             b.setCornerRadiusPercent(config.iconCornerRadius)
             b.setIconAlpha(config.iconAlpha)
+            b.ensureBlurAndRefreshBackground()
         }
         if (needRebuild || bubbleViews.isEmpty()) {
             setupLayout()
@@ -931,7 +1029,7 @@ class HyperOpenPreviewView(
 
         // 定位底衬：完全跟随「显示圆形区域底衬」开关（分隔虚线已由全屏覆盖层独立绘制）
         regionBackdrop.visibility = if (config.showRegionBg) View.VISIBLE else View.GONE
-        regionBackdrop.setSystemBlurEnabled(false)
+        regionBackdrop.setSystemBlurEnabled(true)
         regionBackdrop.setStyle(resolvedStyle)
         regionBackdrop.setBlurRadius(if (config.showRegionBg) config.regionBlurRadius.toFloat() else 0f)
         regionBackdrop.setDimAlpha(if (config.showRegionBg) config.regionDimAlpha else 0f)
@@ -1046,7 +1144,7 @@ class HyperOpenPreviewView(
             val bubble = CircularBubbleView(
                 context, item, resolvedStyle, iconSizePx.toInt(), context.classLoader, config
             )
-            bubble.setSystemBlurEnabled(false)
+            bubble.setSystemBlurEnabled(true)
             bubble.setIconAlpha(config.iconAlpha)
             bubble.setOnScaleChangedListener {
                 notifyBlurSceneChanged()
@@ -1103,14 +1201,13 @@ class HyperOpenPreviewView(
         repositionFingerprintButton()
         if (panelVisible) {
             isDismissing = false
-            fingerprintButton?.visibility = View.GONE
             setPanelChromeVisible(true)
             BubblePanelAnimator.applyShownState(bubbleViews)
         } else {
-            fingerprintButton?.visibility = if (alwaysShowPanel) View.GONE else View.VISIBLE
             setPanelChromeVisible(false)
             BubblePanelAnimator.applyHiddenState(bubbleViews, fodX, fodY)
         }
+        updateFingerprintButtonState()
         notifyBlurSceneChanged()
         post { notifyBlurSceneChanged() }
     }
@@ -1141,6 +1238,16 @@ class HyperOpenPreviewView(
                 }
             }
         }
+        // 右上角「面板常驻」开关（常显）：放行触摸给按钮自身处理点击
+        alwaysShowToggleButton?.let { btn ->
+            if (btn.visibility == View.VISIBLE) {
+                val slop = dpToPx(6f)
+                if (ev.x >= btn.left - slop && ev.x <= btn.right + slop &&
+                    ev.y >= btn.top - slop && ev.y <= btn.bottom + slop) {
+                    return false
+                }
+            }
+        }
         // 指纹按钮（面板隐藏态可见）：放行触摸，交给它自己的 OnTouchListener 处理按住/松手
         fingerprintButton?.let { btn ->
             if (btn.visibility == View.VISIBLE) {
@@ -1151,6 +1258,9 @@ class HyperOpenPreviewView(
                 }
             }
         }
+        // 按住指纹按钮期间（面板展开动画进行中）：绝不拦截，保证手势序列完整回到按钮、
+        // 能正常收到 ACTION_UP 触发退场；否则展开瞬间被抢占 → CANCEL → 立即退场
+        if (fingerprintHolding) return false
         // 面板隐藏态：除上述按钮外一律不拦截，避免手指误触到隐藏的气泡
         if (!panelVisible) return false
         // 其余区域拦截触摸事件以便处理全局滑动动力学与拖拽
@@ -1825,7 +1935,7 @@ class HyperOpenPreviewView(
             val sub = CircularBubbleView(
                 context, childItem, resolvedStyle, iconSizeInt, context.classLoader, config
             ).apply {
-                setSystemBlurEnabled(false)
+                setSystemBlurEnabled(true)
                 this.targetX = targetX
                 this.targetY = targetY
                 setOnScaleChangedListener { notifyBlurSceneChanged() }

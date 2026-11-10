@@ -74,6 +74,7 @@ fun ParamsPage(
     lazyListState: LazyListState,
     selectedTab: Int,
     materialStyle: Int, onMaterialStyle: (Int) -> Unit,
+    onOpenSoftGlassPage: () -> Unit = {},
     offsetY: Float, onOffsetY: (Float) -> Unit,
     regionDiameter: Float, onRegionDiameter: (Float) -> Unit,
     showRegionBg: Boolean, onShowRegionBg: (Boolean) -> Unit,
@@ -626,7 +627,7 @@ fun ParamsPage(
                     title = "材质与视觉",
                     expanded = isOpen("material"),
                     onToggle = { toggle("material") },
-                    summary = (if (materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) "液态玻璃" else "高斯模糊") +
+                    summary = (if (materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) "柔光玻璃" else "高斯模糊") +
                         " · 全屏模糊 ${(fullscreenBlurMaskAlpha * 100).toInt()}%" +
                         if (layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK) "" else (if (showRegionBg) " · 底衬开" else " · 底衬关"),
                 )
@@ -638,8 +639,8 @@ fun ParamsPage(
                         .fillMaxWidth(),
                 ) {
                     ArrowPreference(
-                        title = "液态玻璃",
-                        summary = "Liquid Glass",
+                        title = "柔光玻璃",
+                        summary = "Soft Light Glass · 系统级桌面与系统界面光学",
                         endActions = {
                             if (materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) {
                                 Text("✓", color = MiuixTheme.colorScheme.primary, fontSize = 16.sp)
@@ -657,6 +658,13 @@ fun ParamsPage(
                         },
                         onClick = { onMaterialStyle(HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR) },
                     )
+                    if (materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) {
+                        ArrowPreference(
+                            title = "柔光玻璃参数微调",
+                            summary = "系统默认值 · 光学折射 · 漫射雾度微调",
+                            onClick = onOpenSoftGlassPage,
+                        )
+                    }
                     SliderPreference(
                         title = "全屏模糊遮罩程度",
                         summary = "控制呼出面板时全屏背景高斯模糊强度",

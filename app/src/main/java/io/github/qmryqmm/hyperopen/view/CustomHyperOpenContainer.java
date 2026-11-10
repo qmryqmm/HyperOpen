@@ -104,8 +104,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
         regionBackdrop = new CircularRegionBackdropView(getContext(), systemuiClassLoader);
         regionBackdrop.setStyle(resolvedStyle);
         if (config != null) {
+            regionBackdrop.setGlassParams(HyperOSMaterialFactory.GlassParams.fromConfig(config));
             regionBackdrop.setBlurRadius(config.regionBlurRadius);
-                regionBackdrop.setDimAlpha(config.regionDimAlpha);
+            regionBackdrop.setDimAlpha(config.regionDimAlpha);
         }
         addView(regionBackdrop);
 
@@ -132,8 +133,10 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 ringSectorSpec = null;
             }
             this.resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(getContext(), config.materialStyle);
+            HyperOSMaterialFactory.GlassParams glassParams = HyperOSMaterialFactory.GlassParams.fromConfig(config);
             if (regionBackdrop != null) {
                 regionBackdrop.setStyle(resolvedStyle);
+                regionBackdrop.setGlassParams(glassParams);
                 regionBackdrop.setBlurRadius(config.showRegionBg ? config.regionBlurRadius : 0);
                 regionBackdrop.setDimAlpha(config.showRegionBg ? config.regionDimAlpha : 0f);
                 // 扇区分隔线样式（颜色/透明度/虚线规格）热生效
@@ -562,6 +565,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
         // 更新底衬大小与位置：完全跟随「显示圆形区域底衬」开关（分隔虚线由全屏覆盖层独立绘制）
         regionBackdrop.setVisibility(config.showRegionBg ? View.VISIBLE : View.GONE);
         regionBackdrop.setStyle(resolvedStyle);
+        regionBackdrop.setGlassParams(HyperOSMaterialFactory.GlassParams.fromConfig(config));
         regionBackdrop.setBlurRadius(config.regionBlurRadius);
         regionBackdrop.setDimAlpha(config.regionDimAlpha);
         regionBackdrop.updateGeometry(regionRadiusPx);

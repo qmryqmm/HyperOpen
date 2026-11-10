@@ -66,6 +66,7 @@ public class CircularBubbleView extends FrameLayout {
         this.opticDrawable = new HyperOSMaterialFactory.CircularBubbleDrawable(
             activeStyle, item.tintColor, isSelected, glowEnabled
         );
+        this.opticDrawable.setGlassParams(HyperOSMaterialFactory.GlassParams.fromConfig(config));
         this.dimAlpha = config != null ? config.bubbleDimAlpha : 0f;
         this.opticDrawable.setDimAlpha(this.dimAlpha);
         this.opticDrawable.setCornerRadiusPercent(this.cornerRadiusPercent);
@@ -76,18 +77,10 @@ public class CircularBubbleView extends FrameLayout {
             public void getOutline(View view, Outline outline) {
                 int w = view.getWidth() > 0 ? view.getWidth() : sizePx;
                 int h = view.getHeight() > 0 ? view.getHeight() : sizePx;
-                float cx = w / 2f;
-                float cy = h / 2f;
-                float radius = Math.min(cx, cy) - 2.0f;
-                if (radius <= 0f) return;
-                float corner = radius * (Math.max(0, Math.min(50, cornerRadiusPercent)) / 50f);
-                outline.setRoundRect(
-                    Math.round(cx - radius),
-                    Math.round(cy - radius),
-                    Math.round(cx + radius),
-                    Math.round(cy + radius),
-                    corner
-                );
+                float maxR = Math.min(w, h) / 2f;
+                if (maxR <= 0f) return;
+                float corner = maxR * (Math.max(0, Math.min(50, cornerRadiusPercent)) / 50f);
+                outline.setRoundRect(0, 0, w, h, corner);
             }
         });
         setClipToOutline(true);
@@ -187,7 +180,8 @@ public class CircularBubbleView extends FrameLayout {
     public void ensureBlurAndRefreshBackground() {
         int blurPx = getBlurRadiusPx();
         float scaledRadiusPx = getScaledBlurCornerRadiusPx();
-        int tint = HyperOSMaterialFactory.getUnifiedBlurTint(activeStyle);
+        HyperOSMaterialFactory.GlassParams glassParams = HyperOSMaterialFactory.GlassParams.fromConfig(config);
+        int tint = HyperOSMaterialFactory.getUnifiedBlurTint(activeStyle, glassParams);
 
         if (blurPx <= 0) {
             systemBackdropBlurDrawable = null;
@@ -216,7 +210,9 @@ public class CircularBubbleView extends FrameLayout {
 
     private void refreshBackground() {
         boolean glowEnabled = config == null || config.iconGlowEffect;
+        HyperOSMaterialFactory.GlassParams glassParams = HyperOSMaterialFactory.GlassParams.fromConfig(config);
         opticDrawable.setStyle(activeStyle);
+        opticDrawable.setGlassParams(glassParams);
         opticDrawable.setSelected(isSelected);
         opticDrawable.setGlowEnabled(glowEnabled);
         opticDrawable.setCornerRadiusPercent(cornerRadiusPercent);
@@ -236,7 +232,7 @@ public class CircularBubbleView extends FrameLayout {
         int blurPx = getBlurRadiusPx();
         if (blurPx > 0 && systemBackdropBlurDrawable == null && isAttachedToWindow()) {
             float scaledRadiusPx = getScaledBlurCornerRadiusPx();
-            int tint = HyperOSMaterialFactory.getUnifiedBlurTint(activeStyle);
+            int tint = HyperOSMaterialFactory.getUnifiedBlurTint(activeStyle, glassParams);
             Object currentVri = HyperOSBlurHelper.findViewRootImpl(this);
             systemBackdropBlurDrawable = HyperOSBlurHelper.createSystemBackdropBlurDrawable(this, scaledRadiusPx, blurPx, tint);
             boundVriRef = currentVri != null ? new WeakReference<>(currentVri) : null;
@@ -252,7 +248,6 @@ public class CircularBubbleView extends FrameLayout {
                 currentBg.invalidateSelf();
             } else {
                 LayerDrawable layer = new LayerDrawable(new Drawable[]{systemBackdropBlurDrawable, opticDrawable});
-                layer.setLayerInset(0, BubbleBlurSpec.INSET_PX, BubbleBlurSpec.INSET_PX, BubbleBlurSpec.INSET_PX, BubbleBlurSpec.INSET_PX);
                 setBackground(layer);
             }
         } else {
@@ -374,19 +369,16 @@ public class CircularBubbleView extends FrameLayout {
             this.currentScale = fisheyeScale;
             setScaleX(fisheyeScale);
             setScaleY(fisheyeScale);
-            if (cornerRadiusPercent < 50) {
-                syncBlurCornerRadiusWithViewScale();
-            }
         }
     }
 
     /**
-     * 保持 BackgroundBlurDrawable 圆角半径始终覆盖缩放后正圆（仅在数值发生变化时才触发反射更新）
+     * 保持 BackgroundBlurDrawable 圆角半径始终与物理缩放严格 1:1 吻合
      */
     public void syncBlurCornerRadiusWithViewScale() {
         if (systemBackdropBlurDrawable != null) {
             float r = getScaledBlurCornerRadiusPx();
-            if (Math.abs(r - lastBlurCornerRadiusPx) > 0.5f) {
+            if (Math.abs(r - lastBlurCornerRadiusPx) > 0.15f) {
                 lastBlurCornerRadiusPx = r;
                 HyperOSBlurHelper.updateCornerRadius(systemBackdropBlurDrawable, r);
             }

@@ -252,6 +252,13 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putInt("glyph_pad_color", sp.getInt("glyph_pad_color", 0xFF2A82E4));
                 bundle.putInt("glyph_pad_mode", sp.getInt("glyph_pad_mode", HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT));
                 bundle.putBoolean("icon_glow_effect", sp.getBoolean("icon_glow_effect", true));
+                bundle.putInt("glass_preset", sp.getInt("glass_preset", HyperOpenConfig.GLASS_PRESET_DEFAULT));
+                bundle.putFloat("glass_refract_ior", sp.getFloat("glass_refract_ior", 1.0f));
+                bundle.putFloat("glass_thickness", sp.getFloat("glass_thickness", 1.5f));
+                bundle.putFloat("glass_specular", sp.getFloat("glass_specular", 0.6f));
+                bundle.putFloat("glass_matte_alpha", sp.getFloat("glass_matte_alpha", 0.15f));
+                bundle.putFloat("glass_border_light", sp.getFloat("glass_border_light", 0.35f));
+                bundle.putBoolean("glass_use_native", sp.getBoolean("glass_use_native", true));
                 bundle.putString("shortcuts_json", sp.getString("shortcuts_json", null));
                 Log.d(TAG, "成功响应 SystemUI 配置查询: offsetY=" + bundle.getInt("offset_y"));
                 return bundle;
