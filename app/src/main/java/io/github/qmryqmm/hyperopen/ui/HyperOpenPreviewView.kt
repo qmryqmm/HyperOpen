@@ -230,7 +230,7 @@ class HyperOpenPreviewView(
         // 1. 顶部提示胶囊与编辑提示
         buildHeader()
 
-        // 2. 蜂窝圆形区域底衬（与真实侧同源：BackgroundBlurDrawable 硬件模糊，窗口级 FLAG_SHOW_WALLPAPER/FLAG_BLUR_BEHIND）
+        // 2. 蜂窝圆形区域底衬（与真实侧同源：BackgroundBlurDrawable 硬件模糊，经 HiddenApiBypass 豁免后 App 进程可用）
         regionBackdrop = CircularRegionBackdropView(context)
         regionBackdrop.setSystemBlurEnabled(true)
         regionBackdrop.setStyle(resolvedStyle)
@@ -906,13 +906,21 @@ class HyperOpenPreviewView(
             old.glyphPadEnabled != newConfig.glyphPadEnabled ||
             old.glyphPadColor != newConfig.glyphPadColor ||
             old.glyphPadMode != newConfig.glyphPadMode ||
+            old.glassPreset != newConfig.glassPreset ||
+            old.glassRefractIor != newConfig.glassRefractIor ||
+            old.glassThickness != newConfig.glassThickness ||
+            old.glassSpecular != newConfig.glassSpecular ||
+            old.glassMatteAlpha != newConfig.glassMatteAlpha ||
+            old.glassBorderLight != newConfig.glassBorderLight ||
             old.shortcuts.size != newConfig.shortcuts.size
 
         this.config = newConfig
         this.resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(context, config.materialStyle)
+        val glassParams = HyperOSMaterialFactory.GlassParams.fromConfig(config)
         refreshBackdropMask()
         if (::regionBackdrop.isInitialized) {
             regionBackdrop.setStyle(resolvedStyle)
+            regionBackdrop.setGlassParams(glassParams)
             regionBackdrop.setBlurRadius(if (config.showRegionBg) config.regionBlurRadius.toFloat() else 0f)
             regionBackdrop.setDimAlpha(if (config.showRegionBg) config.regionDimAlpha else 0f)
             // 扇区分隔线样式（颜色/透明度/虚线规格）热生效

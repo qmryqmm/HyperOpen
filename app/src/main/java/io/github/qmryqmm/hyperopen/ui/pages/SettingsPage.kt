@@ -59,6 +59,7 @@ import top.yukonga.miuix.kmp.icon.extended.Import
 import top.yukonga.miuix.kmp.icon.extended.ListView
 import top.yukonga.miuix.kmp.icon.extended.Reset
 import top.yukonga.miuix.kmp.icon.extended.Scan
+import top.yukonga.miuix.kmp.icon.extended.ScreenMirroring
 import top.yukonga.miuix.kmp.icon.extended.Share
 import top.yukonga.miuix.kmp.icon.extended.Theme
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -85,6 +86,7 @@ fun SettingsPage(
     safetyTick: Int,
     onSafetyRefresh: () -> Unit,
     onOpenThemePage: () -> Unit,
+    onOpenSoftGlassPage: () -> Unit,
     onOpenPermissionPage: () -> Unit,
     onResetDefaults: () -> Unit,
     onResetShortcuts: () -> Unit,
@@ -120,6 +122,19 @@ fun SettingsPage(
                         )
                     },
                     onClick = onOpenThemePage,
+                )
+                ArrowPreference(
+                    title = "柔光玻璃设置",
+                    summary = "系统桌面柔光 · 拟真光学 · 硬件渲染",
+                    startAction = {
+                        Icon(
+                            imageVector = MiuixIcons.ScreenMirroring,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.primary,
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                    },
+                    onClick = onOpenSoftGlassPage,
                 )
             }
         }

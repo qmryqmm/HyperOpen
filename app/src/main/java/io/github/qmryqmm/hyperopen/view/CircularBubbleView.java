@@ -66,6 +66,7 @@ public class CircularBubbleView extends FrameLayout {
         this.opticDrawable = new HyperOSMaterialFactory.CircularBubbleDrawable(
             activeStyle, item.tintColor, isSelected, glowEnabled
         );
+        this.opticDrawable.setGlassParams(HyperOSMaterialFactory.GlassParams.fromConfig(config));
         this.dimAlpha = config != null ? config.bubbleDimAlpha : 0f;
         this.opticDrawable.setDimAlpha(this.dimAlpha);
         this.opticDrawable.setCornerRadiusPercent(this.cornerRadiusPercent);
@@ -187,7 +188,8 @@ public class CircularBubbleView extends FrameLayout {
     public void ensureBlurAndRefreshBackground() {
         int blurPx = getBlurRadiusPx();
         float scaledRadiusPx = getScaledBlurCornerRadiusPx();
-        int tint = HyperOSMaterialFactory.getUnifiedBlurTint(activeStyle);
+        HyperOSMaterialFactory.GlassParams glassParams = HyperOSMaterialFactory.GlassParams.fromConfig(config);
+        int tint = HyperOSMaterialFactory.getUnifiedBlurTint(activeStyle, glassParams);
 
         if (blurPx <= 0) {
             systemBackdropBlurDrawable = null;
@@ -216,7 +218,9 @@ public class CircularBubbleView extends FrameLayout {
 
     private void refreshBackground() {
         boolean glowEnabled = config == null || config.iconGlowEffect;
+        HyperOSMaterialFactory.GlassParams glassParams = HyperOSMaterialFactory.GlassParams.fromConfig(config);
         opticDrawable.setStyle(activeStyle);
+        opticDrawable.setGlassParams(glassParams);
         opticDrawable.setSelected(isSelected);
         opticDrawable.setGlowEnabled(glowEnabled);
         opticDrawable.setCornerRadiusPercent(cornerRadiusPercent);
@@ -236,7 +240,7 @@ public class CircularBubbleView extends FrameLayout {
         int blurPx = getBlurRadiusPx();
         if (blurPx > 0 && systemBackdropBlurDrawable == null && isAttachedToWindow()) {
             float scaledRadiusPx = getScaledBlurCornerRadiusPx();
-            int tint = HyperOSMaterialFactory.getUnifiedBlurTint(activeStyle);
+            int tint = HyperOSMaterialFactory.getUnifiedBlurTint(activeStyle, glassParams);
             Object currentVri = HyperOSBlurHelper.findViewRootImpl(this);
             systemBackdropBlurDrawable = HyperOSBlurHelper.createSystemBackdropBlurDrawable(this, scaledRadiusPx, blurPx, tint);
             boundVriRef = currentVri != null ? new WeakReference<>(currentVri) : null;

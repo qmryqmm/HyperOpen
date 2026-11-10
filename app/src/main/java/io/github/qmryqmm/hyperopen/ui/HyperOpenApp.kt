@@ -52,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -81,6 +82,7 @@ import io.github.qmryqmm.hyperopen.ui.pages.ParamsPage
 import io.github.qmryqmm.hyperopen.ui.pages.PermissionCheckPage
 import io.github.qmryqmm.hyperopen.ui.pages.SettingsPage
 import io.github.qmryqmm.hyperopen.ui.pages.ShortcutsManagementPage
+import io.github.qmryqmm.hyperopen.ui.pages.SoftGlassSettingsPage
 import io.github.qmryqmm.hyperopen.ui.pages.ShortcutsTreeState
 import io.github.qmryqmm.hyperopen.ui.pages.ShortcutMultiSelectBottomBar
 import io.github.qmryqmm.hyperopen.ui.pages.rememberShortcutsTreeState
@@ -198,6 +200,13 @@ fun HyperOpenApp(
     var glyphPadColor by remember { mutableIntStateOf(initialConfig.glyphPadColor) }
     var glyphPadMode by remember { mutableIntStateOf(initialConfig.glyphPadMode) }
     var iconGlowEffect by remember { mutableStateOf(initialConfig.iconGlowEffect) }
+    var glassPreset by remember { mutableIntStateOf(initialConfig.glassPreset) }
+    var glassRefractIor by remember { mutableFloatStateOf(initialConfig.glassRefractIor) }
+    var glassThickness by remember { mutableFloatStateOf(initialConfig.glassThickness) }
+    var glassSpecular by remember { mutableFloatStateOf(initialConfig.glassSpecular) }
+    var glassMatteAlpha by remember { mutableFloatStateOf(initialConfig.glassMatteAlpha) }
+    var glassBorderLight by remember { mutableFloatStateOf(initialConfig.glassBorderLight) }
+    var glassUseNative by remember { mutableStateOf(initialConfig.glassUseNative) }
     var themeMode by remember { mutableStateOf(initialConfig.themeMode) }
     var monetColors by remember { mutableStateOf(initialConfig.monetColors) }
     var barBlur by remember { mutableStateOf(initialConfig.barBlur) }
@@ -301,9 +310,10 @@ fun HyperOpenApp(
     val shortcutsListState = rememberLazyListState()
     val settingsListState = rememberLazyListState()
     val themeListState = rememberLazyListState()
+    val softGlassListState = rememberLazyListState()
     val permissionListState = rememberLazyListState()
 
-    // 导航路由：0=主界面, 1=主题设置页, 2=快捷方式编辑页, 3=整体预览页, 4=权限检测页
+    // 导航路由：0=主界面, 1=主题设置页, 2=快捷方式编辑页, 3=整体预览页, 4=权限检测页, 5=柔光玻璃设置页
     var subPage by remember { mutableStateOf(0) }
     var editingItem by remember { mutableStateOf<ShortcutItem?>(null) }
     var isNewShortcut by remember { mutableStateOf(false) }
@@ -363,11 +373,8 @@ fun HyperOpenApp(
                 WindowCompat.setDecorFitsSystemWindows(window, false)
                 controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 controller.hide(WindowInsetsCompat.Type.systemBars())
-                // 与真实锁屏窗口同源：
-                // FLAG_SHOW_WALLPAPER — 让系统壁纸显示在窗口后方（被 BackgroundBlurDrawable 模糊的就是它）；
-                // FLAG_BLUR_BEHIND — 启用 BackgroundBlurDrawable / setBlurBehindRadius 的模糊能力；
-                // 透明窗口 — 让壁纸可见，同时压暗层（Compose 黑色蒙层）独立叠加
-                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
+                // 与真实锁屏窗口同源：FLAG_BLUR_BEHIND 启用 BackgroundBlurDrawable / setBlurBehindRadius；
+                // 透明窗口让壁纸 SurfaceView（窗口后方）可见。壁纸由 WallpaperSurfaceView 绘制。
                 window.addFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
                 window.setBackgroundDrawableResource(android.R.color.transparent)
             } else {
@@ -378,7 +385,6 @@ fun HyperOpenApp(
             val w = activity?.window
             if (w != null) {
                 WindowCompat.getInsetsController(w, w.decorView).show(WindowInsetsCompat.Type.systemBars())
-                w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
                 w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
             }
         }
@@ -457,6 +463,13 @@ fun HyperOpenApp(
         c.glyphPadColor = glyphPadColor
         c.glyphPadMode = glyphPadMode
         c.iconGlowEffect = iconGlowEffect
+        c.glassPreset = glassPreset
+        c.glassRefractIor = glassRefractIor
+        c.glassThickness = glassThickness
+        c.glassSpecular = glassSpecular
+        c.glassMatteAlpha = glassMatteAlpha
+        c.glassBorderLight = glassBorderLight
+        c.glassUseNative = glassUseNative
         c.themeMode = themeMode
         c.monetColors = monetColors
         c.barBlur = barBlur
@@ -554,6 +567,13 @@ fun HyperOpenApp(
         glyphPadColor = defaults.glyphPadColor
         glyphPadMode = defaults.glyphPadMode
         iconGlowEffect = defaults.iconGlowEffect
+        glassPreset = defaults.glassPreset
+        glassRefractIor = defaults.glassRefractIor
+        glassThickness = defaults.glassThickness
+        glassSpecular = defaults.glassSpecular
+        glassMatteAlpha = defaults.glassMatteAlpha
+        glassBorderLight = defaults.glassBorderLight
+        glassUseNative = defaults.glassUseNative
         themeMode = defaults.themeMode
         monetColors = defaults.monetColors
         barBlur = defaults.barBlur
@@ -608,7 +628,8 @@ fun HyperOpenApp(
 
     val currentLiveConfig = remember(
         materialStyle, bubbleDimAlpha, iconCornerRadius, iconAlpha,
-        bubblePaddingPercent, iconGlowEffect, glyphPadEnabled, glyphPadColor, glyphPadMode
+        bubblePaddingPercent, iconGlowEffect, glyphPadEnabled, glyphPadColor, glyphPadMode,
+        glassPreset, glassRefractIor, glassThickness, glassSpecular, glassMatteAlpha, glassBorderLight, glassUseNative
     ) {
         HyperOpenConfig.loadFromApp(ctx).apply {
             this.materialStyle = materialStyle
@@ -620,6 +641,13 @@ fun HyperOpenApp(
             this.glyphPadEnabled = glyphPadEnabled
             this.glyphPadColor = glyphPadColor
             this.glyphPadMode = glyphPadMode
+            this.glassPreset = glassPreset
+            this.glassRefractIor = glassRefractIor
+            this.glassThickness = glassThickness
+            this.glassSpecular = glassSpecular
+            this.glassMatteAlpha = glassMatteAlpha
+            this.glassBorderLight = glassBorderLight
+            this.glassUseNative = glassUseNative
         }
     }
 
@@ -641,6 +669,7 @@ fun HyperOpenApp(
             }
             3 -> "指纹快捷整体预览"
             4 -> "权限检测"
+            5 -> "柔光玻璃设置"
             else -> when (page) {
                 0 -> "参数配置"
                 1 -> if (shortcutsTreeState.multiSelect) "已选择 ${shortcutsTreeState.selectedCount} 项" else "快捷项目"
@@ -834,8 +863,11 @@ fun HyperOpenApp(
                         }
                         val density = androidx.compose.ui.platform.LocalDensity.current
 
+                        // 壁纸位图（供 SurfaceView 绘制到窗口后方 Surface 上）
+                        val liveWallpaperBitmap by io.github.qmryqmm.hyperopen.util.LiveWallpaperLoader.rememberLiveWallpaper(ctx)
+
                         // 全屏模糊半径：与真实侧 BlurUtils.blurRadiusOfRatio(alpha) 同构
-                        // （近似为 alpha * 250px，覆盖系统典型 MAX_BLUR_RADIUS 区间）
+                        // （近似 alpha * 250px，覆盖系统典型 MAX_BLUR_RADIUS 区间）
                         androidx.compose.runtime.LaunchedEffect(currentConfig.fullscreenBlurMaskAlpha) {
                             val w = activity?.window ?: return@LaunchedEffect
                             val lp = w.attributes
@@ -848,7 +880,18 @@ fun HyperOpenApp(
                         Box(
                             modifier = Modifier.fillMaxSize(),
                         ) {
-                            // 全屏压暗层（与真实侧 view.setBackgroundColor(black alpha) 同构，独立于模糊层；
+                            // 壁纸层：SurfaceView 的 Surface 在窗口后方，BackgroundBlurDrawable 模糊的正是它
+                            AndroidView(
+                                factory = { viewCtx ->
+                                    WallpaperSurfaceView(viewCtx) {
+                                        liveWallpaperBitmap?.asAndroidBitmap()
+                                    }
+                                },
+                                update = { it.redraw() },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+
+                            // 全屏压暗层（独立于模糊层，与真实侧 view.setBackgroundColor(black alpha) 同构；
                             // 面板隐藏态不绘制）
                             if (blurScene.panelVisible && currentConfig.fullscreenDimAlpha > 0.001f) {
                                 Box(
@@ -857,10 +900,7 @@ fun HyperOpenApp(
                                         .background(Color.Black.copy(alpha = currentConfig.fullscreenDimAlpha.coerceIn(0f, 1f)))
                                 )
                             }
-
-                            // 交互式预览与拖拽排版控件
-                            // 毛玻璃由 BackgroundBlurDrawable（setSystemBlurEnabled(true)）+
-                            // 窗口级 FLAG_SHOW_WALLPAPER / FLAG_BLUR_BEHIND 直接渲染，与真实锁屏同源
+                            // 6. 交互式预览与拖拽排版控件
                             AndroidView(
                                 modifier = Modifier.fillMaxSize(),
                                 factory = { viewCtx ->
@@ -902,6 +942,35 @@ fun HyperOpenApp(
                         PermissionCheckPage(
                             contentPadding = pagePadding,
                             lazyListState = permissionListState,
+                        )
+                    }
+                    5 -> {
+                        SoftGlassSettingsPage(
+                            contentPadding = pagePadding,
+                            lazyListState = softGlassListState,
+                            glassPreset = glassPreset,
+                            onGlassPreset = { glassPreset = it; persist() },
+                            glassRefractIor = glassRefractIor,
+                            onGlassRefractIor = { glassRefractIor = it; persist() },
+                            glassThickness = glassThickness,
+                            onGlassThickness = { glassThickness = it; persist() },
+                            glassSpecular = glassSpecular,
+                            onGlassSpecular = { glassSpecular = it; persist() },
+                            glassMatteAlpha = glassMatteAlpha,
+                            onGlassMatteAlpha = { glassMatteAlpha = it; persist() },
+                            glassBorderLight = glassBorderLight,
+                            onGlassBorderLight = { glassBorderLight = it; persist() },
+                            glassUseNative = glassUseNative,
+                            onGlassUseNative = { glassUseNative = it; persist() },
+                            onResetToDesktopPreset = {
+                                glassPreset = HyperOpenConfig.GLASS_PRESET_DESKTOP
+                                glassRefractIor = 1.0f
+                                glassThickness = 1.2f
+                                glassSpecular = 0.45f
+                                glassMatteAlpha = 0.16f
+                                glassBorderLight = 0.30f
+                                persist()
+                            },
                         )
                     }
                     else -> {
@@ -1124,6 +1193,7 @@ fun HyperOpenApp(
                                     safetyTick = safetyTick,
                                     onSafetyRefresh = { safetyTick++ },
                                     onOpenThemePage = { subPage = 1 },
+                                    onOpenSoftGlassPage = { subPage = 5 },
                                     onOpenPermissionPage = { subPage = 4 },
                                     onResetDefaults = { showResetDefaultsDialog = true },
                                     onResetShortcuts = { showResetShortcutsDialog = true },
@@ -1701,5 +1771,63 @@ private fun ShortcutEditSession(
                 }
             },
         )
+    }
+}
+
+/**
+ * 壁纸 SurfaceView：Surface 位于窗口后方（setZOrderOnTop(false) 默认行为），
+ * BackgroundBlurDrawable 模糊的「窗口后方内容」正是它——与真实锁屏壁纸被硬件模糊的机制同构。
+ */
+private class WallpaperSurfaceView(
+    context: android.content.Context,
+    private val bitmapProvider: () -> android.graphics.Bitmap?,
+) : android.view.SurfaceView(context), android.view.SurfaceHolder.Callback {
+
+    private var lastDrawn: android.graphics.Bitmap? = null
+
+    init {
+        holder.addCallback(this)
+    }
+
+    /** 仅在位图引用变化时重绘，避免每次重组都触发 lockCanvas。 */
+    fun redraw() {
+        val bmp = bitmapProvider()
+        if (bmp !== lastDrawn) {
+            lastDrawn = bmp
+            drawWallpaper(holder)
+        }
+    }
+
+    override fun surfaceCreated(holder: android.view.SurfaceHolder) {
+        drawWallpaper(holder)
+    }
+
+    override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {
+        drawWallpaper(holder)
+    }
+
+    override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {}
+
+    private fun drawWallpaper(holder: android.view.SurfaceHolder) {
+        val bmp = bitmapProvider()
+        val canvas = holder.lockCanvas() ?: return
+        try {
+            canvas.drawColor(android.graphics.Color.BLACK)
+            if (bmp != null && bmp.width > 0 && bmp.height > 0) {
+                val scale = maxOf(
+                    canvas.width.toFloat() / bmp.width,
+                    canvas.height.toFloat() / bmp.height
+                )
+                val dx = (canvas.width - bmp.width * scale) / 2f
+                val dy = (canvas.height - bmp.height * scale) / 2f
+                val matrix = android.graphics.Matrix().apply {
+                    setScale(scale, scale)
+                    postTranslate(dx, dy)
+                }
+                canvas.drawBitmap(bmp, matrix, null)
+            }
+        } finally {
+            holder.unlockCanvasAndPost(canvas)
+        }
     }
 }

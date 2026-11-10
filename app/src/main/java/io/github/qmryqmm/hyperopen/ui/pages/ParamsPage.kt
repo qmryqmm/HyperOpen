@@ -626,7 +626,7 @@ fun ParamsPage(
                     title = "材质与视觉",
                     expanded = isOpen("material"),
                     onToggle = { toggle("material") },
-                    summary = (if (materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) "液态玻璃" else "高斯模糊") +
+                    summary = (if (materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) "柔光玻璃" else "高斯模糊") +
                         " · 全屏模糊 ${(fullscreenBlurMaskAlpha * 100).toInt()}%" +
                         if (layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK) "" else (if (showRegionBg) " · 底衬开" else " · 底衬关"),
                 )
@@ -638,8 +638,8 @@ fun ParamsPage(
                         .fillMaxWidth(),
                 ) {
                     ArrowPreference(
-                        title = "液态玻璃",
-                        summary = "Liquid Glass",
+                        title = "柔光玻璃",
+                        summary = "Soft Light Glass · 系统级桌面与系统界面光学",
                         endActions = {
                             if (materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) {
                                 Text("✓", color = MiuixTheme.colorScheme.primary, fontSize = 16.sp)
