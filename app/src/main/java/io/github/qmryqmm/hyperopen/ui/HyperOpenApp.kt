@@ -191,7 +191,6 @@ fun HyperOpenApp(
     var iconSpacingOffset by remember { mutableFloatStateOf(initialConfig.iconSpacingOffset.toFloat()) }
     var bubblePaddingPercent by remember { mutableFloatStateOf(initialConfig.bubblePaddingPercent.toFloat()) }
     var bubbleBlurRadius by remember { mutableFloatStateOf(initialConfig.bubbleBlurRadius.toFloat()) }
-    var selectedIconScale by remember { mutableFloatStateOf(initialConfig.selectedIconScale) }
     var glyphPadEnabled by remember { mutableStateOf(initialConfig.glyphPadEnabled) }
     var glyphPadColor by remember { mutableIntStateOf(initialConfig.glyphPadColor) }
     var glyphPadMode by remember { mutableIntStateOf(initialConfig.glyphPadMode) }
@@ -442,7 +441,6 @@ fun HyperOpenApp(
         c.iconSpacingOffset = iconSpacingOffset.toInt()
         c.bubblePaddingPercent = bubblePaddingPercent.toInt()
         c.bubbleBlurRadius = bubbleBlurRadius.toInt()
-        c.selectedIconScale = selectedIconScale
         c.glyphPadEnabled = glyphPadEnabled
         c.glyphPadColor = glyphPadColor
         c.glyphPadMode = glyphPadMode
@@ -540,7 +538,6 @@ fun HyperOpenApp(
         iconSpacingOffset = defaults.iconSpacingOffset.toFloat()
         bubblePaddingPercent = defaults.bubblePaddingPercent.toFloat()
         bubbleBlurRadius = defaults.bubbleBlurRadius.toFloat()
-        selectedIconScale = defaults.selectedIconScale
         glyphPadEnabled = defaults.glyphPadEnabled
         glyphPadColor = defaults.glyphPadColor
         glyphPadMode = defaults.glyphPadMode
@@ -816,7 +813,6 @@ fun HyperOpenApp(
                             this.iconSpacingOffset = iconSpacingOffset.toInt()
                             this.bubblePaddingPercent = bubblePaddingPercent.toInt()
                             this.bubbleBlurRadius = bubbleBlurRadius.toInt()
-                            this.selectedIconScale = selectedIconScale
                             this.iconGlowEffect = iconGlowEffect
                             this.shortcuts = ArrayList(shortcuts)
                         }
@@ -996,7 +992,8 @@ fun HyperOpenApp(
                             }
 
                             // 5. 图标气泡留白区域的独立毛玻璃底衬 (固定 key 复用 GPU 模糊纹理，不随手指滑动重建 Shader，彻底消除轻微闪烁；且底色恒定与真实锁屏 1:1 一致)
-                            if (currentConfig.bubbleBlurRadius > 0) {
+                            // 留白 0% = 气泡整体关闭，气泡模糊跟随停用（与真实侧 getBlurRadiusPx 开关一致）
+                            if (currentConfig.bubbleBlurRadius > 0 && currentConfig.bubblePaddingPercent > 0) {
                                 val cornerPercent = currentConfig.iconCornerRadius.coerceIn(0, 50)
                                 val bubbleBlurShape = if (cornerPercent >= 50) CircleShape else RoundedCornerShape(percent = cornerPercent)
                                 blurScene.bubbles.forEach { spot ->
@@ -1210,8 +1207,6 @@ fun HyperOpenApp(
                                     onBubblePaddingPercent = { bubblePaddingPercent = it; persist() },
                                     bubbleBlurRadius = bubbleBlurRadius,
                                     onBubbleBlurRadius = { bubbleBlurRadius = it; persist() },
-                                    selectedIconScale = selectedIconScale,
-                                    onSelectedIconScale = { selectedIconScale = it; persist() },
                                     iconGlowEffect = iconGlowEffect,
                                     onIconGlowEffect = { iconGlowEffect = it; persist() },
                                 )

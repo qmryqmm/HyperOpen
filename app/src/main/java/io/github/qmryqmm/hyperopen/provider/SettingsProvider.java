@@ -211,7 +211,7 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putBoolean("default_show_hint_title", sp.getBoolean("default_show_hint_title", true));
                 bundle.putBoolean("default_show_hint_subtitle", sp.getBoolean("default_show_hint_subtitle", true));
                 bundle.putInt("folder_hover_delay_ms", sp.getInt("folder_hover_delay_ms", 250));
-                bundle.putFloat("max_scale", sp.getFloat("max_scale", 1.40f));
+                bundle.putFloat("max_scale", sp.getFloat("max_scale", 1.60f));
                 bundle.putInt("influence_radius", sp.getInt("influence_radius", 70));
                 bundle.putFloat("icon_alpha", sp.getFloat("icon_alpha", 1.0f));
                 bundle.putFloat("fisheye_zoom_alpha", sp.getFloat("fisheye_zoom_alpha", 1.0f));
@@ -245,7 +245,8 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putInt("icon_spacing_offset", sp.getInt("icon_spacing_offset", 5));
                 bundle.putInt("bubble_padding_percent", sp.getInt("bubble_padding_percent", 0));
                 bundle.putInt("bubble_blur_radius", sp.getInt("bubble_blur_radius", 25));
-                bundle.putFloat("selected_icon_scale", sp.getFloat("selected_icon_scale", 1.15f));
+                // 旧版 selected_icon_scale：仅作迁移折算用途传给 SystemUI 侧合并进 max_scale（已废弃的独立参数）
+                bundle.putFloat("selected_icon_scale", sp.getFloat("selected_icon_scale", 1.0f));
                 bundle.putInt("app_icon_crop_mode", sp.getInt("app_icon_crop_mode", HyperOpenConfig.CROP_ADAPTIVE_EXPAND));
                 bundle.putBoolean("glyph_pad_enabled", sp.getBoolean("glyph_pad_enabled", true));
                 bundle.putInt("glyph_pad_color", sp.getInt("glyph_pad_color", 0xFF2A82E4));
