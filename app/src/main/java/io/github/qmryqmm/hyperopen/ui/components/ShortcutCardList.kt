@@ -48,8 +48,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import androidx.compose.foundation.Canvas
-import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.runtime.key
+import androidx.compose.ui.viewinterop.AndroidView
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
 import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory
 import io.github.qmryqmm.hyperopen.model.ShortcutItem
@@ -57,7 +57,7 @@ import io.github.qmryqmm.hyperopen.ui.IconPainter
 import io.github.qmryqmm.hyperopen.ui.LocalHyperOpenConfig
 import io.github.qmryqmm.hyperopen.ui.MiuixIconRegistry
 import io.github.qmryqmm.hyperopen.ui.RemixIconRegistry
-import io.github.qmryqmm.hyperopen.view.IconGlyphFactory
+import io.github.qmryqmm.hyperopen.view.CircularBubbleView
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -894,24 +894,25 @@ fun ShortcutCard(
     }
 }
 
-/** 38dp 快捷方式卡片图标：与实际唤出的悬浮球气泡 (CircularBubbleView) 渲染 100% 完全一致。 */
+/** 38dp 快捷方式卡片图标：与实际唤出的悬浮球气泡 (CircularBubbleView) 同源渲染。 */
 @Composable
 fun ShortcutIconBox(item: ShortcutItem) {
     ShortcutBubbleIcon(
         item = item,
-        modifier = Modifier.size(38.dp),
+        size = 38.dp,
     )
 }
 
 /**
- * 快捷方式气泡图标：与 SystemUI / HyperOpenPreviewView (CircularBubbleView) 实际渲染完全一致。
- * 复用 HyperOSMaterialFactory.CircularBubbleDrawable 绘制真实气泡底衬（光学折射、高光、双层边框镜面光晕、压暗 dimAlpha），
- * 以及 IconGlyphFactory.resolve 统一解析裁切应用图标/自定义图片/矢量底垫。
- * 支持圆角 (iconCornerRadius)、常态透明度 (iconAlpha)、内边距 (bubblePaddingPercent) 等参数。
+ * 快捷方式气泡图标：直接复用真实 SystemUI / 交互预览同一渲染实现 [CircularBubbleView]，
+ * 不再单独编写绘制方法——底衬光学层、图标解析裁切、内边距、圆角裁剪、留白 0% 关闭气泡等
+ * 一切渲染逻辑与实机 100% 同源，任何渲染改动自动同步。
+ * 窗口级毛玻璃在应用内禁用（与交互预览一致），避免列表逐图标触发 SurfaceFlinger 全屏模糊。
  */
 @Composable
 fun ShortcutBubbleIcon(
     item: ShortcutItem,
+    size: Dp,
     modifier: Modifier = Modifier,
     config: HyperOpenConfig? = null,
     isSelected: Boolean = false,
@@ -919,55 +920,39 @@ fun ShortcutBubbleIcon(
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val liveConfig = LocalHyperOpenConfig.current
     val cfg = config ?: liveConfig ?: remember(ctx) { HyperOpenConfig.loadFromApp(ctx) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val sizePx = with(density) { size.roundToPx() }
+    val resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(ctx, cfg.materialStyle)
 
-    val activeStyle = cfg.materialStyle
-    val bubbleDimAlpha = cfg.bubbleDimAlpha
-    val cornerRadiusPercent = cfg.iconCornerRadius.coerceIn(0, 50)
-    val iconAlpha = cfg.iconAlpha.coerceIn(0f, 1f)
-    val bubblePaddingPercent = cfg.bubblePaddingPercent.coerceIn(0, 40)
-    // 留白 0% = 气泡整体关闭：底衬、模糊与压暗一并停用，仅显示图标
-    val bubbleEnabled = bubblePaddingPercent > 0
-    val glowEnabled = cfg.iconGlowEffect
-
-    val bubbleDrawable = remember(activeStyle, item.tintColor, isSelected, glowEnabled) {
-        HyperOSMaterialFactory.CircularBubbleDrawable(
-            activeStyle, item.tintColor, isSelected, glowEnabled
-        )
-    }
-    bubbleDrawable.setStyle(activeStyle)
-    bubbleDrawable.setDimAlpha(if (bubbleEnabled) bubbleDimAlpha else 0f)
-    bubbleDrawable.setCornerRadiusPercent(cornerRadiusPercent)
-    bubbleDrawable.setSelected(isSelected)
-    bubbleDrawable.setGlowEnabled(glowEnabled)
-    bubbleDrawable.setAlpha((iconAlpha * 255f).roundToInt().coerceIn(0, 255))
-
-    val iconDrawable = remember(
+    // 图标相关配置变化时整体重建视图（图标解析缓存由 IconGlyphFactory 提供）；
+    // 其余参数（模糊/压暗/留白/圆角/透明度/选中）经 update 实时热同步，与真实容器的热更新链一致
+    val viewKey = listOf(
         item.id, item.iconPackage, item.iconGlyph, item.actionType, item.actionPayload,
         item.appIconCropMode, item.glyphPadEnabled, item.glyphPadColor, item.glyphPadMode,
-        item.tintColor, cfg.appIconCropMode, cornerRadiusPercent
-    ) {
-        IconGlyphFactory.resolve(ctx, item, cfg).mutate()
-    }
+        item.tintColor, sizePx, resolvedStyle,
+        cfg.appIconCropMode, cfg.glyphPadEnabled, cfg.glyphPadColor, cfg.glyphPadMode,
+        cfg.iconGlowEffect,
+    ).joinToString("|")
 
-    Canvas(modifier = modifier) {
-        val w = size.width.toInt()
-        val h = size.height.toInt()
-        if (w <= 0 || h <= 0) return@Canvas
-        val nativeCanvas = drawContext.canvas.nativeCanvas
-
-        // 1. 绘制气泡底衬（液态玻璃/高斯模糊光学层、压暗、圆角与常态透明度）；留白 0% 气泡关闭时不绘制
-        if (bubbleEnabled) {
-            bubbleDrawable.setBounds(0, 0, w, h)
-            bubbleDrawable.draw(nativeCanvas)
-        }
-
-        // 2. 绘制前景图标（应用常态透明度与内边距缩放）
-        val padPx = (minOf(w, h) * (bubblePaddingPercent / 100f)).roundToInt()
-        val iconW = (w - 2 * padPx).coerceAtLeast(1)
-        val iconH = (h - 2 * padPx).coerceAtLeast(1)
-        iconDrawable.setBounds(padPx, padPx, padPx + iconW, padPx + iconH)
-        iconDrawable.alpha = (iconAlpha * 255f).roundToInt().coerceIn(0, 255)
-        iconDrawable.draw(nativeCanvas)
+    key(viewKey) {
+        AndroidView(
+            factory = { viewCtx ->
+                CircularBubbleView(viewCtx, item, resolvedStyle, sizePx, viewCtx.classLoader, cfg).apply {
+                    // 与交互预览一致：应用内禁用窗口级模糊
+                    setSystemBlurEnabled(false)
+                }
+            },
+            modifier = modifier.size(size),
+            update = { v ->
+                v.setMaterialStyle(resolvedStyle)
+                v.setBlurRadius(cfg.bubbleBlurRadius.toFloat())
+                v.setDimAlpha(cfg.bubbleDimAlpha)
+                v.setBubblePaddingPercent(cfg.bubblePaddingPercent)
+                v.setCornerRadiusPercent(cfg.iconCornerRadius)
+                v.setIconAlpha(cfg.iconAlpha)
+                v.setSelectedState(isSelected)
+            },
+        )
     }
 }
 

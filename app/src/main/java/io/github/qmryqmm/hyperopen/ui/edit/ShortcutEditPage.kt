@@ -535,7 +535,7 @@ fun ShortcutEditPage(
                         ) {
                             ShortcutBubbleIcon(
                                 item = previewItem,
-                                modifier = Modifier.size(64.dp),
+                                size = 64.dp,
                             )
                             EditBadge()
                         }
@@ -1181,7 +1181,7 @@ fun ShortcutEditPage(
                             ) {
                                 ShortcutBubbleIcon(
                                     item = previewItem,
-                                    modifier = Modifier.size(64.dp),
+                                    size = 64.dp,
                                 )
                             }
                         }

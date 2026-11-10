@@ -20,6 +20,7 @@ import io.github.qmryqmm.hyperopen.config.HyperOpenConfig;
 import io.github.qmryqmm.hyperopen.factory.HyperOSBlurHelper;
 import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory;
 import io.github.qmryqmm.hyperopen.model.ShortcutItem;
+import io.github.qmryqmm.hyperopen.util.BubbleBlurSpec;
 
 public class CircularBubbleView extends FrameLayout {
 
@@ -161,28 +162,19 @@ public class CircularBubbleView extends FrameLayout {
     }
 
     /**
-     * 获取内缩 3px 后的基础模糊圆半径（严格位于 2.2px 描边内侧，绝不溢出边框）
-     */
-    private float getEffectiveCircleRadiusPx() {
-        int w = getWidth() > 0 ? getWidth() : sizePx;
-        int h = getHeight() > 0 ? getHeight() : sizePx;
-        return Math.max(1f, Math.min(w, h) / 2f - 3f);
-    }
-
-    /**
-     * 计算用于 SurfaceFlinger BackgroundBlurDrawable 的圆角半径：
-     * 50% 正圆时乘 4.0f 交由 Skia 自动钳制为半宽；小于 50% 时按比例并随缩放同步。
+     * 计算用于 SurfaceFlinger BackgroundBlurDrawable 的圆角半径——
+     * 规格统一由 {@link BubbleBlurSpec#cornerRadiusPx} 提供（50% 正圆乘 4.0f 交由 Skia 钳制为半宽，
+     * 小于 50% 时按比例并随缩放同步），真实侧与预览斑点侧不得各自再抄公式。
      */
     private float getScaledBlurCornerRadiusPx() {
-        if (cornerRadiusPercent >= 50) {
-            return getEffectiveCircleRadiusPx() * 4.0f;
-        }
-        return getEffectiveCircleRadiusPx() * (cornerRadiusPercent / 50f) * Math.max(0.1f, currentScale);
+        int w = getWidth() > 0 ? getWidth() : sizePx;
+        int h = getHeight() > 0 ? getHeight() : sizePx;
+        return BubbleBlurSpec.cornerRadiusPx(Math.min(w, h), cornerRadiusPercent, currentScale);
     }
 
     private int getBlurRadiusPx() {
-        // 留白 0% = 气泡整体关闭，气泡模糊跟随停用
-        if (!systemBlurEnabled || blurRadiusDp <= 0f || paddingPercent <= 0) return 0;
+        // 留白 0% = 气泡整体关闭，气泡模糊跟随停用（开关规格统一由 BubbleBlurSpec 提供）
+        if (!systemBlurEnabled || !BubbleBlurSpec.isEnabled(blurRadiusDp, paddingPercent)) return 0;
         return Math.round(TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP, blurRadiusDp, getResources().getDisplayMetrics()
         ));
@@ -260,7 +252,7 @@ public class CircularBubbleView extends FrameLayout {
                 currentBg.invalidateSelf();
             } else {
                 LayerDrawable layer = new LayerDrawable(new Drawable[]{systemBackdropBlurDrawable, opticDrawable});
-                layer.setLayerInset(0, 3, 3, 3, 3);
+                layer.setLayerInset(0, BubbleBlurSpec.INSET_PX, BubbleBlurSpec.INSET_PX, BubbleBlurSpec.INSET_PX, BubbleBlurSpec.INSET_PX);
                 setBackground(layer);
             }
         } else {
