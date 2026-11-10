@@ -363,6 +363,13 @@ fun HyperOpenApp(
                 WindowCompat.setDecorFitsSystemWindows(window, false)
                 controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 controller.hide(WindowInsetsCompat.Type.systemBars())
+                // 与真实锁屏窗口同源：
+                // FLAG_SHOW_WALLPAPER — 让系统壁纸显示在窗口后方（被 BackgroundBlurDrawable 模糊的就是它）；
+                // FLAG_BLUR_BEHIND — 启用 BackgroundBlurDrawable / setBlurBehindRadius 的模糊能力；
+                // 透明窗口 — 让壁纸可见，同时压暗层（Compose 黑色蒙层）独立叠加
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                window.setBackgroundDrawableResource(android.R.color.transparent)
             } else {
                 controller.show(WindowInsetsCompat.Type.systemBars())
             }
@@ -371,6 +378,8 @@ fun HyperOpenApp(
             val w = activity?.window
             if (w != null) {
                 WindowCompat.getInsetsController(w, w.decorView).show(WindowInsetsCompat.Type.systemBars())
+                w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
+                w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
             }
         }
     }
@@ -823,215 +832,35 @@ fun HyperOpenApp(
                         var blurScene by remember {
                             mutableStateOf(PreviewBlurSceneState(panelVisible = false))
                         }
-                        /** 「始终显示指纹快捷方式面板」开关（预览页专用，不写入配置） */
-                        var alwaysShowPanel by remember { mutableStateOf(false) }
-
-                        val previewBackdrop = rememberLayerBackdrop {
-                            drawRect(Color(0xFF0C0E14))
-                            drawContent()
-                        }
-
-                        val bubbleBackdrop = rememberLayerBackdrop {
-                            drawRect(Color(0xFF0C0E14))
-                            drawContent()
-                        }
-
-                        fun unifiedBlurColors(alphaMultiplier: Float = 1f) = BlurColors(
-                            blendColors = listOf(
-                                BlendColorEntry(
-                                    // 底色混合统一取 HyperOSMaterialFactory.getUnifiedBlurTint 单一数据源
-                                    //（0x16/0x12 白色微光），真实窗口模糊与预览 textureBlur 不再各写一份
-                                    color = Color.White.copy(
-                                        alpha = ((HyperOSMaterialFactory.getUnifiedBlurTint(materialStyle) ushr 24) and 0xFF) / 255f
-                                            * alphaMultiplier.coerceIn(0f, 1f)
-                                    ),
-                                    mode = BlurBlendMode.SrcOver
-                                )
-                            ),
-                            saturation = if (materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) 1.75f else 1.20f
-                        )
-
-                        val constantUnifiedBlurColors = remember(materialStyle) { unifiedBlurColors(1f) }
-
-                        // 彻底实现系统桌面壁纸完全自动、实时动态拉取与变更监听
-                        val liveWallpaperBitmap by io.github.qmryqmm.hyperopen.util.LiveWallpaperLoader.rememberLiveWallpaper(ctx)
                         val density = androidx.compose.ui.platform.LocalDensity.current
+
+                        // 全屏模糊半径：与真实侧 BlurUtils.blurRadiusOfRatio(alpha) 同构
+                        // （近似为 alpha * 250px，覆盖系统典型 MAX_BLUR_RADIUS 区间）
+                        androidx.compose.runtime.LaunchedEffect(currentConfig.fullscreenBlurMaskAlpha) {
+                            val w = activity?.window ?: return@LaunchedEffect
+                            val lp = w.attributes
+                            lp.setBlurBehindRadius(
+                                (currentConfig.fullscreenBlurMaskAlpha.coerceIn(0f, 1f) * 250f).toInt()
+                            )
+                            w.attributes = lp
+                        }
 
                         Box(
                             modifier = Modifier.fillMaxSize(),
                         ) {
-                            // 1~3. 底层壁纸 + 全屏毛玻璃遮罩 + 圆形视界区域底衬（共同捕获入 bubbleBackdrop 供上层气泡与胶囊采样，与真实锁屏 SurfaceFlinger 多层叠加完全一致）
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .layerBackdrop(bubbleBackdrop)
-                            ) {
-                                // 1. 底层真实桌面壁纸层
+                            // 全屏压暗层（与真实侧 view.setBackgroundColor(black alpha) 同构，独立于模糊层；
+                            // 面板隐藏态不绘制）
+                            if (blurScene.panelVisible && currentConfig.fullscreenDimAlpha > 0.001f) {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .layerBackdrop(previewBackdrop)
-                                ) {
-                                    val currentWallpaper = liveWallpaperBitmap
-                                    if (currentWallpaper != null) {
-                                        Image(
-                                            bitmap = currentWallpaper,
-                                            contentDescription = null,
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    } else {
-                                        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                                            drawRect(Color(0xFF0D1117))
-                                            drawCircle(
-                                                brush = androidx.compose.ui.graphics.Brush.radialGradient(
-                                                    colors = listOf(Color(0xFF2A82E4).copy(alpha = 0.45f), Color.Transparent),
-                                                    center = androidx.compose.ui.geometry.Offset(size.width * 0.22f, size.height * 0.38f),
-                                                    radius = size.width * 0.65f
-                                                )
-                                            )
-                                            drawCircle(
-                                                brush = androidx.compose.ui.graphics.Brush.radialGradient(
-                                                    colors = listOf(Color(0xFF7928CA).copy(alpha = 0.40f), Color.Transparent),
-                                                    center = androidx.compose.ui.geometry.Offset(size.width * 0.78f, size.height * 0.68f),
-                                                    radius = size.width * 0.70f
-                                                )
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // 2. 全屏毛玻璃遮罩层与独立黑色压暗层 (与全屏遮罩/压暗滑块实时联动，与真实锁屏 GxzwWindowFrameLayout 1:1 对齐)
-                                // 面板隐藏态（按住指纹按钮之前）不绘制任何遮罩，只露出壁纸 + 指纹按钮
-                                if (blurScene.panelVisible && currentConfig.fullscreenBlurMaskAlpha > 0.001f) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .textureBlur(
-                                                backdrop = previewBackdrop,
-                                                shape = RectangleShape,
-                                                blurRadius = (currentConfig.fullscreenBlurMaskAlpha * 40f).coerceAtLeast(1f),
-                                                colors = BlurColors(
-                                                    blendColors = listOf(
-                                                        BlendColorEntry(
-                                                            color = Color.Black.copy(alpha = currentConfig.fullscreenDimAlpha.coerceIn(0f, 1f)),
-                                                            mode = BlurBlendMode.SrcOver
-                                                        )
-                                                    )
-                                                )
-                                            )
-                                    )
-                                } else if (blurScene.panelVisible && currentConfig.fullscreenDimAlpha > 0.001f) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(Color.Black.copy(alpha = currentConfig.fullscreenDimAlpha.coerceIn(0f, 1f)))
-                                    )
-                                }
-
-                                // 3. 圆形视界区域的统一毛玻璃底衬 (与真实锁屏 CircularRegionBackdropView 及气泡底衬完全一致)
-                                if (blurScene.panelVisible && currentConfig.showRegionBg && currentConfig.regionBlurRadius > 0) {
-                                    val screenH = ctx.resources.displayMetrics.heightPixels
-                                    val screenW = ctx.resources.displayMetrics.widthPixels
-                                    val fallbackCenterX = screenW / 2.0f
-                                    val fallbackCenterY = screenH * 0.795f - with(density) { currentConfig.offsetY.dp.toPx() }
-                                    val fallbackDiameterPx = with(density) { currentConfig.regionDiameter.dp.toPx() }
-
-                                    val centerX = if (blurScene.regionDiameterPx > 0f) blurScene.regionCenterX else fallbackCenterX
-                                    val centerY = if (blurScene.regionDiameterPx > 0f) blurScene.regionCenterY else fallbackCenterY
-                                    val diameterPx = if (blurScene.regionDiameterPx > 0f) blurScene.regionDiameterPx else fallbackDiameterPx
-                                    val radiusPx = diameterPx / 2f
-                                    val diameterDp = with(density) { diameterPx.toDp() }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .offset(
-                                                x = with(density) { (centerX - radiusPx).toDp() },
-                                                y = with(density) { (centerY - radiusPx).toDp() }
-                                            )
-                                            .size(diameterDp)
-                                            .textureBlur(
-                                                backdrop = previewBackdrop,
-                                                shape = CircleShape,
-                                                blurRadius = currentConfig.regionBlurRadius.toFloat(),
-                                                colors = constantUnifiedBlurColors
-                                            )
-                                    )
-                                }
-                            }
-
-                            // 4. 顶部提示胶囊与左上角返回按钮的毛玻璃底衬
-                            if (blurScene.panelVisible && currentConfig.showHeaderPill && currentConfig.showHeaderPillBg && currentConfig.headerBlurRadius > 0 && blurScene.headerWidthPx > 0f && blurScene.headerHeightPx > 0f) {
-                                // 与真实锁屏 createCompositeHeaderPillDrawable 的 layerInset(2px) 对齐：模糊层四周内缩 2px
-                                val headerInsetPx = 2f
-                                Box(
-                                    modifier = Modifier
-                                        .offset(
-                                            x = with(density) { (blurScene.headerLeftPx + headerInsetPx).toDp() },
-                                            y = with(density) { (blurScene.headerTopPx + headerInsetPx).toDp() }
-                                        )
-                                        .size(
-                                            width = with(density) { (blurScene.headerWidthPx - headerInsetPx * 2f).coerceAtLeast(1f).toDp() },
-                                            height = with(density) { (blurScene.headerHeightPx - headerInsetPx * 2f).coerceAtLeast(1f).toDp() }
-                                        )
-                                        .textureBlur(
-                                            backdrop = bubbleBackdrop,
-                                            shape = RoundedCornerShape(percent = 50),
-                                            blurRadius = currentConfig.headerBlurRadius.toFloat(),
-                                            colors = constantUnifiedBlurColors
-                                        )
+                                        .background(Color.Black.copy(alpha = currentConfig.fullscreenDimAlpha.coerceIn(0f, 1f)))
                                 )
                             }
 
-                            if (blurScene.panelVisible && currentConfig.regionBlurRadius > 0 && blurScene.backBtnSizePx > 0f) {
-                                val backSizeDp = with(density) { blurScene.backBtnSizePx.toDp() }
-                                Box(
-                                    modifier = Modifier
-                                        .offset(
-                                            x = with(density) { blurScene.backBtnLeftPx.toDp() },
-                                            y = with(density) { blurScene.backBtnTopPx.toDp() }
-                                        )
-                                        .size(backSizeDp)
-                                        .textureBlur(
-                                            backdrop = bubbleBackdrop,
-                                            shape = CircleShape,
-                                            blurRadius = currentConfig.regionBlurRadius.toFloat(),
-                                            colors = constantUnifiedBlurColors
-                                        )
-                                )
-                            }
-
-                            // 5. 图标气泡留白区域的独立毛玻璃底衬 (固定 key 复用 GPU 模糊纹理，不随手指滑动重建 Shader，彻底消除轻微闪烁；且底色恒定与真实锁屏 1:1 一致)
-                            // 模糊开关规格统一由 BubbleBlurSpec 提供（留白 0% = 气泡整体关闭，模糊跟随停用）
-                            if (blurScene.panelVisible && BubbleBlurSpec.isEnabled(currentConfig.bubbleBlurRadius.toFloat(), currentConfig.bubblePaddingPercent)) {
-                                val cornerPercent = currentConfig.iconCornerRadius.coerceIn(0, 50)
-                                val bubbleBlurShape = if (cornerPercent >= 50) CircleShape else RoundedCornerShape(percent = cornerPercent)
-                                blurScene.bubbles.forEach { spot ->
-                                    androidx.compose.runtime.key(spot.id) {
-                                        if (spot.diameterPx > 2f && spot.alpha > 0.01f) {
-                                            val bubbleRadiusPx = spot.diameterPx / 2f
-                                            val bubbleDiameterDp = with(density) { spot.diameterPx.toDp() }
-                                            Box(
-                                                modifier = Modifier
-                                                    .offset(
-                                                        x = with(density) { (spot.centerX - bubbleRadiusPx).toDp() },
-                                                        y = with(density) { (spot.centerY - bubbleRadiusPx).toDp() }
-                                                    )
-                                                    .size(bubbleDiameterDp)
-                                                    .graphicsLayer { alpha = spot.alpha.coerceIn(0f, 1f) }
-                                                    .textureBlur(
-                                                        backdrop = bubbleBackdrop,
-                                                        shape = bubbleBlurShape,
-                                                        blurRadius = currentConfig.bubbleBlurRadius.toFloat(),
-                                                        colors = constantUnifiedBlurColors
-                                                    )
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 6. 交互式预览与拖拽排版控件
+                            // 交互式预览与拖拽排版控件
+                            // 毛玻璃由 BackgroundBlurDrawable（setSystemBlurEnabled(true)）+
+                            // 窗口级 FLAG_SHOW_WALLPAPER / FLAG_BLUR_BEHIND 直接渲染，与真实锁屏同源
                             AndroidView(
                                 modifier = Modifier.fillMaxSize(),
                                 factory = { viewCtx ->
@@ -1059,41 +888,12 @@ fun HyperOpenApp(
                                         onBlurSceneChanged = { scene ->
                                             blurScene = scene
                                         },
-                                        alwaysShowPanel = alwaysShowPanel,
                                     ).also { previewViewRef = it }
                                 },
                                 update = { pv ->
-                                    pv.setAlwaysShowPanel(alwaysShowPanel)
                                     pv.updateConfig(currentConfig)
                                 },
                             )
-
-                            // 「始终显示指纹快捷方式面板」开关：开启后面板常驻，
-                            // 无需按住指纹按钮，可直接长按进入排版模式 / 滑动预览图标效果
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(top = 96.dp, start = 18.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(percent = 50))
-                                        .background(Color.Black.copy(alpha = 0.35f))
-                                        .padding(horizontal = 14.dp, vertical = 6.dp)
-                                ) {
-                                    Text(
-                                        text = "始终显示面板",
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Switch(
-                                        checked = alwaysShowPanel,
-                                        onCheckedChange = { alwaysShowPanel = it },
-                                    )
-                                }
-                            }
                         }
                         }
                         previewContent()

@@ -19,6 +19,13 @@ public final class BubbleBlurSpec {
     /** 气泡毛玻璃贴片内缩像素：严格位于描边内侧，绝不溢出边框 */
     public static final int INSET_PX = 3;
 
+    /**
+     * FOD 指纹中心在「真实物理屏幕高度」上的兜底比例（0.795）。
+     * 预览侧 calculateFodCoordinates 与 Compose 层圆形底衬兜底共用此值，
+     * 保证两处兜底公式不漂移。
+     */
+    public static final float FOD_CENTER_Y_RATIO = 0.795f;
+
     private BubbleBlurSpec() {
         // 纯静态工具类
     }
