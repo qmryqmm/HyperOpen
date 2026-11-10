@@ -25,6 +25,7 @@ import io.github.qmryqmm.hyperopen.layout.RingSectorPacking
 import io.github.qmryqmm.hyperopen.layout.StockFanPacking
 import io.github.qmryqmm.hyperopen.model.ShortcutItem
 import io.github.qmryqmm.hyperopen.util.BubbleBlurSpec
+import io.github.qmryqmm.hyperopen.util.BubblePanelAnimator
 import io.github.qmryqmm.hyperopen.util.FisheyeScale
 import io.github.qmryqmm.hyperopen.view.CircularBubbleView
 import io.github.qmryqmm.hyperopen.view.CircularRegionBackdropView
@@ -61,6 +62,8 @@ data class PreviewBlurSceneState(
     val backBtnTopPx: Float = 0f,
     val backBtnSizePx: Float = 0f,
     val bubbles: List<BubbleBlurSpot> = emptyList(),
+    /** 面板是否处于展开可见态：隐藏时 Compose 层的全屏/圆形/气泡毛玻璃一并关闭 */
+    val panelVisible: Boolean = true,
 )
 
 /**
@@ -77,6 +80,8 @@ class HyperOpenPreviewView(
     private val onBackClick: () -> Unit,
     private val onOrderChanged: (List<ShortcutItem>) -> Unit,
     private val onBlurSceneChanged: ((PreviewBlurSceneState) -> Unit)? = null,
+    /** 「始终显示面板」开关：true 时面板常驻，无需按住指纹按钮，可直接长按排版 / 滑动预览 */
+    private var alwaysShowPanel: Boolean = false,
 ) : FrameLayout(context) {
 
     private var resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(context, config.materialStyle)
@@ -102,6 +107,22 @@ class HyperOpenPreviewView(
     private var lastRegionCenterX = 0f
     private var lastRegionCenterY = 0f
     private var lastRegionDiameterPx = 0f
+
+    // ── 面板显隐状态机（模拟指纹解锁后按住传感器 → 延迟展开 → 松手退场） ──
+    /** 当前面板是否处于展开可见态 */
+    private var panelVisible: Boolean = false
+    /** 手指是否正按在「指纹按钮」上 */
+    private var fingerprintHolding: Boolean = false
+    /** 按住后等待 showDelayMs 再展开的任务 */
+    private val expandRunnable = Runnable {
+        if (fingerprintHolding && !alwaysShowPanel && !panelVisible) {
+            showPanel(animated = true)
+        }
+    }
+    /** 指纹按钮（位于 FOD 指纹中心，隐藏态时可见） */
+    private var fingerprintButton: View? = null
+    /** 退场动画期间的标记，避免重复触发 */
+    private var isDismissing: Boolean = false
 
     private var currentSelectedBubble: CircularBubbleView? = null
     private var pendingFolderBubble: CircularBubbleView? = null
@@ -231,11 +252,15 @@ class HyperOpenPreviewView(
         // 4.1 右上角吸附开关（仅排版模式可见）
         buildSnapToggleButton()
 
+        // 4.2 指纹按钮：位于 FOD 指纹中心，按住 showDelayMs 后展开面板，松手播放退场动画
+        buildFingerprintButton()
+
         // 5. 在首次测量前提前建立蜂窝气泡视图树
         setupLayout()
 
         // 6. 全屏虚线层插入后，把顶部提示重新提到最上层，避免虚线穿过提示胶囊
         topHeaderContainer.bringToFront()
+        fingerprintButton?.bringToFront()
     }
 
     private var floatingBackButton: FrameLayout? = null
@@ -323,6 +348,187 @@ class HyperOpenPreviewView(
         addView(btn, lp)
         snapToggleButton = btn
     }
+
+    /**
+     * 指纹传感器按钮：面板隐藏态时显示在 FOD 指纹中心。
+     * - 按下：启动 showDelayMs 等待（与真实「解锁后按住传感器多久进入面板」同源）；
+     * - 等待结束：播放与真实 SystemUI 完全同源的入场展开动画；
+     * - 松手：播放与真实 SystemUI 完全同源的退场收拢动画，播完回到隐藏态。
+     * 始终显示模式下按钮隐藏、面板常驻。
+     */
+    private fun buildFingerprintButton() {
+        val size = dpToPx(72f).toInt()
+        val btn = FrameLayout(context).apply {
+            background = HyperOSMaterialFactory.createCircularBubbleDrawable(
+                resolvedStyle, 0xFFFFFFFF.toInt(), false, true
+            )
+            isClickable = true
+            isFocusable = true
+            alpha = 0.92f
+        }
+        val iconView = android.widget.ImageView(context).apply {
+            setImageDrawable(
+                io.github.qmryqmm.hyperopen.view.IconGlyphFactory.createGlyph("lock", 0xFFFFFFFF.toInt())
+            )
+            val p = dpToPx(16f).toInt()
+            setPadding(p, p, p, p)
+        }
+        btn.addView(iconView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+
+        // 精确的 FOD 位置需等首次测量后由 calculateFodCoordinates 写入；此处先给屏幕底部兜底
+        val lp = LayoutParams(size, size).apply {
+            leftMargin = (resources.displayMetrics.widthPixels / 2f - size / 2f).toInt()
+            topMargin = (resources.displayMetrics.heightPixels * 0.795f - size / 2f).toInt()
+        }
+        addView(btn, lp)
+        fingerprintButton = btn
+
+        btn.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (!alwaysShowPanel && !isEditMode) {
+                        fingerprintHolding = true
+                        removeCallbacks(expandRunnable)
+                        // showDelayMs == 500 为系统默认：真实侧该值不干预原生 500ms 延迟，
+                        // 预览侧直接用配置值（0 = 立即），保证「能感觉」的等待时长对齐
+                        val delay = Math.max(0, config.showDelayMs).toLong()
+                        postDelayed(expandRunnable, delay)
+                        triggerHaptic()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (fingerprintHolding) {
+                        fingerprintHolding = false
+                        removeCallbacks(expandRunnable)
+                        if (panelVisible && !alwaysShowPanel) {
+                            hidePanel(animated = true)
+                        }
+                    }
+                    true
+                }
+                else -> true
+            }
+        }
+    }
+
+    /** 首次测量 / FOD 坐标变化时把指纹按钮摆到与真实一致的指纹中心。 */
+    private fun repositionFingerprintButton() {
+        val btn = fingerprintButton ?: return
+        val size = (btn.layoutParams as? LayoutParams)?.width ?: dpToPx(72f).toInt()
+        val lp = btn.layoutParams as LayoutParams
+        lp.leftMargin = (lastFodX - size / 2f).toInt()
+        lp.topMargin = (lastFodY - size / 2f).toInt()
+        btn.layoutParams = lp
+    }
+
+    /** 展开面板：播放与真实同源的入场动画，并通知 Compose 层恢复毛玻璃。 */
+    private fun showPanel(animated: Boolean) {
+        isDismissing = false
+        panelVisible = true
+        fingerprintButton?.visibility = View.GONE
+        setPanelChromeVisible(true)
+        if (animated) {
+            BubblePanelAnimator.playExpand(bubbleViews, lastFodX, lastFodY, config)
+            // 动画期间逐帧同步模糊斑点（缩放/位移/透明度）
+            val dur = Math.max(0, config.animDurationMs).toLong() + 120L
+            post(object : Runnable {
+                var elapsed = 0L
+                override fun run() {
+                    if (!panelVisible) return
+                    notifyBlurSceneChanged()
+                    if (elapsed < dur) {
+                        elapsed += 16L
+                        postDelayed(this, 16L)
+                    }
+                }
+            })
+        } else {
+            BubblePanelAnimator.applyShownState(bubbleViews)
+        }
+        notifyBlurSceneChanged()
+    }
+
+    /** 收起面板：播放与真实同源的退场动画，播完回到隐藏态并重新显示指纹按钮。 */
+    private fun hidePanel(animated: Boolean) {
+        if (isDismissing) return
+        // 排版模式下先退出，避免退场动画与拖拽状态冲突
+        if (isEditMode) exitEditMode()
+        resetHoverSelection()
+        dismissFolderSubBubbles()
+        if (animated && config.dismissAnimEnabled) {
+            isDismissing = true
+            BubblePanelAnimator.playDismiss(
+                bubbleViews, currentSelectedBubble, lastFodX, lastFodY, config
+            ) {
+                isDismissing = false
+                panelVisible = false
+                fingerprintButton?.visibility = View.VISIBLE
+                setPanelChromeVisible(false)
+                BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
+                notifyBlurSceneChanged()
+            }
+            val dur = 200L
+            post(object : Runnable {
+                var elapsed = 0L
+                override fun run() {
+                    if (!isDismissing) return
+                    notifyBlurSceneChanged()
+                    if (elapsed < dur) {
+                        elapsed += 16L
+                        postDelayed(this, 16L)
+                    }
+                }
+            })
+        } else {
+            panelVisible = false
+            fingerprintButton?.visibility = View.VISIBLE
+            setPanelChromeVisible(false)
+            BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
+            notifyBlurSceneChanged()
+        }
+    }
+
+    /** 隐藏态下收敛顶部提示 / 圆形底衬 / 扇区线，只保留指纹按钮与壁纸。 */
+    private fun setPanelChromeVisible(visible: Boolean) {
+        if (::topHeaderContainer.isInitialized) {
+            topHeaderContainer.visibility = if (visible) View.VISIBLE else View.GONE
+        }
+        if (::regionBackdrop.isInitialized) {
+            regionBackdrop.visibility = if (visible && config.showRegionBg) View.VISIBLE else View.GONE
+        }
+        if (::sectorOverlay.isInitialized) {
+            sectorOverlay.visibility = if (visible) View.VISIBLE else View.GONE
+        }
+        snapToggleButton?.let { if (!visible) it.visibility = View.GONE }
+    }
+
+    /** 由外部「始终显示面板」开关驱动。 */
+    fun setAlwaysShowPanel(enabled: Boolean) {
+        // 不因值相同而早退：AndroidView 首次 update 可能在 initViews 之后才执行，
+        // 需要保证构造时 alwaysShowPanel=true 的初始态也被正确应用
+        val changed = alwaysShowPanel != enabled
+        alwaysShowPanel = enabled
+        if (!changed && panelVisible == enabled) return
+        removeCallbacks(expandRunnable)
+        fingerprintHolding = false
+        if (enabled) {
+            // 常驻：直接显示终态，可继续长按排版 / 滑动预览
+            showPanel(animated = false)
+            fingerprintButton?.visibility = View.GONE
+        } else {
+            // 回到按住触发：收起面板，露出指纹按钮
+            panelVisible = false
+            isDismissing = false
+            fingerprintButton?.visibility = View.VISIBLE
+            setPanelChromeVisible(false)
+            BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
+            notifyBlurSceneChanged()
+        }
+    }
+
+    /** 当前面板是否可见（供 Compose 层读取，决定毛玻璃层是否绘制）。 */
+    fun isPanelVisible(): Boolean = panelVisible
 
     /**
      * 将所有气泡（含被自由摆放的）归位到各自蜂窝槽位
@@ -513,6 +719,8 @@ class HyperOpenPreviewView(
 
     override fun onDetachedFromWindow() {
         removeCallbacks(longPressRunnable)
+        removeCallbacks(expandRunnable)
+        fingerprintHolding = false
         // 注意：detach 时不再自动提交排版（旧实现裸提交未结算的动画中间值，导致返回键退出后图标错位）；
         // 是否保存由 MainActivity 的返回确认弹窗决定：commitLayoutChanges() / discardLayoutChanges()
         super.onDetachedFromWindow()
@@ -888,6 +1096,21 @@ class HyperOpenPreviewView(
                 it.id to floatArrayOf(it.customOffsetX, it.customOffsetY)
             }
         }
+
+        // 气泡树重建后按「当前显隐状态」复位，而不是一律回到隐藏态：
+        // 参数热更新（updateConfig → needRebuild → setupLayout）可能发生在面板已展开的会话中，
+        // 若强制隐藏会导致用户正看着的面板突然消失。
+        repositionFingerprintButton()
+        if (panelVisible) {
+            isDismissing = false
+            fingerprintButton?.visibility = View.GONE
+            setPanelChromeVisible(true)
+            BubblePanelAnimator.applyShownState(bubbleViews)
+        } else {
+            fingerprintButton?.visibility = if (alwaysShowPanel) View.GONE else View.VISIBLE
+            setPanelChromeVisible(false)
+            BubblePanelAnimator.applyHiddenState(bubbleViews, fodX, fodY)
+        }
         notifyBlurSceneChanged()
         post { notifyBlurSceneChanged() }
     }
@@ -918,11 +1141,37 @@ class HyperOpenPreviewView(
                 }
             }
         }
+        // 指纹按钮（面板隐藏态可见）：放行触摸，交给它自己的 OnTouchListener 处理按住/松手
+        fingerprintButton?.let { btn ->
+            if (btn.visibility == View.VISIBLE) {
+                val slop = dpToPx(12f)
+                if (ev.x >= btn.left - slop && ev.x <= btn.right + slop &&
+                    ev.y >= btn.top - slop && ev.y <= btn.bottom + slop) {
+                    return false
+                }
+            }
+        }
+        // 面板隐藏态：除上述按钮外一律不拦截，避免手指误触到隐藏的气泡
+        if (!panelVisible) return false
         // 其余区域拦截触摸事件以便处理全局滑动动力学与拖拽
         return true
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // 指纹按钮在展开后被隐藏（GONE），后续 ACTION_UP 会回落到父 View；
+        // 这里兜底处理「按住 → 松手」的退场，避免按钮收不到 UP 导致面板卡在展开态
+        if (fingerprintHolding &&
+            (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL)
+        ) {
+            fingerprintHolding = false
+            removeCallbacks(expandRunnable)
+            if (panelVisible && !alwaysShowPanel) {
+                hidePanel(animated = true)
+            }
+            return true
+        }
+        // 面板隐藏态（按住触发模式下未展开）：除指纹按钮外不消费任何触摸
+        if (!panelVisible) return false
         val x = event.x
         val y = event.y
 
@@ -1749,6 +1998,7 @@ class HyperOpenPreviewView(
                 backBtnTopPx = dpToPx(46f),
                 backBtnSizePx = (dpToPx(40f) - 6f).coerceAtLeast(1f),
                 bubbles = spots,
+                panelVisible = panelVisible,
             )
         )
     }
