@@ -177,6 +177,7 @@ class HyperOpenPreviewView(
 
     init {
         snapEnabled = loadSnapEnabled()
+        alwaysShowPanel = loadAlwaysShowPanel()
         initVibrator()
         initViews()
     }
@@ -195,6 +196,25 @@ class HyperOpenPreviewView(
             context.getSharedPreferences("hyperopen_ui_state", Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean("snap_enabled", snapEnabled)
+                .apply()
+        } catch (_: Throwable) {}
+    }
+
+    /** 「面板常驻」开关跨会话记忆（与 snap_enabled 同一 SharedPreferences） */
+    private fun loadAlwaysShowPanel(): Boolean {
+        return try {
+            context.getSharedPreferences("hyperopen_ui_state", Context.MODE_PRIVATE)
+                .getBoolean("always_show_panel", false)
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun persistAlwaysShowPanel() {
+        try {
+            context.getSharedPreferences("hyperopen_ui_state", Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("always_show_panel", alwaysShowPanel)
                 .apply()
         } catch (_: Throwable) {}
     }
@@ -587,6 +607,7 @@ class HyperOpenPreviewView(
             it.text = alwaysShowToggleText()
             if (!changed) return@let
         }
+        persistAlwaysShowPanel()
         if (!changed && panelVisible == enabled) return
         removeCallbacks(expandRunnable)
         fingerprintHolding = false
@@ -1199,7 +1220,8 @@ class HyperOpenPreviewView(
         // 参数热更新（updateConfig → needRebuild → setupLayout）可能发生在面板已展开的会话中，
         // 若强制隐藏会导致用户正看着的面板突然消失。
         repositionFingerprintButton()
-        if (panelVisible) {
+        if (panelVisible || alwaysShowPanel) {
+            panelVisible = true
             isDismissing = false
             setPanelChromeVisible(true)
             BubblePanelAnimator.applyShownState(bubbleViews)
@@ -1907,12 +1929,34 @@ class HyperOpenPreviewView(
         val children = folderBubble.item?.parseFolderChildren() ?: return
         if (children.isEmpty()) return
 
+        // 先把文件夹图标完全放大到鱼眼峰值（maxScale），放大动画播完后再展开子项：
+        // 避免「边放大边展开」导致子项起点位置与文件夹最终位置错位、观感突兀
+        folderBubble.animate().cancel()
+        folderBubble.animate()
+            .scaleX(config.maxScale)
+            .scaleY(config.maxScale)
+            .setDuration(120)
+            .setInterpolator(android.view.animation.DecelerateInterpolator())
+            .withEndAction {
+                // 松手 / 状态被复位后不再展开（防竞态：放大动画期间用户抬手）
+                if (!isTouching || activeFolderBubble != null) return@withEndAction
+                // 同步 fisheyeScale 字段，保证后续 applyScale 判定基准正确
+                folderBubble.applyScale(config.maxScale)
+                performFolderExpansion(folderBubble, children)
+            }
+            .start()
+    }
+
+    /** 文件夹图标完全放大后的实际展开：其余普通图标恢复原大小（保持变暗），子项从文件夹中心扇形展开 */
+    private fun performFolderExpansion(folderBubble: CircularBubbleView, children: List<ShortcutItem>) {
         dismissFolderSubBubbles()
         activeFolderBubble = folderBubble
         triggerSlideHaptic()
 
         for (b in bubbleViews) {
             if (b != folderBubble) {
+                // 其余普通图标：恢复原本大小（鱼眼放大收回 1.0），仅保留变暗弱化
+                b.applyScale(1.0f)
                 b.setIconAlpha(0.25f)
             }
         }
@@ -2037,6 +2081,9 @@ class HyperOpenPreviewView(
         activeFolderBubble = null
 
         for (b in bubbleViews) {
+            // 收起时一级气泡（含文件夹图标）恢复原大小与原透明度
+            b.animate().cancel()
+            b.applyScale(1.0f)
             b.setIconAlpha(config.iconAlpha)
         }
         notifyBlurSceneChanged()
