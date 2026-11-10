@@ -1032,13 +1032,34 @@ public class CustomHyperOpenContainer extends FrameLayout {
         List<ShortcutItem> children = folderBubble.item.parseFolderChildren();
         if (children.isEmpty()) return;
 
+        // 先把文件夹图标完全放大到鱼眼峰值（maxScale），放大动画播完后再展开子项：
+        // 避免「边放大边展开」导致子项起点位置与文件夹最终位置错位、观感突兀
+        folderBubble.animate().cancel();
+        folderBubble.animate()
+            .scaleX(config != null ? config.maxScale : 1.5f)
+            .scaleY(config != null ? config.maxScale : 1.5f)
+            .setDuration(120)
+            .setInterpolator(new android.view.animation.DecelerateInterpolator())
+            .withEndAction(() -> {
+                // 松手 / 选中已复位后不再展开（防竞态：放大动画期间用户抬手）
+                if (currentSelectedBubble != folderBubble || activeFolderBubble != null) return;
+                // 同步 fisheyeScale 字段，保证后续 applyScale 判定基准正确
+                folderBubble.applyScale(config != null ? config.maxScale : 1.5f);
+                performFolderExpansion(folderBubble, children);
+            })
+            .start();
+    }
+
+    /** 文件夹图标完全放大后的实际展开：其余普通图标恢复原大小（保持变暗），子项从文件夹中心扇形展开 */
+    private void performFolderExpansion(CircularBubbleView folderBubble, List<ShortcutItem> children) {
         dismissFolderSubBubbles();
         activeFolderBubble = folderBubble;
         triggerSlideHaptic();
 
-        // 其余一级气泡降低透明度
+        // 其余一级气泡：恢复原本大小（鱼眼放大收回 1.0），仅保留变暗弱化
         for (CircularBubbleView b : bubbles) {
             if (b != folderBubble) {
+                b.applyScale(1.0f);
                 b.setIconAlpha(0.25f);
             }
         }
@@ -1161,8 +1182,10 @@ public class CustomHyperOpenContainer extends FrameLayout {
         currentSelectedSubBubble = null;
         activeFolderBubble = null;
 
-        // 恢复一级气泡透明度
+        // 恢复一级气泡大小与透明度（含文件夹图标，取消可能仍在进行的放大动画）
         for (CircularBubbleView b : bubbles) {
+            b.animate().cancel();
+            b.applyScale(1.0f);
             b.setIconAlpha(config != null ? config.iconAlpha : 1.0f);
         }
     }
