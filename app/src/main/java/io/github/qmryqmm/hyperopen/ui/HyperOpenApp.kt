@@ -70,6 +70,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import io.github.qmryqmm.hyperopen.config.ConfigBackup
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
+import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory
 import io.github.qmryqmm.hyperopen.layout.LayoutCapacity
 import io.github.qmryqmm.hyperopen.model.ShortcutItem
 import io.github.qmryqmm.hyperopen.safety.SafetyStore
@@ -84,6 +85,7 @@ import io.github.qmryqmm.hyperopen.ui.pages.ShortcutsTreeState
 import io.github.qmryqmm.hyperopen.ui.pages.ShortcutMultiSelectBottomBar
 import io.github.qmryqmm.hyperopen.ui.pages.rememberShortcutsTreeState
 import io.github.qmryqmm.hyperopen.ui.pages.ThemeSettingsPage
+import io.github.qmryqmm.hyperopen.util.BubbleBlurSpec
 import io.github.qmryqmm.hyperopen.util.LiveWallpaperLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -832,10 +834,12 @@ fun HyperOpenApp(
                         fun unifiedBlurColors(alphaMultiplier: Float = 1f) = BlurColors(
                             blendColors = listOf(
                                 BlendColorEntry(
-                                    color = if (materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS)
-                                        Color.White.copy(alpha = (0x16 / 255f) * alphaMultiplier.coerceIn(0f, 1f))
-                                    else
-                                        Color.White.copy(alpha = (0x12 / 255f) * alphaMultiplier.coerceIn(0f, 1f)),
+                                    // 底色混合统一取 HyperOSMaterialFactory.getUnifiedBlurTint 单一数据源
+                                    //（0x16/0x12 白色微光），真实窗口模糊与预览 textureBlur 不再各写一份
+                                    color = Color.White.copy(
+                                        alpha = ((HyperOSMaterialFactory.getUnifiedBlurTint(materialStyle) ushr 24) and 0xFF) / 255f
+                                            * alphaMultiplier.coerceIn(0f, 1f)
+                                    ),
                                     mode = BlurBlendMode.SrcOver
                                 )
                             ),
@@ -992,8 +996,8 @@ fun HyperOpenApp(
                             }
 
                             // 5. 图标气泡留白区域的独立毛玻璃底衬 (固定 key 复用 GPU 模糊纹理，不随手指滑动重建 Shader，彻底消除轻微闪烁；且底色恒定与真实锁屏 1:1 一致)
-                            // 留白 0% = 气泡整体关闭，气泡模糊跟随停用（与真实侧 getBlurRadiusPx 开关一致）
-                            if (currentConfig.bubbleBlurRadius > 0 && currentConfig.bubblePaddingPercent > 0) {
+                            // 模糊开关规格统一由 BubbleBlurSpec 提供（留白 0% = 气泡整体关闭，模糊跟随停用）
+                            if (BubbleBlurSpec.isEnabled(currentConfig.bubbleBlurRadius.toFloat(), currentConfig.bubblePaddingPercent)) {
                                 val cornerPercent = currentConfig.iconCornerRadius.coerceIn(0, 50)
                                 val bubbleBlurShape = if (cornerPercent >= 50) CircleShape else RoundedCornerShape(percent = cornerPercent)
                                 blurScene.bubbles.forEach { spot ->

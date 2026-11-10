@@ -24,6 +24,7 @@ import io.github.qmryqmm.hyperopen.layout.HollowRingPacking
 import io.github.qmryqmm.hyperopen.layout.RingSectorPacking
 import io.github.qmryqmm.hyperopen.layout.StockFanPacking
 import io.github.qmryqmm.hyperopen.model.ShortcutItem
+import io.github.qmryqmm.hyperopen.util.BubbleBlurSpec
 import io.github.qmryqmm.hyperopen.util.FisheyeScale
 import io.github.qmryqmm.hyperopen.view.CircularBubbleView
 import io.github.qmryqmm.hyperopen.view.CircularRegionBackdropView
@@ -1693,8 +1694,9 @@ class HyperOpenPreviewView(
             // 模糊斑点必须等于图标实际渲染缩放：scaleX 即视图变换后的最终倍率（稳态下与 currentScale 一致，
             // 入场/退场动画期间则是动画值），保证模糊与图标放大的倍率始终同步
             val scale = b.scaleX.coerceAtLeast(0.1f)
-            // 充满整个气泡尺寸，确保任意圆角（如 25% 圆角矩形）下毛玻璃均完整铺满气泡
-            val effectiveDiameter = iconSizePx * scale
+            // 与真实窗口模糊贴片同一规格：视图边界内缩 INSET_PX 后随视图缩放（BubbleBlurSpec），
+            // 任意圆角（如 25% 圆角矩形）下毛玻璃均完整铺满气泡且绝不溢出描边
+            val effectiveDiameter = (iconSizePx - 2f * BubbleBlurSpec.INSET_PX) * scale
             spots.add(
                 BubbleBlurSpot(
                     id = b.item.id,
@@ -1709,10 +1711,10 @@ class HyperOpenPreviewView(
             val lp = sub.layoutParams as? LayoutParams
             val cx = if (lp != null) lp.leftMargin + iconSizePx / 2f + sub.translationX else sub.targetX
             val cy = if (lp != null) lp.topMargin + iconSizePx / 2f + sub.translationY else sub.targetY
-            // 与一级气泡完全同一公式：旧实现 currentScale × scaleX 在鱼眼稳态下双重相乘
+            // 与一级气泡完全同一公式（含 INSET_PX 内缩规格）：旧实现 currentScale × scaleX 在鱼眼稳态下双重相乘
             // （scaleX == currentScale == s，模糊直径变成 iconSize × s²，比图标实际放大的 s 倍多涨一倍）
             val scale = sub.scaleX.coerceAtLeast(0.1f)
-            val effectiveDiameter = iconSizePx * scale
+            val effectiveDiameter = (iconSizePx - 2f * BubbleBlurSpec.INSET_PX) * scale
             val effectiveAlpha = (sub.iconAlpha * sub.alpha).coerceIn(0f, 1f)
             spots.add(
                 BubbleBlurSpot(
