@@ -655,7 +655,10 @@ fun HyperOpenApp(
     val currentLiveConfig = remember(
         materialStyle, bubbleDimAlpha, iconCornerRadius, iconAlpha,
         bubblePaddingPercent, glyphPadEnabled, glyphPadColor, glyphPadMode,
-        glassPreset, glassRefractIor, glassThickness, glassSpecular, glassMatteAlpha, glassBorderLight, glassUseNative
+        glassPreset, glassRefractIor, glassThickness, glassSpecular, glassMatteAlpha, glassBorderLight, glassUseNative,
+        // 组件级材质解析依赖项（effectiveBlurRadiusDp / effectiveDimAlpha / glassParamsFor）：
+        // 跟随全局开关、全局模糊/压暗与气泡磨砂浓度变化时，列表卡片的气泡材质必须同步刷新
+        bubbleMaterialFollowGlobal, globalBlurRadius, globalDimAlpha, bubbleGlassMatteAlpha, bubbleBlurRadius
     ) {
         HyperOpenConfig.loadFromApp(ctx).apply {
             this.materialStyle = materialStyle
@@ -884,31 +887,13 @@ fun HyperOpenApp(
                             this.glassMatteAlpha = glassMatteAlpha
                             this.glassBorderLight = glassBorderLight
                             this.glassUseNative = glassUseNative
-                            // Plan B + 跟随全局：柔光模式下模糊半径由 matteAlpha 驱动，高斯模式用 blur slider
-                            val isSoftGlass = materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS
-                            val matteToBlur = { m: Float -> (m / 0.40f * 50f).coerceIn(0f, 50f) }
-                            this.bubbleBlurRadius = when {
-                                isSoftGlass && bubbleMaterialFollowGlobal -> matteToBlur(glassMatteAlpha).toInt()
-                                isSoftGlass -> matteToBlur(bubbleGlassMatteAlpha).toInt()
-                                bubbleMaterialFollowGlobal -> globalBlurRadius.toInt()
-                                else -> bubbleBlurRadius.toInt()
-                            }
-                            this.regionBlurRadius = when {
-                                isSoftGlass && regionMaterialFollowGlobal -> matteToBlur(glassMatteAlpha).toInt()
-                                isSoftGlass -> matteToBlur(regionGlassMatteAlpha).toInt()
-                                regionMaterialFollowGlobal -> globalBlurRadius.toInt()
-                                else -> regionBlurRadius.toInt()
-                            }
-                            this.headerBlurRadius = when {
-                                isSoftGlass && headerMaterialFollowGlobal -> matteToBlur(glassMatteAlpha).toInt()
-                                isSoftGlass -> matteToBlur(headerGlassMatteAlpha).toInt()
-                                headerMaterialFollowGlobal -> globalBlurRadius.toInt()
-                                else -> headerBlurRadius.toInt()
-                            }
-                            // 压暗：跟随全局用 globalDimAlpha，否则用 per-component
-                            this.bubbleDimAlpha = if (bubbleMaterialFollowGlobal) globalDimAlpha else bubbleDimAlpha
-                            this.regionDimAlpha = if (regionMaterialFollowGlobal) globalDimAlpha else regionDimAlpha
-                            this.headerDimAlpha = if (headerMaterialFollowGlobal) globalDimAlpha else headerDimAlpha
+                            // 组件级材质解析（柔光磨砂浓度驱动模糊半径、跟随全局材质等）已统一收敛到
+                            // HyperOpenConfig.effective* / glassParamsFor 单一数据源，真机与预览同源取值；
+                            // 这里只搬运原始滑块值，禁止在 UI 层再私自换算（历史上只在预览侧换算，
+                            // 导致真机调节「柔光磨砂浓度 / 跟随全局」完全不生效）
+                            this.bubbleBlurRadius = bubbleBlurRadius.toInt()
+                            this.regionBlurRadius = regionBlurRadius.toInt()
+                            this.headerBlurRadius = headerBlurRadius.toInt()
                             this.globalBlurRadius = globalBlurRadius.toInt()
                             this.globalDimAlpha = globalDimAlpha
                             this.bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal

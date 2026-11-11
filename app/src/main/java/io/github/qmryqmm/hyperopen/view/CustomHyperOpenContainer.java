@@ -48,6 +48,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
     private LinearLayout headerPill;
     private TextView headerTitle;
     private TextView headerSubtitle;
+    /** 顶部提示胶囊背景控制器（光学层 + blur 生命周期，与气泡 / 底衬共用同一套材质参数） */
+    private HeaderPillBackdrop headerPillBackdrop;
 
     private CircularRegionBackdropView regionBackdrop;
     /** 全屏扇区分隔虚线覆盖层（独立于圆形底衬，虚线可延伸出屏幕） */
@@ -104,9 +106,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
         regionBackdrop = new CircularRegionBackdropView(getContext(), systemuiClassLoader);
         regionBackdrop.setStyle(resolvedStyle);
         if (config != null) {
-            regionBackdrop.setGlassParams(HyperOSMaterialFactory.GlassParams.fromConfig(config));
-            regionBackdrop.setBlurRadius(config.regionBlurRadius);
-            regionBackdrop.setDimAlpha(config.regionDimAlpha);
+            regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION));
+            regionBackdrop.setBlurRadius(config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION));
+            regionBackdrop.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION));
         }
         addView(regionBackdrop);
 
@@ -133,12 +135,11 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 ringSectorSpec = null;
             }
             this.resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(getContext(), config.materialStyle);
-            HyperOSMaterialFactory.GlassParams glassParams = HyperOSMaterialFactory.GlassParams.fromConfig(config);
             if (regionBackdrop != null) {
                 regionBackdrop.setStyle(resolvedStyle);
-                regionBackdrop.setGlassParams(glassParams);
-                regionBackdrop.setBlurRadius(config.showRegionBg ? config.regionBlurRadius : 0);
-                regionBackdrop.setDimAlpha(config.showRegionBg ? config.regionDimAlpha : 0f);
+                regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION));
+                regionBackdrop.setBlurRadius(config.showRegionBg ? config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION) : 0);
+                regionBackdrop.setDimAlpha(config.showRegionBg ? config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION) : 0f);
                 // 扇区分隔线样式（颜色/透明度/虚线规格）热生效
                 if (ringSectorSpec != null) {
                     float liveCenterY = fodCenterY - dpToPx(config.offsetY);
@@ -155,9 +156,10 @@ public class CustomHyperOpenContainer extends FrameLayout {
             applyHeaderPillStyleAndLayout();
             // 气泡材质、模糊半径、留白比例、圆角比例与透明度热生效
             for (CircularBubbleView b : bubbles) {
+                b.updateConfig(config);
                 b.setMaterialStyle(resolvedStyle);
-                b.setBlurRadius(config.bubbleBlurRadius);
-                b.setDimAlpha(config.bubbleDimAlpha);
+                b.setBlurRadius(config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
+                b.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE));
                 b.setBubblePaddingPercent(config.bubblePaddingPercent);
                 b.setCornerRadiusPercent(config.iconCornerRadius);
                 b.setIconAlpha(config.iconAlpha);
@@ -445,19 +447,34 @@ public class CustomHyperOpenContainer extends FrameLayout {
     }
 
     /**
-     * 按 showHeaderPillBg 开关与 headerBlurRadius 独立模糊半径铺设/移除顶部提示的胶囊玻璃背景。
+     * 按 showHeaderPillBg 开关与统一材质参数铺设/移除顶部提示的胶囊玻璃背景。
+     * 胶囊光学层与玻璃参数经 {@link HeaderPillBackdrop} 与图标气泡 / 圆形底衬严格同源，
+     * blur 生命周期由 {@link io.github.qmryqmm.hyperopen.util.BlurRegionSession} 统一管理。
      * 关闭时背景置 null 且 outline 置空，只保留标题/副标题纯文字悬浮。
      */
     private void applyHeaderPillBackground() {
         if (headerPill == null) return;
         boolean show = config == null || config.showHeaderPillBg;
         if (show) {
-            int blurDp = config != null ? config.headerBlurRadius : 25;
-            int blurPx = blurDp > 0 ? dpToPx(blurDp) : 0;
-            headerPill.setBackground(HyperOSMaterialFactory.createCompositeHeaderPillDrawable(headerPill, resolvedStyle, blurPx, config != null ? config.headerDimAlpha : 0f));
+            if (config != null) {
+                int blurDp = config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_HEADER);
+                int blurPx = blurDp > 0 ? dpToPx(blurDp) : 0;
+                HyperOSMaterialFactory.GlassParams params = config.glassParamsFor(HyperOpenConfig.COMPONENT_HEADER);
+                float dim = config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_HEADER);
+                if (headerPillBackdrop == null) {
+                    headerPillBackdrop = new HeaderPillBackdrop(resolvedStyle, params, blurPx, dim);
+                } else {
+                    headerPillBackdrop.update(resolvedStyle, params, blurPx, dim);
+                }
+                headerPillBackdrop.applyTo(headerPill);
+            } else if (headerPillBackdrop != null) {
+                headerPillBackdrop.applyTo(headerPill);
+            }
             headerPill.setClipToOutline(true);
         } else {
-            if (headerPill.getBackground() != null) {
+            if (headerPillBackdrop != null) {
+                headerPillBackdrop.removeFrom(headerPill);
+            } else if (headerPill.getBackground() != null) {
                 headerPill.setBackground(null);
             }
             // 关键：必须先关掉裁切再清背景，否则空 outline 会把整个 View 内容裁没
@@ -565,9 +582,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
         // 更新底衬大小与位置：完全跟随「显示圆形区域底衬」开关（分隔虚线由全屏覆盖层独立绘制）
         regionBackdrop.setVisibility(config.showRegionBg ? View.VISIBLE : View.GONE);
         regionBackdrop.setStyle(resolvedStyle);
-        regionBackdrop.setGlassParams(HyperOSMaterialFactory.GlassParams.fromConfig(config));
-        regionBackdrop.setBlurRadius(config.regionBlurRadius);
-        regionBackdrop.setDimAlpha(config.regionDimAlpha);
+        regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION));
+        regionBackdrop.setBlurRadius(config.showRegionBg ? config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION) : 0);
+        regionBackdrop.setDimAlpha(config.showRegionBg ? config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION) : 0f);
         regionBackdrop.updateGeometry(regionRadiusPx);
 
         ViewGroup.LayoutParams existingRLp = regionBackdrop.getLayoutParams();
@@ -680,9 +697,10 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 float finalY = pt.y + dpToPx(item.customOffsetY);
                 bubble.targetX = finalX;
                 bubble.targetY = finalY;
+                bubble.updateConfig(config);
                 bubble.setMaterialStyle(resolvedStyle);
-                bubble.setBlurRadius(config.bubbleBlurRadius);
-                bubble.setDimAlpha(config.bubbleDimAlpha);
+                bubble.setBlurRadius(config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
+                bubble.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE));
                 bubble.setBubblePaddingPercent(config.bubblePaddingPercent);
                 bubble.setCornerRadiusPercent(config.iconCornerRadius);
                 bubble.setIconAlpha(config.iconAlpha);
@@ -1067,7 +1085,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                     .setDuration(140)
                     .setInterpolator(new android.view.animation.LinearInterpolator())
                     .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
-                    .withEndAction(() -> b.applyScale(1.0f))
+                    .withEndAction(() -> { b.applyScale(1.0f); b.ensureBlurAndRefreshBackground(); })
                     .start();
                 b.setIconAlpha(0.25f);
             }
@@ -1108,6 +1126,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
 
             bubblesContainer.addView(sub);
             folderSubBubbles.add(sub);
+            sub.ensureBlurAndRefreshBackground();
 
             sub.animate()
                 .translationX(0f)
@@ -1230,10 +1249,11 @@ public class CustomHyperOpenContainer extends FrameLayout {
                     .setDuration(140)
                     .setInterpolator(new android.view.animation.LinearInterpolator())
                     .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
-                    .withEndAction(() -> b.applyScale(1.0f))
+                    .withEndAction(() -> { b.applyScale(1.0f); b.ensureBlurAndRefreshBackground(); })
                     .start();
             } else {
                 b.applyScale(1.0f);
+                b.ensureBlurAndRefreshBackground();
             }
             b.setIconAlpha(targetAlpha);
         }

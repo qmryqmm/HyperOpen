@@ -124,7 +124,8 @@ object AppIconCropProcessor {
         val center = size / 2f
         // 内缩 1px 确保抗锯齿边缘完整落在 Bitmap 内部，放大时绝不被四边截平
         val halfRadius = center - 1f
-        val cornerRadiusPx = halfRadius * (clampedPercent / 50f)
+        // 圆角公式与气泡 Outline / 光学层 / 模糊贴片统一（BubbleBlurSpec 唯一实现）
+        val cornerRadiusPx = io.github.qmryqmm.hyperopen.util.BubbleBlurSpec.cornerRadiusOfHalfSize(halfRadius, clampedPercent)
         outCanvas.drawRoundRect(
             center - halfRadius,
             center - halfRadius,
@@ -166,7 +167,7 @@ object AppIconCropProcessor {
         val size = bmp.width
         val center = size / 2f
         val targetRadius = center - 1f
-        val cornerRadius = targetRadius * (cornerRadiusPercent.coerceIn(0, 50) / 50f)
+        val cornerRadius = io.github.qmryqmm.hyperopen.util.BubbleBlurSpec.cornerRadiusOfHalfSize(targetRadius, cornerRadiusPercent)
         // 对角线方向上圆角矩形边界到中心的距离 = (targetRadius - cornerRadius) * sqrt(2) + cornerRadius
         val diagTargetRadius = (targetRadius - cornerRadius) * 1.4142135f + cornerRadius
         val dirs = arrayOf(
