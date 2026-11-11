@@ -238,7 +238,7 @@ public final class IconGlyphFactory {
 
         // 4c) 动作默认行为：FOLDER 文件夹气泡（优先使用内置 folder 图标）
         if (ShortcutItem.ACTION_FOLDER.equals(item.actionType)) {
-            return resolveMiuixIcon("remix:folder-fill", item.tintColor, item.glyphPadEnabled, item.glyphPadColor, item.glyphPadMode, cornerRadiusPercent);
+            return resolveMiuixIcon("remix:folder-2-fill", item.tintColor, item.glyphPadEnabled, item.glyphPadColor, item.glyphPadMode, cornerRadiusPercent);
         }
 
         // 5) 关键词匹配内置符号兜底

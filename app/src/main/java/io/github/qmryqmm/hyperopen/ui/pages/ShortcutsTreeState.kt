@@ -545,7 +545,7 @@ class ShortcutsTreeState(
                     ShortcutItem.ACTION_FOLDER,
                     "[]",
                     "",
-                    "remix:folder-fill",
+                    "remix:folder-2-fill",
                     0xFF2A82E4.toInt(),
                     true,
                     true,
