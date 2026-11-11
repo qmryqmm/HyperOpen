@@ -1937,6 +1937,7 @@ class HyperOpenPreviewView(
             .scaleY(config.maxScale)
             .setDuration(120)
             .setInterpolator(android.view.animation.DecelerateInterpolator())
+            .setUpdateListener { folderBubble.syncBlurCornerRadiusWithViewScale() }
             .withEndAction {
                 // 松手 / 状态被复位后不再展开（防竞态：放大动画期间用户抬手）
                 if (!isTouching || activeFolderBubble != null) return@withEndAction
@@ -1955,8 +1956,16 @@ class HyperOpenPreviewView(
 
         for (b in bubbleViews) {
             if (b != folderBubble) {
-                // 其余普通图标：恢复原本大小（鱼眼放大收回 1.0），仅保留变暗弱化
-                b.applyScale(1.0f)
+                // 其余普通图标：线性恢复原本大小（鱼眼放大收回 1.0），仅保留变暗弱化
+                b.animate().cancel()
+                b.animate()
+                    .scaleX(1.0f)
+                    .scaleY(1.0f)
+                    .setDuration(140)
+                    .setInterpolator(android.view.animation.LinearInterpolator())
+                    .setUpdateListener { b.syncBlurCornerRadiusWithViewScale() }
+                    .withEndAction { b.applyScale(1.0f) }
+                    .start()
                 b.setIconAlpha(0.25f)
             }
         }
@@ -2008,7 +2017,10 @@ class HyperOpenPreviewView(
                 .setInterpolator(android.view.animation.OvershootInterpolator(1.2f))
                 .setDuration(180)
                 .setStartDelay(i * 15L)
-                .setUpdateListener { notifyBlurSceneChanged() }
+                .setUpdateListener {
+                    sub.syncBlurCornerRadiusWithViewScale()
+                    notifyBlurSceneChanged()
+                }
                 .withEndAction { notifyBlurSceneChanged() }
                 .start()
         }
@@ -2064,26 +2076,73 @@ class HyperOpenPreviewView(
             } else Float.MAX_VALUE
 
             if (distFromFolder > iconSizePx * 2.8f) {
-                dismissFolderSubBubbles()
+                dismissFolderSubBubbles(animated = true)
             }
         }
         notifyBlurSceneChanged()
     }
 
-    private fun dismissFolderSubBubbles() {
+    /**
+     * 关闭并移除文件夹子气泡。
+     *
+     * @param animated true 时子项向文件夹中心收拢并淡出后再移除（悬停移出触发的关闭）；
+     *                 false 时立即移除（松手退场 / 排版 / 切换文件夹等，外层已有动画或需立即复位）。
+     */
+    private fun dismissFolderSubBubbles(animated: Boolean = false) {
         if (folderSubBubbles.isEmpty()) return
-        for (sub in folderSubBubbles) {
-            sub.animate().cancel()
-            bubblesContainer.removeView(sub)
-        }
+        val folder = activeFolderBubble
+        val subs = ArrayList(folderSubBubbles)
         folderSubBubbles.clear()
         currentSelectedSubBubble = null
         activeFolderBubble = null
 
+        if (!animated) {
+            for (sub in subs) {
+                sub.animate().cancel()
+                bubblesContainer.removeView(sub)
+            }
+        } else {
+            // 子气泡向文件夹中心收拢 + 缩小 + 淡出，播完后从容器移除
+            for (sub in subs) {
+                sub.animate().cancel()
+                val toX = (folder?.targetX ?: sub.targetX) - sub.targetX
+                val toY = (folder?.targetY ?: sub.targetY) - sub.targetY
+                sub.animate()
+                    .translationX(toX)
+                    .translationY(toY)
+                    .scaleX(0.2f)
+                    .scaleY(0.2f)
+                    .alpha(0f)
+                    .setDuration(140)
+                    .setInterpolator(android.view.animation.AccelerateInterpolator())
+                    .setUpdateListener {
+                        sub.syncBlurCornerRadiusWithViewScale()
+                        notifyBlurSceneChanged()
+                    }
+                    .withEndAction { bubblesContainer.removeView(sub) }
+                    .start()
+            }
+        }
+
         for (b in bubbleViews) {
-            // 收起时一级气泡（含文件夹图标）恢复原大小与原透明度
+            // 收起时一级气泡（含文件夹图标）恢复原大小与原透明度：
+            // 有动画的关闭走线性过渡（与收拢动画同步），立即关闭保持瞬态复位
             b.animate().cancel()
-            b.applyScale(1.0f)
+            if (animated) {
+                b.animate()
+                    .scaleX(1.0f)
+                    .scaleY(1.0f)
+                    .setDuration(140)
+                    .setInterpolator(android.view.animation.LinearInterpolator())
+                    .setUpdateListener {
+                        b.syncBlurCornerRadiusWithViewScale()
+                        notifyBlurSceneChanged()
+                    }
+                    .withEndAction { b.applyScale(1.0f) }
+                    .start()
+            } else {
+                b.applyScale(1.0f)
+            }
             b.setIconAlpha(config.iconAlpha)
         }
         notifyBlurSceneChanged()

@@ -176,7 +176,7 @@ public class HyperOpenConfig {
     /** 唤醒指纹快捷方式时全屏遮罩背景压暗程度 (0.0f ~ 1.0f，默认 0.45f) */
     public float fullscreenDimAlpha = 0.45f;
     public float headerDimAlpha = 0f;   // 顶部提示胶囊背景压暗 (0.0 ~ 1.0)
-    public float regionDimAlpha = 0f;   // 圆形视界背景压暗 (0.0 ~ 1.0)
+    public float regionDimAlpha = 0f;   // 圆形图标显示区域背景压暗 (0.0 ~ 1.0)
     public float bubbleDimAlpha = 0f;   // 图标气泡留白区域压暗 (0.0 ~ 1.0)
     /** 指纹解锁后进入快捷方式面板的等待阈值 (0 ~ 2000 ms，默认 500 = 系统默认不干预，0 = 立即弹出) */
     public int showDelayMs = 500;

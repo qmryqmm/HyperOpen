@@ -8,7 +8,7 @@
 
     <string name="section_geometry">几何与位置参数</string>
     <string name="param_offset_y">整体垂直高度偏移 (Offset Y)</string>
-    <string name="param_region_diameter">圆形视界直径 (Region Diameter)</string>
+    <string name="param_region_diameter">图标显示区域直径 (Region Diameter)</string>
     <string name="param_show_region_bg">显示圆形区域底衬与边框</string>
     <string name="param_show_header_pill_bg">显示顶部提示胶囊背景</string>
 

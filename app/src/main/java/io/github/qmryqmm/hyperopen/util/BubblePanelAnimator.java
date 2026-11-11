@@ -95,7 +95,7 @@ public final class BubblePanelAnimator {
                         .setInterpolator(new DecelerateInterpolator())
                         .setDuration(duration)
                         .setStartDelay(0L)
-                        .setUpdateListener(null)
+                        .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
                         .withEndAction(() -> b.applyScale(1.0f))
                         .start();
             } else {
@@ -112,7 +112,7 @@ public final class BubblePanelAnimator {
                         .setInterpolator(EXPAND_INTERPOLATOR)
                         .setDuration(duration)
                         .setStartDelay(Math.min(i * 12L, 80L))
-                        .setUpdateListener(null)
+                        .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
                         .withEndAction(() -> b.applyScale(1.0f))
                         .start();
             }
@@ -154,6 +154,7 @@ public final class BubblePanelAnimator {
                         .scaleY(1.30f)
                         .alpha(0f)
                         .setDuration(120)
+                        .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
                         .withEndAction(finishOne)
                         .start();
             } else {
@@ -166,6 +167,7 @@ public final class BubblePanelAnimator {
                         .scaleY(0.2f)
                         .alpha(0f)
                         .setDuration(110)
+                        .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
                         .withEndAction(finishOne)
                         .start();
             }
