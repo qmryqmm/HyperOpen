@@ -143,6 +143,14 @@ fun ParamsPage(
     bubblePaddingPercent: Float, onBubblePaddingPercent: (Float) -> Unit,
     bubbleBlurRadius: Float, onBubbleBlurRadius: (Float) -> Unit,
     iconGlowEffect: Boolean, onIconGlowEffect: (Boolean) -> Unit,
+    // ── 全局模糊材质 / 跟随全局开关 / per-component matteAlpha ──
+    onOpenBlurMaterialPage: () -> Unit = {},
+    bubbleMaterialFollowGlobal: Boolean, onBubbleMaterialFollowGlobal: (Boolean) -> Unit,
+    regionMaterialFollowGlobal: Boolean, onRegionMaterialFollowGlobal: (Boolean) -> Unit,
+    headerMaterialFollowGlobal: Boolean, onHeaderMaterialFollowGlobal: (Boolean) -> Unit,
+    bubbleGlassMatteAlpha: Float, onBubbleGlassMatteAlpha: (Float) -> Unit,
+    regionGlassMatteAlpha: Float, onRegionGlassMatteAlpha: (Float) -> Unit,
+    headerGlassMatteAlpha: Float, onHeaderGlassMatteAlpha: (Float) -> Unit,
 ) {
     val ctx = LocalContext.current
     val view = androidx.compose.ui.platform.LocalView.current
@@ -665,6 +673,13 @@ fun ParamsPage(
                             onClick = onOpenSoftGlassPage,
                         )
                     }
+                    if (materialStyle == HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR) {
+                        ArrowPreference(
+                            title = "全局模糊材质调节",
+                            summary = "统一调节模糊半径与压暗程度",
+                            onClick = onOpenBlurMaterialPage,
+                        )
+                    }
                     SliderPreference(
                         title = "全屏模糊遮罩程度",
                         summary = "控制呼出面板时全屏背景高斯模糊强度",
@@ -692,22 +707,42 @@ fun ParamsPage(
                             onCheckedChange = onShowRegionBg,
                         )
                         if (showRegionBg) {
-                            SliderPreference(
-                                title = "图标显示区域背景模糊半径",
-                                summary = "结合高斯模糊与次表面散射渲染毛玻璃底盘",
-                                valueText = if (regionBlurRadius.toInt() == 0) "已关闭模糊" else "${regionBlurRadius.toInt()} dp",
-                                value = regionBlurRadius,
-                                valueRange = 0f..50f,
-                                onValueChange = onRegionBlurRadius,
+                            // 跟随全局材质开关
+                            SwitchPreference(
+                                title = "跟随全局材质",
+                                summary = if (regionMaterialFollowGlobal) "使用全局模糊/压暗参数" else "使用本组件独立参数",
+                                checked = regionMaterialFollowGlobal,
+                                onCheckedChange = onRegionMaterialFollowGlobal,
                             )
-                            SliderPreference(
-                                title = "图标显示区域背景压暗程度",
-                                summary = "在毛玻璃底盘之上叠加黑色压暗，提升图标对比度",
-                                valueText = if (kotlin.math.round(regionDimAlpha * 100f) <= 0.5f) "不压暗" else "${kotlin.math.round(regionDimAlpha * 100f).toInt()} %",
-                                value = regionDimAlpha * 100f,
-                                valueRange = 0f..100f,
-                                onValueChange = { onRegionDimAlpha(it / 100f) },
-                            )
+                            if (!regionMaterialFollowGlobal) {
+                                if (materialStyle == HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR) {
+                                    SliderPreference(
+                                        title = "图标显示区域背景模糊半径",
+                                        summary = "结合高斯模糊与次表面散射渲染毛玻璃底盘",
+                                        valueText = if (regionBlurRadius.toInt() == 0) "已关闭模糊" else "${regionBlurRadius.toInt()} dp",
+                                        value = regionBlurRadius,
+                                        valueRange = 0f..50f,
+                                        onValueChange = onRegionBlurRadius,
+                                    )
+                                    SliderPreference(
+                                        title = "图标显示区域背景压暗程度",
+                                        summary = "在毛玻璃底盘之上叠加黑色压暗，提升图标对比度",
+                                        valueText = if (kotlin.math.round(regionDimAlpha * 100f) <= 0.5f) "不压暗" else "${kotlin.math.round(regionDimAlpha * 100f).toInt()} %",
+                                        value = regionDimAlpha * 100f,
+                                        valueRange = 0f..100f,
+                                        onValueChange = { onRegionDimAlpha(it / 100f) },
+                                    )
+                                } else {
+                                    SliderPreference(
+                                        title = "区域柔光磨砂浓度",
+                                        summary = "控制本组件柔光玻璃的磨砂强度（同时影响模糊半径）",
+                                        valueText = "${(regionGlassMatteAlpha * 100).toInt()}%",
+                                        value = regionGlassMatteAlpha * 100f,
+                                        valueRange = 5f..40f,
+                                        onValueChange = { onRegionGlassMatteAlpha(it / 100f) },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -839,22 +874,41 @@ fun ParamsPage(
                             onCheckedChange = onShowHeaderPillBg,
                         )
                         if (showHeaderPillBg) {
-                            SliderPreference(
-                                title = "顶部提示背景模糊程度",
-                                summary = "独立调节顶部胶囊背景毛玻璃模糊半径",
-                                valueText = if (headerBlurRadius.toInt() == 0) "已关闭模糊" else "${headerBlurRadius.toInt()} dp",
-                                value = headerBlurRadius,
-                                valueRange = 0f..50f,
-                                onValueChange = onHeaderBlurRadius,
+                            SwitchPreference(
+                                title = "跟随全局材质",
+                                summary = if (headerMaterialFollowGlobal) "使用全局模糊/压暗参数" else "使用本组件独立参数",
+                                checked = headerMaterialFollowGlobal,
+                                onCheckedChange = onHeaderMaterialFollowGlobal,
                             )
-                            SliderPreference(
-                                title = "顶部提示背景压暗程度",
-                                summary = "在胶囊毛玻璃背景之上叠加黑色压暗",
-                                valueText = if (kotlin.math.round(headerDimAlpha * 100f) <= 0.5f) "不压暗" else "${kotlin.math.round(headerDimAlpha * 100f).toInt()} %",
-                                value = headerDimAlpha * 100f,
-                                valueRange = 0f..100f,
-                                onValueChange = { onHeaderDimAlpha(it / 100f) },
-                            )
+                            if (!headerMaterialFollowGlobal) {
+                                if (materialStyle == HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR) {
+                                    SliderPreference(
+                                        title = "顶部提示背景模糊程度",
+                                        summary = "独立调节顶部胶囊背景毛玻璃模糊半径",
+                                        valueText = if (headerBlurRadius.toInt() == 0) "已关闭模糊" else "${headerBlurRadius.toInt()} dp",
+                                        value = headerBlurRadius,
+                                        valueRange = 0f..50f,
+                                        onValueChange = onHeaderBlurRadius,
+                                    )
+                                    SliderPreference(
+                                        title = "顶部提示背景压暗程度",
+                                        summary = "在胶囊毛玻璃背景之上叠加黑色压暗",
+                                        valueText = if (kotlin.math.round(headerDimAlpha * 100f) <= 0.5f) "不压暗" else "${kotlin.math.round(headerDimAlpha * 100f).toInt()} %",
+                                        value = headerDimAlpha * 100f,
+                                        valueRange = 0f..100f,
+                                        onValueChange = { onHeaderDimAlpha(it / 100f) },
+                                    )
+                                } else {
+                                    SliderPreference(
+                                        title = "胶囊柔光磨砂浓度",
+                                        summary = "控制本组件柔光玻璃的磨砂强度（同时影响模糊半径）",
+                                        valueText = "${(headerGlassMatteAlpha * 100).toInt()}%",
+                                        value = headerGlassMatteAlpha * 100f,
+                                        valueRange = 5f..40f,
+                                        onValueChange = { onHeaderGlassMatteAlpha(it / 100f) },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -984,30 +1038,49 @@ fun ParamsPage(
                         valueRange = 0f..40f,
                         onValueChange = onBubblePaddingPercent,
                     )
-                    SliderPreference(
-                        title = "气泡留白区域模糊半径",
-                        summary = "与图标显示区域底衬统一的高斯模糊毛玻璃样式",
-                        valueText = when {
-                            bubblePaddingPercent <= 0 -> "已随气泡关闭"
-                            bubbleBlurRadius.toInt() == 0 -> "已关闭模糊"
-                            else -> "${bubbleBlurRadius.toInt()} dp"
-                        },
-                        value = bubbleBlurRadius,
-                        valueRange = 0f..50f,
-                        onValueChange = onBubbleBlurRadius,
+                    SwitchPreference(
+                        title = "跟随全局材质",
+                        summary = if (bubbleMaterialFollowGlobal) "使用全局模糊/压暗参数" else "使用本组件独立参数",
+                        checked = bubbleMaterialFollowGlobal,
+                        onCheckedChange = onBubbleMaterialFollowGlobal,
                     )
-                    SliderPreference(
-                        title = "气泡留白区域压暗程度",
-                        summary = "在每个图标气泡的毛玻璃底衬之上叠加黑色压暗",
-                        valueText = when {
-                            bubblePaddingPercent <= 0 -> "已随气泡关闭"
-                            kotlin.math.round(bubbleDimAlpha * 100f) <= 0.5f -> "不压暗"
-                            else -> "${kotlin.math.round(bubbleDimAlpha * 100f).toInt()} %"
-                        },
-                        value = bubbleDimAlpha * 100f,
-                        valueRange = 0f..100f,
-                        onValueChange = { onBubbleDimAlpha(it / 100f) },
-                    )
+                    if (!bubbleMaterialFollowGlobal) {
+                        if (materialStyle == HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR) {
+                            SliderPreference(
+                                title = "气泡留白区域模糊半径",
+                                summary = "与图标显示区域底衬统一的高斯模糊毛玻璃样式",
+                                valueText = when {
+                                    bubblePaddingPercent <= 0 -> "已随气泡关闭"
+                                    bubbleBlurRadius.toInt() == 0 -> "已关闭模糊"
+                                    else -> "${bubbleBlurRadius.toInt()} dp"
+                                },
+                                value = bubbleBlurRadius,
+                                valueRange = 0f..50f,
+                                onValueChange = onBubbleBlurRadius,
+                            )
+                            SliderPreference(
+                                title = "气泡留白区域压暗程度",
+                                summary = "在每个图标气泡的毛玻璃底衬之上叠加黑色压暗",
+                                valueText = when {
+                                    bubblePaddingPercent <= 0 -> "已随气泡关闭"
+                                    kotlin.math.round(bubbleDimAlpha * 100f) <= 0.5f -> "不压暗"
+                                    else -> "${kotlin.math.round(bubbleDimAlpha * 100f).toInt()} %"
+                                },
+                                value = bubbleDimAlpha * 100f,
+                                valueRange = 0f..100f,
+                                onValueChange = { onBubbleDimAlpha(it / 100f) },
+                            )
+                        } else {
+                            SliderPreference(
+                                title = "气泡柔光磨砂浓度",
+                                summary = "控制本组件柔光玻璃的磨砂强度（同时影响模糊半径）",
+                                valueText = "${(bubbleGlassMatteAlpha * 100).toInt()}%",
+                                value = bubbleGlassMatteAlpha * 100f,
+                                valueRange = 5f..40f,
+                                onValueChange = { onBubbleGlassMatteAlpha(it / 100f) },
+                            )
+                        }
+                    }
                 }
             }
         }
