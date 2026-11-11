@@ -62,9 +62,8 @@ public class CircularBubbleView extends FrameLayout {
         this.paddingPercent = config != null ? config.bubblePaddingPercent : 18;
         this.cornerRadiusPercent = config != null ? Math.max(0, Math.min(50, config.iconCornerRadius)) : 50;
 
-        boolean glowEnabled = config == null || config.iconGlowEffect;
         this.opticDrawable = new HyperOSMaterialFactory.CircularBubbleDrawable(
-            activeStyle, item.tintColor, isSelected, glowEnabled
+            activeStyle, item.tintColor, isSelected
         );
         this.opticDrawable.setGlassParams(HyperOSMaterialFactory.GlassParams.fromConfig(config));
         this.dimAlpha = config != null ? config.bubbleDimAlpha : 0f;
@@ -211,12 +210,10 @@ public class CircularBubbleView extends FrameLayout {
     }
 
     private void refreshBackground() {
-        boolean glowEnabled = config == null || config.iconGlowEffect;
         HyperOSMaterialFactory.GlassParams glassParams = HyperOSMaterialFactory.GlassParams.fromConfig(config);
         opticDrawable.setStyle(activeStyle);
         opticDrawable.setGlassParams(glassParams);
         opticDrawable.setSelected(isSelected);
-        opticDrawable.setGlowEnabled(glowEnabled);
         opticDrawable.setCornerRadiusPercent(cornerRadiusPercent);
         applyEffectiveDim();
 
@@ -350,8 +347,6 @@ public class CircularBubbleView extends FrameLayout {
     public void setSelectedState(boolean selected) {
         if (this.isSelected != selected) {
             this.isSelected = selected;
-            boolean glowEnabled = config == null || config.iconGlowEffect;
-            opticDrawable.setGlowEnabled(glowEnabled);
             opticDrawable.setSelected(selected);
         }
     }

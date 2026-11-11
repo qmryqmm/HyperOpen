@@ -142,7 +142,6 @@ fun ParamsPage(
     iconSpacingOffset: Float, onIconSpacingOffset: (Float) -> Unit,
     bubblePaddingPercent: Float, onBubblePaddingPercent: (Float) -> Unit,
     bubbleBlurRadius: Float, onBubbleBlurRadius: (Float) -> Unit,
-    iconGlowEffect: Boolean, onIconGlowEffect: (Boolean) -> Unit,
     // ── 全局模糊材质 / 跟随全局开关 / per-component matteAlpha ──
     onOpenBlurMaterialPage: () -> Unit = {},
     bubbleMaterialFollowGlobal: Boolean, onBubbleMaterialFollowGlobal: (Boolean) -> Unit,
@@ -923,7 +922,7 @@ fun ParamsPage(
                     title = "图标与物理动力学",
                     expanded = isOpen("icon"),
                     onToggle = { toggle("icon") },
-                    summary = "尺寸 ${iconSize.toInt()} dp · 圆角 ${iconCornerRadius.toInt()}% · 放大 ${"%.2f".format(maxScale)}x · 辉光${if (iconGlowEffect) "开" else "关"}",
+                    summary = "尺寸 ${iconSize.toInt()} dp · 圆角 ${iconCornerRadius.toInt()}% · 放大 ${"%.2f".format(maxScale)}x",
                 )
             }
             if (isOpen("icon")) item(key = "icon_card") {
@@ -1001,12 +1000,6 @@ fun ParamsPage(
                         value = influenceRadius,
                         valueRange = 60f..200f,
                         onValueChange = onInfluenceRadius,
-                    )
-                    SwitchPreference(
-                        title = "图标激活呼吸辉光动效",
-                        summary = "手指滑过选中目标时泛起柔光微晕反馈",
-                        checked = iconGlowEffect,
-                        onCheckedChange = onIconGlowEffect,
                     )
                 }
             }

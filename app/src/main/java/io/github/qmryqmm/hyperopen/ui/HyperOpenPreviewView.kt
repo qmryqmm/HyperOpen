@@ -293,7 +293,7 @@ class HyperOpenPreviewView(
         val btnSize = dpToPx(40f).toInt()
         val backBtn = FrameLayout(context).apply {
             background = HyperOSMaterialFactory.createCircularBubbleDrawable(
-                resolvedStyle, 0xFFFFFFFF.toInt(), false, false
+                resolvedStyle, 0xFFFFFFFF.toInt(), false
             )
             isClickable = true
             isFocusable = true
@@ -427,7 +427,7 @@ class HyperOpenPreviewView(
         val size = dpToPx(72f).toInt()
         val btn = FrameLayout(context).apply {
             background = HyperOSMaterialFactory.createCircularBubbleDrawable(
-                resolvedStyle, 0xFFFFFFFF.toInt(), false, true
+                resolvedStyle, 0xFFFFFFFF.toInt(), false
             )
             isClickable = true
             isFocusable = true
@@ -674,7 +674,7 @@ class HyperOpenPreviewView(
     private fun refreshFloatingBackButtonBackground() {
         val btn = floatingBackButton ?: return
         btn.background = HyperOSMaterialFactory.createCircularBubbleDrawable(
-            resolvedStyle, 0xFFFFFFFF.toInt(), false, false
+            resolvedStyle, 0xFFFFFFFF.toInt(), false
         )
         btn.invalidate()
     }
@@ -923,7 +923,6 @@ class HyperOpenPreviewView(
             old.layoutStyle != newConfig.layoutStyle ||
             old.ringSectorMode != newConfig.ringSectorMode ||
             old.ringCount != newConfig.ringCount ||
-            old.iconGlowEffect != newConfig.iconGlowEffect ||
             old.glyphPadEnabled != newConfig.glyphPadEnabled ||
             old.glyphPadColor != newConfig.glyphPadColor ||
             old.glyphPadMode != newConfig.glyphPadMode ||

@@ -226,8 +226,9 @@ public class HyperOpenConfig {
     public int glyphPadColor = 0xFF2A82E4;
     /** Miuix 矢量图标底垫质感模式 (GLYPH_PAD_MODE_SOLID / TRANSLUCENT / INVERTED) */
     public int glyphPadMode = GLYPH_PAD_MODE_TRANSLUCENT;
-    /** 图标呼吸/激活外发光辉光动效 */
-    public boolean iconGlowEffect = true;
+    /** 图标呼吸/激活外发光辉光动效（已移除，保留字段兼容旧配置读取） */
+    @Deprecated
+    public boolean iconGlowEffect = false;
 
     // ── 柔光玻璃系统级细调参数 ──
     public static final int GLASS_PRESET_DEFAULT = 0;
@@ -489,7 +490,7 @@ public class HyperOpenConfig {
                     config.glyphPadEnabled = bundle.getBoolean("glyph_pad_enabled", true);
                     config.glyphPadColor = bundle.getInt("glyph_pad_color", 0xFF2A82E4);
                     config.glyphPadMode = bundle.getInt("glyph_pad_mode", GLYPH_PAD_MODE_TRANSLUCENT);
-                    config.iconGlowEffect = bundle.getBoolean("icon_glow_effect", true);
+                    config.iconGlowEffect = false;
 
                     config.glassPreset = bundle.getInt("glass_preset", GLASS_PRESET_DEFAULT);
                     config.glassRefractIor = bundle.getFloat("glass_refract_ior", 1.12f);
@@ -612,7 +613,7 @@ public class HyperOpenConfig {
         config.glyphPadEnabled = xPrefs.getBoolean("glyph_pad_enabled", true);
         config.glyphPadColor = xPrefs.getInt("glyph_pad_color", 0xFF2A82E4);
         config.glyphPadMode = xPrefs.getInt("glyph_pad_mode", GLYPH_PAD_MODE_TRANSLUCENT);
-        config.iconGlowEffect = xPrefs.getBoolean("icon_glow_effect", true);
+        config.iconGlowEffect = false;
 
         config.glassPreset = xPrefs.getInt("glass_preset", GLASS_PRESET_DEFAULT);
         config.glassRefractIor = xPrefs.getFloat("glass_refract_ior", 1.12f);
@@ -725,7 +726,7 @@ public class HyperOpenConfig {
         config.glyphPadEnabled = sp.getBoolean("glyph_pad_enabled", true);
         config.glyphPadColor = sp.getInt("glyph_pad_color", 0xFF2A82E4);
         config.glyphPadMode = sp.getInt("glyph_pad_mode", GLYPH_PAD_MODE_TRANSLUCENT);
-        config.iconGlowEffect = sp.getBoolean("icon_glow_effect", true);
+        config.iconGlowEffect = false;
 
         config.glassPreset = sp.getInt("glass_preset", GLASS_PRESET_DEFAULT);
         config.glassRefractIor = sp.getFloat("glass_refract_ior", 1.12f);
@@ -849,7 +850,7 @@ public class HyperOpenConfig {
             .putBoolean("glyph_pad_enabled", glyphPadEnabled)
             .putInt("glyph_pad_color", glyphPadColor)
             .putInt("glyph_pad_mode", glyphPadMode)
-            .putBoolean("icon_glow_effect", iconGlowEffect)
+            .putBoolean("icon_glow_effect", false)
             .putInt("glass_preset", glassPreset)
             .putFloat("glass_refract_ior", glassRefractIor)
             .putFloat("glass_thickness", glassThickness)

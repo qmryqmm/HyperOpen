@@ -111,11 +111,7 @@ public class HyperOSMaterialFactory {
     }
 
     public static Drawable createCircularBubbleDrawable(int style, int tintColor, boolean isSelected) {
-        return new CircularBubbleDrawable(style, tintColor, isSelected, true);
-    }
-
-    public static Drawable createCircularBubbleDrawable(int style, int tintColor, boolean isSelected, boolean glowEnabled) {
-        return new CircularBubbleDrawable(style, tintColor, isSelected, glowEnabled);
+        return new CircularBubbleDrawable(style, tintColor, isSelected);
     }
 
     public static Drawable createHeaderPillDrawable(int style) {
@@ -269,11 +265,10 @@ public class HyperOSMaterialFactory {
         boolean isSelected,
         @NonNull Paint bgPaint,
         @NonNull Paint highlightPaint,
-        @NonNull Paint borderPaint,
         @NonNull CircularOpticsCache cache
     ) {
         drawUnifiedCircularOpticsCached(
-            canvas, width, height, style, isSelected, bgPaint, highlightPaint, borderPaint, cache, 50, null
+            canvas, width, height, style, isSelected, bgPaint, highlightPaint, cache, 50, null
         );
     }
 
@@ -285,12 +280,11 @@ public class HyperOSMaterialFactory {
         boolean isSelected,
         @NonNull Paint bgPaint,
         @NonNull Paint highlightPaint,
-        @NonNull Paint borderPaint,
         @NonNull CircularOpticsCache cache,
         int cornerRadiusPercent
     ) {
         drawUnifiedCircularOpticsCached(
-            canvas, width, height, style, isSelected, bgPaint, highlightPaint, borderPaint, cache, cornerRadiusPercent, null
+            canvas, width, height, style, isSelected, bgPaint, highlightPaint, cache, cornerRadiusPercent, null
         );
     }
 
@@ -302,7 +296,6 @@ public class HyperOSMaterialFactory {
         boolean isSelected,
         @NonNull Paint bgPaint,
         @NonNull Paint highlightPaint,
-        @NonNull Paint borderPaint,
         @NonNull CircularOpticsCache cache,
         int cornerRadiusPercent,
         @Nullable GlassParams params
@@ -316,25 +309,15 @@ public class HyperOSMaterialFactory {
 
         cache.ensure(width, height, style, isSelected, params);
 
-        float halfStroke = borderPaint.getStrokeWidth() / 2f;
-        float strokeCornerRadius = Math.max(0f, cornerRadius - halfStroke);
-
         if (style == STYLE_SOFT_GLASS) {
             bgPaint.setShader(cache.lensRefraction);
             canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, bgPaint);
 
             highlightPaint.setShader(cache.specularAndCaustic);
             canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, highlightPaint);
-
-            borderPaint.setShader(cache.borderGrad);
-            canvas.drawRoundRect(halfStroke, halfStroke, w - halfStroke, h - halfStroke, strokeCornerRadius, strokeCornerRadius, borderPaint);
         } else {
             bgPaint.setShader(cache.radialMatte);
             canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, bgPaint);
-
-            borderPaint.setShader(null);
-            borderPaint.setColor(cache.gaussianBorderColor);
-            canvas.drawRoundRect(halfStroke, halfStroke, w - halfStroke, h - halfStroke, strokeCornerRadius, strokeCornerRadius, borderPaint);
         }
     }
 
@@ -348,10 +331,9 @@ public class HyperOSMaterialFactory {
         int style,
         boolean isSelected,
         @NonNull Paint bgPaint,
-        @NonNull Paint highlightPaint,
-        @NonNull Paint borderPaint
+        @NonNull Paint highlightPaint
     ) {
-        drawUnifiedCircularOptics(canvas, width, height, style, isSelected, bgPaint, highlightPaint, borderPaint, null);
+        drawUnifiedCircularOptics(canvas, width, height, style, isSelected, bgPaint, highlightPaint, null);
     }
 
     public static void drawUnifiedCircularOptics(
@@ -362,7 +344,6 @@ public class HyperOSMaterialFactory {
         boolean isSelected,
         @NonNull Paint bgPaint,
         @NonNull Paint highlightPaint,
-        @NonNull Paint borderPaint,
         @Nullable GlassParams params
     ) {
         if (width <= 0 || height <= 0) return;
@@ -372,11 +353,8 @@ public class HyperOSMaterialFactory {
         if (radius <= 0f) return;
 
         GlassParams p = params != null ? params : new GlassParams();
-        float halfStroke = borderPaint.getStrokeWidth() / 2f;
-        float strokeRadius = Math.max(0f, radius - halfStroke);
 
         if (style == STYLE_SOFT_GLASS) {
-            // ================= 桌面/系统级柔光玻璃 (Soft Light Glass) =================
             float baseMatte = p.matteAlpha;
             int alphaCenter = Math.round(Math.max(0.02f, baseMatte * (isSelected ? 0.85f : 0.55f)) * 255f);
             int alphaMid = Math.round(Math.max(0.04f, baseMatte * (isSelected ? 1.25f : 0.90f)) * 255f);
@@ -410,21 +388,6 @@ public class HyperOSMaterialFactory {
             );
             highlightPaint.setShader(specularAndCaustic);
             canvas.drawCircle(cx, cy, radius, highlightPaint);
-
-            float borderFactor = p.borderLight;
-            int bTopAlpha = Math.round(Math.min(0.95f, (isSelected ? 0.85f : 0.55f) * borderFactor) * 255f);
-            int bMidAlpha = Math.round(Math.min(0.60f, (isSelected ? 0.40f : 0.22f) * borderFactor) * 255f);
-            int bWaistAlpha = Math.round(Math.min(0.35f, (isSelected ? 0.18f : 0.08f) * borderFactor) * 255f);
-            int bBottomAlpha = Math.round(Math.min(0.50f, (isSelected ? 0.35f : 0.18f) * borderFactor) * 255f);
-
-            LinearGradient borderGrad = new LinearGradient(
-                cx - radius * 0.2f, cy - radius, cx + radius * 0.2f, cy + radius,
-                new int[]{(bTopAlpha << 24) | 0x00FFFFFF, (bMidAlpha << 24) | 0x00FFFFFF, (bWaistAlpha << 24) | 0x00FFFFFF, (bBottomAlpha << 24) | 0x00FFFFFF},
-                new float[]{0f, 0.38f, 0.72f, 1f},
-                Shader.TileMode.CLAMP
-            );
-            borderPaint.setShader(borderGrad);
-            canvas.drawCircle(cx, cy, strokeRadius, borderPaint);
         } else {
             int d0 = isSelected ? 0x28FFFFFF : 0x14FFFFFF;
             int d1 = isSelected ? 0x14FFFFFF : 0x0AFFFFFF;
@@ -436,10 +399,6 @@ public class HyperOSMaterialFactory {
             );
             bgPaint.setShader(radialMatte);
             canvas.drawCircle(cx, cy, radius, bgPaint);
-
-            borderPaint.setShader(null);
-            borderPaint.setColor(isSelected ? 0x98FFFFFF : 0x45FFFFFF);
-            canvas.drawCircle(cx, cy, strokeRadius, borderPaint);
         }
     }
 
@@ -617,39 +576,25 @@ public class HyperOSMaterialFactory {
         private int style;
         private final int tintColor;
         private boolean isSelected;
-        private boolean glowEnabled;
         private GlassParams glassParams = null;
 
         private final Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint highlightPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint glowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint outerAuraPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint dimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private float dimAlpha = 0f;
         private int cornerRadiusPercent = 50;
 
         private final CircularOpticsCache opticsCache = new CircularOpticsCache();
-        private int glowCachedW = -1;
-        private int glowCachedH = -1;
 
         public CircularBubbleDrawable(int style, int tintColor, boolean isSelected) {
-            this(style, tintColor, isSelected, true);
-        }
-
-        public CircularBubbleDrawable(int style, int tintColor, boolean isSelected, boolean glowEnabled) {
             this.style = style;
             this.tintColor = tintColor;
             this.isSelected = isSelected;
-            this.glowEnabled = glowEnabled;
-            borderPaint.setStyle(Paint.Style.STROKE);
-            borderPaint.setStrokeWidth(isSelected ? 2.0f : 1.5f);
         }
 
         public void setSelected(boolean selected) {
             if (this.isSelected != selected) {
                 this.isSelected = selected;
-                borderPaint.setStrokeWidth(selected ? 2.0f : 1.5f);
                 invalidateSelf();
             }
         }
@@ -664,13 +609,6 @@ public class HyperOSMaterialFactory {
         public void setGlassParams(@Nullable GlassParams params) {
             this.glassParams = params;
             invalidateSelf();
-        }
-
-        public void setGlowEnabled(boolean enabled) {
-            if (this.glowEnabled != enabled) {
-                this.glowEnabled = enabled;
-                invalidateSelf();
-            }
         }
 
         public void setDimAlpha(float a) {
@@ -695,32 +633,6 @@ public class HyperOSMaterialFactory {
             return cornerRadiusPercent;
         }
 
-        private void ensureGlowShaders(int width, int height, float cx, float cy, float radius) {
-            if (glowCachedW == width && glowCachedH == height) {
-                return;
-            }
-            glowCachedW = width;
-            glowCachedH = height;
-
-            int coreColor = (tintColor & 0x00FFFFFF) | 0x66000000;
-            RadialGradient glowShader = new RadialGradient(
-                cx, cy, radius * 0.88f,
-                new int[]{coreColor, (coreColor & 0x00FFFFFF) | 0x14000000, 0x00000000},
-                new float[]{0f, 0.55f, 1f},
-                Shader.TileMode.CLAMP
-            );
-            glowPaint.setShader(glowShader);
-
-            int auraColor = (tintColor & 0x00FFFFFF) | 0x38000000;
-            RadialGradient auraShader = new RadialGradient(
-                cx, cy, radius,
-                new int[]{0x00000000, auraColor, 0x00000000},
-                new float[]{0.68f, 0.88f, 1f},
-                Shader.TileMode.CLAMP
-            );
-            outerAuraPaint.setShader(auraShader);
-        }
-
         @Override
         public void draw(@NonNull Canvas canvas) {
             int width = getBounds().width();
@@ -738,23 +650,14 @@ public class HyperOSMaterialFactory {
             }
 
             drawUnifiedCircularOpticsCached(
-                canvas, width, height, style, isSelected, bgPaint, highlightPaint, borderPaint, opticsCache, cornerRadiusPercent, glassParams
+                canvas, width, height, style, isSelected, bgPaint, highlightPaint, opticsCache, cornerRadiusPercent, glassParams
             );
-
-            if (isSelected && glowEnabled) {
-                ensureGlowShaders(width, height, w / 2f, h / 2f, maxR);
-                canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, glowPaint);
-                canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, outerAuraPaint);
-            }
         }
 
         @Override
         public void setAlpha(int alpha) {
             bgPaint.setAlpha(alpha);
-            borderPaint.setAlpha(alpha);
             highlightPaint.setAlpha(alpha);
-            glowPaint.setAlpha(alpha);
-            outerAuraPaint.setAlpha(alpha);
             if (dimAlpha > 0.001f) {
                 dimPaint.setAlpha(Math.round((alpha / 255f) * dimAlpha * 255f));
             }

@@ -200,7 +200,6 @@ fun HyperOpenApp(
     var glyphPadEnabled by remember { mutableStateOf(initialConfig.glyphPadEnabled) }
     var glyphPadColor by remember { mutableIntStateOf(initialConfig.glyphPadColor) }
     var glyphPadMode by remember { mutableIntStateOf(initialConfig.glyphPadMode) }
-    var iconGlowEffect by remember { mutableStateOf(initialConfig.iconGlowEffect) }
     var glassPreset by remember { mutableIntStateOf(initialConfig.glassPreset) }
     var glassRefractIor by remember { mutableFloatStateOf(initialConfig.glassRefractIor) }
     var glassThickness by remember { mutableFloatStateOf(initialConfig.glassThickness) }
@@ -475,7 +474,6 @@ fun HyperOpenApp(
         c.glyphPadEnabled = glyphPadEnabled
         c.glyphPadColor = glyphPadColor
         c.glyphPadMode = glyphPadMode
-        c.iconGlowEffect = iconGlowEffect
         c.glassPreset = glassPreset
         c.glassRefractIor = glassRefractIor
         c.glassThickness = glassThickness
@@ -587,7 +585,6 @@ fun HyperOpenApp(
         glyphPadEnabled = defaults.glyphPadEnabled
         glyphPadColor = defaults.glyphPadColor
         glyphPadMode = defaults.glyphPadMode
-        iconGlowEffect = defaults.iconGlowEffect
         glassPreset = defaults.glassPreset
         glassRefractIor = defaults.glassRefractIor
         glassThickness = defaults.glassThickness
@@ -657,7 +654,7 @@ fun HyperOpenApp(
 
     val currentLiveConfig = remember(
         materialStyle, bubbleDimAlpha, iconCornerRadius, iconAlpha,
-        bubblePaddingPercent, iconGlowEffect, glyphPadEnabled, glyphPadColor, glyphPadMode,
+        bubblePaddingPercent, glyphPadEnabled, glyphPadColor, glyphPadMode,
         glassPreset, glassRefractIor, glassThickness, glassSpecular, glassMatteAlpha, glassBorderLight, glassUseNative
     ) {
         HyperOpenConfig.loadFromApp(ctx).apply {
@@ -666,7 +663,6 @@ fun HyperOpenApp(
             this.iconCornerRadius = iconCornerRadius.toInt().coerceIn(0, 50)
             this.iconAlpha = iconAlpha
             this.bubblePaddingPercent = bubblePaddingPercent.toInt().coerceIn(0, 40)
-            this.iconGlowEffect = iconGlowEffect
             this.glyphPadEnabled = glyphPadEnabled
             this.glyphPadColor = glyphPadColor
             this.glyphPadMode = glyphPadMode
@@ -880,7 +876,7 @@ fun HyperOpenApp(
                             this.hapticMode = hapticMode
                             this.iconSpacingOffset = iconSpacingOffset.toInt()
                             this.bubblePaddingPercent = bubblePaddingPercent.toInt()
-                            this.iconGlowEffect = iconGlowEffect
+                            this.glyphPadEnabled = glyphPadEnabled
                             this.glassPreset = glassPreset
                             this.glassRefractIor = glassRefractIor
                             this.glassThickness = glassThickness
@@ -1231,8 +1227,6 @@ fun HyperOpenApp(
                                     onBubblePaddingPercent = { bubblePaddingPercent = it; persist() },
                                     bubbleBlurRadius = bubbleBlurRadius,
                                     onBubbleBlurRadius = { bubbleBlurRadius = it; persist() },
-                                    iconGlowEffect = iconGlowEffect,
-                                    onIconGlowEffect = { iconGlowEffect = it; persist() },
                                 )
                             }
                             1 -> {

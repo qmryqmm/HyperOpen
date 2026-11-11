@@ -931,7 +931,6 @@ fun ShortcutBubbleIcon(
         item.appIconCropMode, item.glyphPadEnabled, item.glyphPadColor, item.glyphPadMode,
         item.tintColor, sizePx, resolvedStyle,
         cfg.appIconCropMode, cfg.glyphPadEnabled, cfg.glyphPadColor, cfg.glyphPadMode,
-        cfg.iconGlowEffect,
     ).joinToString("|")
 
     key(viewKey) {

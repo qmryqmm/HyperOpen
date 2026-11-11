@@ -272,7 +272,7 @@ public class CircularRegionBackdropView extends FrameLayout {
                 canvas.drawCircle(getWidth() / 2f, getHeight() / 2f, Math.min(getWidth(), getHeight()) / 2f, dimPaint);
             }
             HyperOSMaterialFactory.drawUnifiedCircularOpticsCached(
-                canvas, getWidth(), getHeight(), style, false, bgPaint, highlightPaint, borderPaint, opticsCache, 50, glassParams
+                canvas, getWidth(), getHeight(), style, false, bgPaint, highlightPaint, opticsCache, 50, glassParams
             );
         }
     }
