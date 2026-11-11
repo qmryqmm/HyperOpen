@@ -517,7 +517,8 @@ public final class IconGlyphFactory {
                 float cx = b.exactCenterX();
                 float cy = b.exactCenterY();
                 float halfRadius = Math.max(1f, Math.min(b.width(), b.height()) / 2f - 1f);
-                float cornerRadius = halfRadius * (cornerRadiusPercent / 50f);
+                // 圆角公式与气泡 Outline / 光学层 / 图标裁切统一（BubbleBlurSpec 唯一实现）
+                float cornerRadius = io.github.qmryqmm.hyperopen.util.BubbleBlurSpec.cornerRadiusOfHalfSize(halfRadius, cornerRadiusPercent);
                 canvas.drawRoundRect(
                     cx - halfRadius,
                     cy - halfRadius,

@@ -92,6 +92,8 @@ class HyperOpenPreviewView(
     private lateinit var headerTitle: TextView
     private lateinit var headerSubtitle: TextView
     private lateinit var editBanner: TextView
+    /** 顶部提示胶囊背景控制器（与真机 CustomHyperOpenContainer 同源：统一材质参数 + blur 生命周期） */
+    private var headerPillBackdrop: io.github.qmryqmm.hyperopen.view.HeaderPillBackdrop? = null
 
     private lateinit var regionBackdrop: CircularRegionBackdropView
     /** 全屏扇区分隔虚线覆盖层（独立于圆形底衬，虚线可延伸到屏幕外） */
@@ -293,7 +295,7 @@ class HyperOpenPreviewView(
         val btnSize = dpToPx(40f).toInt()
         val backBtn = FrameLayout(context).apply {
             background = HyperOSMaterialFactory.createCircularBubbleDrawable(
-                resolvedStyle, 0xFFFFFFFF.toInt(), false, false
+                resolvedStyle, 0xFFFFFFFF.toInt(), false, config.glassParamsFor(HyperOpenConfig.COMPONENT_BUBBLE)
             )
             isClickable = true
             isFocusable = true
@@ -339,7 +341,11 @@ class HyperOpenPreviewView(
             gravity = Gravity.CENTER
             val padH = dpToPx(14f).toInt()
             setPadding(padH, 0, padH, 0)
-            background = HyperOSMaterialFactory.createHeaderPillDrawable(resolvedStyle, config.headerDimAlpha)
+            background = HyperOSMaterialFactory.createHeaderPillDrawable(
+                resolvedStyle,
+                config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_HEADER),
+                config.glassParamsFor(HyperOpenConfig.COMPONENT_HEADER)
+            )
             outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: android.graphics.Outline) {
                     if (view.width <= 0 || view.height <= 0) return
@@ -390,7 +396,11 @@ class HyperOpenPreviewView(
             gravity = Gravity.CENTER
             val padH = dpToPx(14f).toInt()
             setPadding(padH, 0, padH, 0)
-            background = HyperOSMaterialFactory.createHeaderPillDrawable(resolvedStyle, config.headerDimAlpha)
+            background = HyperOSMaterialFactory.createHeaderPillDrawable(
+                resolvedStyle,
+                config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_HEADER),
+                config.glassParamsFor(HyperOpenConfig.COMPONENT_HEADER)
+            )
             outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: android.graphics.Outline) {
                     if (view.width <= 0 || view.height <= 0) return
@@ -427,7 +437,7 @@ class HyperOpenPreviewView(
         val size = dpToPx(72f).toInt()
         val btn = FrameLayout(context).apply {
             background = HyperOSMaterialFactory.createCircularBubbleDrawable(
-                resolvedStyle, 0xFFFFFFFF.toInt(), false, true
+                resolvedStyle, 0xFFFFFFFF.toInt(), false, config.glassParamsFor(HyperOpenConfig.COMPONENT_BUBBLE)
             )
             isClickable = true
             isFocusable = true
@@ -671,12 +681,36 @@ class HyperOpenPreviewView(
         notifyBlurSceneChanged()
     }
 
+    /**
+     * 刷新预览界面悬浮按钮（返回 / 指纹 / 吸附开关 / 面板常驻开关）的统一材质背景：
+     * 与图标气泡同一套 GlassParams 光学参数，材质热更新后即时跟随。
+     */
     private fun refreshFloatingBackButtonBackground() {
-        val btn = floatingBackButton ?: return
-        btn.background = HyperOSMaterialFactory.createCircularBubbleDrawable(
-            resolvedStyle, 0xFFFFFFFF.toInt(), false, false
-        )
-        btn.invalidate()
+        val bubbleParams = config.glassParamsFor(HyperOpenConfig.COMPONENT_BUBBLE)
+        val pillParams = config.glassParamsFor(HyperOpenConfig.COMPONENT_HEADER)
+        val pillDim = config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_HEADER)
+        floatingBackButton?.let { btn ->
+            btn.background = HyperOSMaterialFactory.createCircularBubbleDrawable(
+                resolvedStyle, 0xFFFFFFFF.toInt(), false, bubbleParams
+            )
+            btn.invalidate()
+        }
+        fingerprintButton?.let { btn ->
+            (btn as? android.widget.FrameLayout)?.let { fb ->
+                fb.background = HyperOSMaterialFactory.createCircularBubbleDrawable(
+                    resolvedStyle, 0xFFFFFFFF.toInt(), false, bubbleParams
+                )
+                fb.invalidate()
+            }
+        }
+        snapToggleButton?.let { btn ->
+            btn.background = HyperOSMaterialFactory.createHeaderPillDrawable(resolvedStyle, pillDim, pillParams)
+            btn.invalidate()
+        }
+        alwaysShowToggleButton?.let { btn ->
+            btn.background = HyperOSMaterialFactory.createHeaderPillDrawable(resolvedStyle, pillDim, pillParams)
+            btn.invalidate()
+        }
     }
 
     private fun buildHeader() {
@@ -792,19 +826,26 @@ class HyperOpenPreviewView(
     }
 
     /**
-     * 按 showHeaderPillBg 开关与 materialStyle 材质动态设置顶部提示胶囊背景
+     * 按 showHeaderPillBg 开关与统一材质参数动态设置顶部提示胶囊背景
+     * （与真机 createCompositeHeaderPillDrawable 路径同源的 HeaderPillBackdrop：
+     * 统一 GlassParams 光学参数 + BlurRegionSession blur 生命周期）
      */
     private fun applyHeaderPillBackground() {
         if (!::headerPill.isInitialized) return
         val show = config.showHeaderPill && config.showHeaderPillBg
         if (show) {
-            // 与真实侧 createCompositeHeaderPillDrawable 同源：系统 BackgroundBlur + 光学层复合
-            val blurPx = if (config.headerBlurRadius > 0) dpToPx(config.headerBlurRadius.toFloat()).toInt() else 0
-            headerPill.background = HyperOSMaterialFactory.createCompositeHeaderPillDrawable(
-                headerPill, resolvedStyle, blurPx, config.headerDimAlpha
-            )
+            val blurDp = config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_HEADER)
+            val blurPx = if (blurDp > 0) dpToPx(blurDp.toFloat()).toInt() else 0
+            val params = config.glassParamsFor(HyperOpenConfig.COMPONENT_HEADER)
+            val dim = config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_HEADER)
+            val backdrop = headerPillBackdrop ?: io.github.qmryqmm.hyperopen.view.HeaderPillBackdrop(
+                resolvedStyle, params, blurPx, dim
+            ).also { headerPillBackdrop = it }
+            backdrop.update(resolvedStyle, params, blurPx, dim)
+            backdrop.applyTo(headerPill)
             headerPill.clipToOutline = true
         } else {
+            headerPillBackdrop?.removeFrom(headerPill)
             headerPill.background = null
             headerPill.clipToOutline = false
         }
@@ -923,7 +964,6 @@ class HyperOpenPreviewView(
             old.layoutStyle != newConfig.layoutStyle ||
             old.ringSectorMode != newConfig.ringSectorMode ||
             old.ringCount != newConfig.ringCount ||
-            old.iconGlowEffect != newConfig.iconGlowEffect ||
             old.glyphPadEnabled != newConfig.glyphPadEnabled ||
             old.glyphPadColor != newConfig.glyphPadColor ||
             old.glyphPadMode != newConfig.glyphPadMode ||
@@ -937,13 +977,12 @@ class HyperOpenPreviewView(
 
         this.config = newConfig
         this.resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(context, config.materialStyle)
-        val glassParams = HyperOSMaterialFactory.GlassParams.fromConfig(config)
         refreshBackdropMask()
         if (::regionBackdrop.isInitialized) {
             regionBackdrop.setStyle(resolvedStyle)
-            regionBackdrop.setGlassParams(glassParams)
-            regionBackdrop.setBlurRadius(if (config.showRegionBg) config.regionBlurRadius.toFloat() else 0f)
-            regionBackdrop.setDimAlpha(if (config.showRegionBg) config.regionDimAlpha else 0f)
+            regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION))
+            regionBackdrop.setBlurRadius(if (config.showRegionBg) config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION).toFloat() else 0f)
+            regionBackdrop.setDimAlpha(if (config.showRegionBg) config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION) else 0f)
             // 扇区分隔线样式（颜色/透明度/虚线规格）热生效
             val liveSpec = ringSectorSpec
             if (liveSpec != null && isRingSectorActive()) {
@@ -968,10 +1007,11 @@ class HyperOpenPreviewView(
         refreshFloatingBackButtonBackground()
         for (b in bubbleViews) {
             // 与真实侧 setupBubbles 复用分支的 setter 全集保持一致（含材质/模糊/留白/玻璃刷新）
+            b.updateConfig(config)
             b.setMaterialStyle(resolvedStyle)
-            b.setBlurRadius(config.bubbleBlurRadius.toFloat())
+            b.setBlurRadius(config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE).toFloat())
             b.setBubblePaddingPercent(config.bubblePaddingPercent)
-            b.setDimAlpha(config.bubbleDimAlpha)
+            b.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE))
             b.setCornerRadiusPercent(config.iconCornerRadius)
             b.setIconAlpha(config.iconAlpha)
             b.ensureBlurAndRefreshBackground()
@@ -1052,8 +1092,9 @@ class HyperOpenPreviewView(
         regionBackdrop.visibility = if (config.showRegionBg) View.VISIBLE else View.GONE
         regionBackdrop.setSystemBlurEnabled(true)
         regionBackdrop.setStyle(resolvedStyle)
-        regionBackdrop.setBlurRadius(if (config.showRegionBg) config.regionBlurRadius.toFloat() else 0f)
-        regionBackdrop.setDimAlpha(if (config.showRegionBg) config.regionDimAlpha else 0f)
+        regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION))
+        regionBackdrop.setBlurRadius(if (config.showRegionBg) config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION).toFloat() else 0f)
+        regionBackdrop.setDimAlpha(if (config.showRegionBg) config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION) else 0f)
         regionBackdrop.updateGeometry(regionRadiusPx)
         val rLp = LayoutParams(regionDiameterPx.toInt(), regionDiameterPx.toInt()).apply {
             leftMargin = (fodX - regionRadiusPx).toInt()
@@ -1154,7 +1195,8 @@ class HyperOpenPreviewView(
             sectorOverlay.clear()
         }
 
-        // 实例化气泡（预览界面禁用底层窗口级 BackgroundBlur，由 Compose 的 textureBlur 渲染实时壁纸模糊，确保样式与真实锁屏 1:1 对齐且无双层叠加闪烁）
+        // 实例化气泡（气泡材质参数由 CircularBubbleView 经 HyperOpenConfig 组件级解析统一取值，
+        // 与真机 setupBubbles 完全同源；窗口级 BackgroundBlur 直接模糊壁纸 Surface，无双层叠加）
         val bubbleCount = minOf(points.size, activeShortcuts.size)
         for (i in 0 until bubbleCount) {
             val item = activeShortcuts[i]
@@ -1964,7 +2006,7 @@ class HyperOpenPreviewView(
                     .setDuration(140)
                     .setInterpolator(android.view.animation.LinearInterpolator())
                     .setUpdateListener { b.syncBlurCornerRadiusWithViewScale() }
-                    .withEndAction { b.applyScale(1.0f) }
+                    .withEndAction { b.applyScale(1.0f); b.ensureBlurAndRefreshBackground() }
                     .start()
                 b.setIconAlpha(0.25f)
             }
@@ -2007,6 +2049,7 @@ class HyperOpenPreviewView(
 
             bubblesContainer.addView(sub)
             folderSubBubbles.add(sub)
+            sub.ensureBlurAndRefreshBackground()
 
             sub.animate()
                 .translationX(0f)
@@ -2138,10 +2181,11 @@ class HyperOpenPreviewView(
                         b.syncBlurCornerRadiusWithViewScale()
                         notifyBlurSceneChanged()
                     }
-                    .withEndAction { b.applyScale(1.0f) }
+                    .withEndAction { b.applyScale(1.0f); b.ensureBlurAndRefreshBackground() }
                     .start()
             } else {
                 b.applyScale(1.0f)
+                b.ensureBlurAndRefreshBackground()
             }
             b.setIconAlpha(config.iconAlpha)
         }

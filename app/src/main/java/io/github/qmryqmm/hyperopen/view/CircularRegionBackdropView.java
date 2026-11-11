@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Outline;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.util.AttributeSet;
 import android.util.TypedValue;
@@ -14,10 +15,8 @@ import android.widget.FrameLayout;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import java.lang.ref.WeakReference;
-
-import io.github.qmryqmm.hyperopen.factory.HyperOSBlurHelper;
 import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory;
+import io.github.qmryqmm.hyperopen.util.BlurRegionSession;
 
 /**
  * 圆形视界区域背景视图：
@@ -28,6 +27,10 @@ import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory;
  * 4. 严格正圆形 OutlineProvider 硬件裁切，确保圆内实时高斯模糊、圆外 100% 清晰原始画面；
  * 5. 叠加水润通透次表面散射、液态玻璃天穹切面高光与菲涅尔镜面圆环；
  * 6. 与全屏模糊彻底解耦，独立受控于自身的模糊半径与透明度。
+ * <p>
+ * 光学层复用 {@link HyperOSMaterialFactory#drawUnifiedCircularOpticsCached}（与图标气泡、
+ * 顶部提示胶囊严格同一套材质参数与绘制方式）；模糊生命周期由 {@link BlurRegionSession}
+ * 统一管理（与气泡 / 胶囊共用）。
  */
 public class CircularRegionBackdropView extends FrameLayout {
 
@@ -38,8 +41,8 @@ public class CircularRegionBackdropView extends FrameLayout {
     private HyperOSMaterialFactory.GlassParams glassParams = null;
 
     private OverlayDrawView overlayView;
-    private Drawable systemBackdropBlurDrawable;
-    private WeakReference<Object> boundVriRef;
+    /** 系统级背景模糊统一会话（与图标气泡 / 顶部提示胶囊共用同一生命周期实现） */
+    private final BlurRegionSession blurSession = new BlurRegionSession();
     private boolean systemBlurEnabled = true;
 
     public CircularRegionBackdropView(@NonNull Context context) {
@@ -64,8 +67,7 @@ public class CircularRegionBackdropView extends FrameLayout {
         if (this.systemBlurEnabled != enabled) {
             this.systemBlurEnabled = enabled;
             if (!enabled) {
-                systemBackdropBlurDrawable = null;
-                boundVriRef = null;
+                blurSession.release();
                 setBackground(null);
             } else if (currentRadiusPx > 0) {
                 updateGeometry(currentRadiusPx);
@@ -108,12 +110,9 @@ public class CircularRegionBackdropView extends FrameLayout {
     @Override
     protected void onVisibilityChanged(@NonNull View changedView, int visibility) {
         super.onVisibilityChanged(changedView, visibility);
+        // 每次恢复可见均重新校准 blur 会话（BlurRegionSession 内部自愈失效的旧 ViewRootImpl 句柄）
         if (visibility == View.VISIBLE && currentRadiusPx > 0 && systemBlurEnabled) {
-            Object currentVri = HyperOSBlurHelper.findViewRootImpl(this);
-            Object boundVri = boundVriRef != null ? boundVriRef.get() : null;
-            if (systemBackdropBlurDrawable == null || currentVri != boundVri) {
-                post(() -> updateGeometry(currentRadiusPx));
-            }
+            post(() -> updateGeometry(currentRadiusPx));
         }
     }
 
@@ -167,8 +166,7 @@ public class CircularRegionBackdropView extends FrameLayout {
      * 重置模糊实例，避免跨生命周期持有失效的旧 ViewRootImpl 句柄
      */
     public void reset() {
-        systemBackdropBlurDrawable = null;
-        boundVriRef = null;
+        blurSession.release();
         setBackground(null);
     }
 
@@ -185,34 +183,15 @@ public class CircularRegionBackdropView extends FrameLayout {
         int tint = HyperOSMaterialFactory.getUnifiedBlurTint(style, glassParams);
 
         if (blurPx <= 0) {
-            systemBackdropBlurDrawable = null;
-            boundVriRef = null;
+            blurSession.release();
             setBackground(null);
         } else {
-            Object currentVri = HyperOSBlurHelper.findViewRootImpl(this);
-            Object boundVri = boundVriRef != null ? boundVriRef.get() : null;
-
-            // 仅当未创建或宿主 ViewRootImpl 发生变化时才重新创建 BackgroundBlurDrawable
-            if (systemBackdropBlurDrawable != null && currentVri != null && currentVri == boundVri) {
-                HyperOSBlurHelper.updateBlurDrawable(systemBackdropBlurDrawable, radiusPx, blurPx, tint);
-                try {
-                    systemBackdropBlurDrawable.setVisible(true, false);
-                } catch (Throwable ignored) {}
-            } else {
-                Drawable bd = HyperOSBlurHelper.createSystemBackdropBlurDrawable(this, radiusPx, blurPx, tint);
-                if (bd != null) {
-                    systemBackdropBlurDrawable = bd;
-                    boundVriRef = currentVri != null ? new WeakReference<>(currentVri) : null;
-                    setBackground(systemBackdropBlurDrawable);
-                    try {
-                        systemBackdropBlurDrawable.setVisible(true, true);
-                    } catch (Throwable ignored) {}
-                } else if (systemBackdropBlurDrawable != null) {
-                    HyperOSBlurHelper.updateBlurDrawable(systemBackdropBlurDrawable, radiusPx, blurPx, tint);
-                    try {
-                        systemBackdropBlurDrawable.setVisible(true, false);
-                    } catch (Throwable ignored) {}
-                }
+            int w = getWidth() > 0 ? getWidth() : Math.round(radiusPx * 2f);
+            int h = getHeight() > 0 ? getHeight() : Math.round(radiusPx * 2f);
+            // 系统界面契约：blur drawable 挂背景槽完成注册；圆形底衬不缩放，bounds 由 View 布局管理
+            Drawable bd = blurSession.ensureFor(this, null, Math.min(w, h) / 2f, blurPx, tint);
+            if (bd != null && getBackground() != bd) {
+                setBackground(bd);
             }
         }
 
@@ -231,13 +210,14 @@ public class CircularRegionBackdropView extends FrameLayout {
         int tint = HyperOSMaterialFactory.getUnifiedBlurTint(style, glassParams);
 
         if (blurPx <= 0) {
-            if (systemBackdropBlurDrawable != null) {
-                systemBackdropBlurDrawable = null;
-                boundVriRef = null;
+            if (blurSession.isActive()) {
+                blurSession.release();
                 setBackground(null);
             }
-        } else if (systemBackdropBlurDrawable != null) {
-            HyperOSBlurHelper.updateBlurDrawable(systemBackdropBlurDrawable, currentRadiusPx, blurPx, tint);
+        } else if (blurSession.isActive() && currentRadiusPx > 0) {
+            int w = getWidth() > 0 ? getWidth() : Math.round(currentRadiusPx * 2f);
+            int h = getHeight() > 0 ? getHeight() : Math.round(currentRadiusPx * 2f);
+            blurSession.ensureFor(this, null, Math.min(w, h) / 2f, blurPx, tint);
         }
 
         if (overlayView != null) {
@@ -260,7 +240,7 @@ public class CircularRegionBackdropView extends FrameLayout {
         public OverlayDrawView(Context context) {
             super(context);
             borderPaint.setStyle(Paint.Style.STROKE);
-            borderPaint.setStrokeWidth(2.0f);
+            borderPaint.setStrokeWidth(HyperOSMaterialFactory.OPTICS_BORDER_STROKE_WIDTH);
             dimPaint.setStyle(Paint.Style.FILL);
         }
 

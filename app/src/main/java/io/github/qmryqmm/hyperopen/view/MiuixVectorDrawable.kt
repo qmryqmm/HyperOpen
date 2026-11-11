@@ -93,7 +93,8 @@ class MiuixVectorDrawable @JvmOverloads constructor(
             val cx = b.exactCenterX()
             val cy = b.exactCenterY()
             val halfRadius = Math.max(1f, Math.min(b.width(), b.height()) / 2f - 1f)
-            val cornerRadius = halfRadius * (cornerRadiusPercent.coerceIn(0, 50) / 50f)
+            // 圆角公式与气泡 Outline / 光学层 / 图标裁切统一（BubbleBlurSpec 唯一实现）
+            val cornerRadius = io.github.qmryqmm.hyperopen.util.BubbleBlurSpec.cornerRadiusOfHalfSize(halfRadius, cornerRadiusPercent)
             canvas.drawRoundRect(
                 cx - halfRadius,
                 cy - halfRadius,

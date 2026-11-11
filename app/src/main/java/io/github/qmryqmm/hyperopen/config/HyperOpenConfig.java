@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 
+import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory;
 import io.github.qmryqmm.hyperopen.model.ShortcutItem;
 
 import org.json.JSONArray;
@@ -214,6 +215,10 @@ public class HyperOpenConfig {
     /** 图标分布紧凑度间距微调 (-10dp ~ 20dp，默认 5dp，负值更紧凑，正值更松散) */
     public int iconSpacingOffset = 5;
     /** 气泡内部图标留白比例 (0% ~ 40%，默认 0%)；0% 图标满铺并直接关闭气泡：底衬、模糊与压暗一并停用 */
+    /**
+     * 气泡内部留白比例 (0 ~ 40%)：同时是气泡整体开关——0% 时气泡底衬/模糊/压暗全部关闭，
+     * 仅显示图标。
+     */
     public int bubblePaddingPercent = 0;
     /** 图标气泡留白区域高斯模糊半径 (0 ~ 50 dp，默认 25 dp，0 为关闭模糊，样式与圆形视界底衬一致) */
     public int bubbleBlurRadius = 25;
@@ -226,8 +231,9 @@ public class HyperOpenConfig {
     public int glyphPadColor = 0xFF2A82E4;
     /** Miuix 矢量图标底垫质感模式 (GLYPH_PAD_MODE_SOLID / TRANSLUCENT / INVERTED) */
     public int glyphPadMode = GLYPH_PAD_MODE_TRANSLUCENT;
-    /** 图标呼吸/激活外发光辉光动效 */
-    public boolean iconGlowEffect = true;
+    /** 图标呼吸/激活外发光辉光动效（已移除，保留字段兼容旧配置读取） */
+    @Deprecated
+    public boolean iconGlowEffect = false;
 
     // ── 柔光玻璃系统级细调参数 ──
     public static final int GLASS_PRESET_DEFAULT = 0;
@@ -263,6 +269,149 @@ public class HyperOpenConfig {
     public float bubbleGlassMatteAlpha = 0.12f;
     public float regionGlassMatteAlpha = 0.12f;
     public float headerGlassMatteAlpha = 0.12f;
+
+    /** 模糊基线一次性自愈标记（见 {@link #healBlurBaselineIfNeeded}） */
+    public boolean blurBaselineHealed = false;
+
+    // ──────────────────────────────────────────────────────────────
+    // 组件级材质有效值解析（唯一数据源）
+    //
+    // 图标气泡 / 图标显示区域底衬 / 顶部提示胶囊三种载体的模糊、压暗与磨砂参数
+    // 必须经由此处的 effective* 系列解析后再喂给渲染层：
+    //   · 模糊半径：以模糊滑块为基准（跟随全局取 globalBlurRadius，否则取组件独立值）；
+    //     柔光玻璃模式下磨砂浓度只做向上增益，绝不把模糊抽空；
+    //   · 磨砂浓度：全局（预设/自定义玻璃参数）或组件级「柔光磨砂浓度」，
+    //     驱动柔光雾面渐变与模糊底色 tint；
+    //   · 「跟随全局材质」关闭时取组件独立参数，开启时取全局参数；
+    // 真机（CustomHyperOpenContainer）与 App 预览（HyperOpenPreviewView / ShortcutCardList）
+    // 都必须走同一入口，禁止任何一侧再各自换算，否则预览与实机效果必然漂移。
+    // ──────────────────────────────────────────────────────────────
+
+    /** 材质载体：图标气泡 */
+    public static final int COMPONENT_BUBBLE = 0;
+    /** 材质载体：图标显示区域底衬 */
+    public static final int COMPONENT_REGION = 1;
+    /** 材质载体：顶部提示胶囊 */
+    public static final int COMPONENT_HEADER = 2;
+
+    /**
+     * 柔光磨砂浓度 (0.0 ~ 0.40) → 模糊半径 dp (0 ~ 50) 的换算。
+     * 仅作为柔光模式下磨砂对模糊的「向上增益」，绝不作为模糊的唯一来源
+     * （历史上以此值整体替换模糊半径，磨砂滑块被拖低时模糊随之塌缩消失）。
+     */
+    public static int matteToBlurDp(float matteAlpha) {
+        float clamped = Math.max(0f, Math.min(0.40f, matteAlpha));
+        return (int) (clamped / 0.40f * 50f);
+    }
+
+    /** 该组件材质是否跟随全局 */
+    public boolean materialFollowGlobal(int component) {
+        switch (component) {
+            case COMPONENT_BUBBLE: return bubbleMaterialFollowGlobal;
+            case COMPONENT_REGION: return regionMaterialFollowGlobal;
+            default: return headerMaterialFollowGlobal;
+        }
+    }
+
+    /** 该组件独立的模糊半径滑块原始值 (dp) */
+    private int rawBlurRadiusFor(int component) {
+        switch (component) {
+            case COMPONENT_BUBBLE: return bubbleBlurRadius;
+            case COMPONENT_REGION: return regionBlurRadius;
+            default: return headerBlurRadius;
+        }
+    }
+
+    /**
+     * 该组件最终生效的磨砂浓度：
+     * 跟随全局 → 全局 {@link HyperOSMaterialFactory.GlassParams}（预设或自定义）的 matteAlpha；
+     * 独立 → 组件级「柔光磨砂浓度」滑块值。柔光玻璃的雾面渐变与模糊底色 tint 都用此值。
+     */
+    public float effectiveMatteAlpha(int component) {
+        float custom;
+        if (materialFollowGlobal(component)) {
+            custom = HyperOSMaterialFactory.GlassParams.fromConfig(this).matteAlpha;
+        } else {
+            switch (component) {
+                case COMPONENT_BUBBLE: custom = bubbleGlassMatteAlpha; break;
+                case COMPONENT_REGION: custom = regionGlassMatteAlpha; break;
+                default: custom = headerGlassMatteAlpha; break;
+            }
+        }
+        return HyperOSMaterialFactory.clampMatte(custom);
+    }
+
+    /**
+     * 该组件最终生效的模糊半径 (dp)：
+     * <ul>
+     *   <li>基准 = 模糊半径滑块链：跟随全局取 globalBlurRadius，否则取组件独立滑块值；</li>
+     *   <li>柔光玻璃模式下磨砂浓度按滑块文案「同时影响模糊半径」做<b>向上增益</b>
+     *       （{@link #matteToBlurDp}），只增不减——磨砂滑块调低只减弱雾面质感，
+     *       绝不把模糊整体抽空（历史回归点：曾用磨砂换算值整体替换模糊半径，
+     *       磨砂拖到最低后图标/底衬/胶囊模糊全部消失）；</li>
+     *   <li>「已关闭模糊」仍生效：高斯模式下把对应模糊滑块设 0 即可。</li>
+     * </ul>
+     */
+    public int effectiveBlurRadiusDp(int component) {
+        int base = materialFollowGlobal(component) ? globalBlurRadius : rawBlurRadiusFor(component);
+        int resolved = Math.max(0, base);
+        if (materialStyle == MATERIAL_SOFT_GLASS) {
+            resolved = Math.max(resolved, matteToBlurDp(effectiveMatteAlpha(component)));
+        }
+        return resolved;
+    }
+
+    /** 该组件最终生效的压暗程度 (0.0 ~ 1.0)：跟随全局用 globalDimAlpha，否则用组件独立值 */
+    public float effectiveDimAlpha(int component) {
+        float v;
+        if (materialFollowGlobal(component)) {
+            v = globalDimAlpha;
+        } else {
+            switch (component) {
+                case COMPONENT_BUBBLE: v = bubbleDimAlpha; break;
+                case COMPONENT_REGION: v = regionDimAlpha; break;
+                default: v = headerDimAlpha; break;
+            }
+        }
+        return Math.max(0f, Math.min(1f, v));
+    }
+
+    /**
+     * 模糊/压暗基线一次性自愈（所有加载入口统一调用）。
+     * <p>
+     * 历史背景：重构前真机侧恒以组件独立 *BlurRadius / *DimAlpha 渲染，
+     * 「跟随全局」与全局滑块从未在真机生效，于是配置里残留了
+     * 「globalBlurRadius=0 / globalDimAlpha=0，但组件值 >0 且跟随全局=开」的
+     * 陷阱状态（多为调试滑块时留下）。统一生效链路后若不治愈，模糊/压暗会整体消失。
+     * 此处一次性把全局值提升为跟随中的组件最大值；治愈标记持久化后，
+     * 用户再显式设置的 0（已关闭模糊/不压暗）会被尊重，不再干预。
+     */
+    public void healBlurBaselineIfNeeded() {
+        if (blurBaselineHealed) return;
+        blurBaselineHealed = true;
+        if (globalBlurRadius <= 0) {
+            int maxRaw = 0;
+            if (bubbleMaterialFollowGlobal) maxRaw = Math.max(maxRaw, bubbleBlurRadius);
+            if (regionMaterialFollowGlobal) maxRaw = Math.max(maxRaw, regionBlurRadius);
+            if (headerMaterialFollowGlobal) maxRaw = Math.max(maxRaw, headerBlurRadius);
+            if (maxRaw > 0) globalBlurRadius = maxRaw;
+        }
+        if (globalDimAlpha <= 0f) {
+            float maxDim = 0f;
+            if (bubbleMaterialFollowGlobal) maxDim = Math.max(maxDim, bubbleDimAlpha);
+            if (regionMaterialFollowGlobal) maxDim = Math.max(maxDim, regionDimAlpha);
+            if (headerMaterialFollowGlobal) maxDim = Math.max(maxDim, headerDimAlpha);
+            if (maxDim > 0f) globalDimAlpha = maxDim;
+        }
+    }
+
+    /**
+     * 该组件最终生效的玻璃光学参数：全局 GlassParams 基础上叠加组件级磨砂浓度。
+     * 图标气泡、图标显示区域底衬、顶部提示胶囊必须共用此入口，保证严格同一套材质参数。
+     */
+    public HyperOSMaterialFactory.GlassParams glassParamsFor(int component) {
+        return HyperOSMaterialFactory.GlassParams.fromConfig(this).withMatteAlpha(effectiveMatteAlpha(component));
+    }
 
     public List<ShortcutItem> shortcuts = new ArrayList<>();
 
@@ -489,7 +638,7 @@ public class HyperOpenConfig {
                     config.glyphPadEnabled = bundle.getBoolean("glyph_pad_enabled", true);
                     config.glyphPadColor = bundle.getInt("glyph_pad_color", 0xFF2A82E4);
                     config.glyphPadMode = bundle.getInt("glyph_pad_mode", GLYPH_PAD_MODE_TRANSLUCENT);
-                    config.iconGlowEffect = bundle.getBoolean("icon_glow_effect", true);
+                    config.iconGlowEffect = false;
 
                     config.glassPreset = bundle.getInt("glass_preset", GLASS_PRESET_DEFAULT);
                     config.glassRefractIor = bundle.getFloat("glass_refract_ior", 1.12f);
@@ -506,6 +655,12 @@ public class HyperOpenConfig {
                     config.bubbleGlassMatteAlpha = bundle.getFloat("bubble_glass_matte_alpha", 0.12f);
                     config.regionGlassMatteAlpha = bundle.getFloat("region_glass_matte_alpha", 0.12f);
                     config.headerGlassMatteAlpha = bundle.getFloat("header_glass_matte_alpha", 0.12f);
+                    config.blurBaselineHealed = bundle.getBoolean("blur_baseline_healed", false);
+
+                    if (!bundle.containsKey("global_blur_radius")) {
+                        migrateFromLegacy(config);
+                    }
+                    config.healBlurBaselineIfNeeded();
 
                     String jsonStr = bundle.getString("shortcuts_json", null);
                     config.shortcuts = parseShortcutsJson(jsonStr);
@@ -612,7 +767,7 @@ public class HyperOpenConfig {
         config.glyphPadEnabled = xPrefs.getBoolean("glyph_pad_enabled", true);
         config.glyphPadColor = xPrefs.getInt("glyph_pad_color", 0xFF2A82E4);
         config.glyphPadMode = xPrefs.getInt("glyph_pad_mode", GLYPH_PAD_MODE_TRANSLUCENT);
-        config.iconGlowEffect = xPrefs.getBoolean("icon_glow_effect", true);
+        config.iconGlowEffect = false;
 
         config.glassPreset = xPrefs.getInt("glass_preset", GLASS_PRESET_DEFAULT);
         config.glassRefractIor = xPrefs.getFloat("glass_refract_ior", 1.12f);
@@ -629,6 +784,13 @@ public class HyperOpenConfig {
         config.bubbleGlassMatteAlpha = xPrefs.getFloat("bubble_glass_matte_alpha", 0.12f);
         config.regionGlassMatteAlpha = xPrefs.getFloat("region_glass_matte_alpha", 0.12f);
         config.headerGlassMatteAlpha = xPrefs.getFloat("header_glass_matte_alpha", 0.12f);
+        config.blurBaselineHealed = xPrefs.getBoolean("blur_baseline_healed", false);
+
+        // 旧配置迁移
+        if (!xPrefs.contains("global_blur_radius")) {
+            migrateFromLegacy(config);
+        }
+        config.healBlurBaselineIfNeeded();
 
         String jsonStr = xPrefs.getString("shortcuts_json", null);
         config.shortcuts = parseShortcutsJson(jsonStr);
@@ -725,7 +887,7 @@ public class HyperOpenConfig {
         config.glyphPadEnabled = sp.getBoolean("glyph_pad_enabled", true);
         config.glyphPadColor = sp.getInt("glyph_pad_color", 0xFF2A82E4);
         config.glyphPadMode = sp.getInt("glyph_pad_mode", GLYPH_PAD_MODE_TRANSLUCENT);
-        config.iconGlowEffect = sp.getBoolean("icon_glow_effect", true);
+        config.iconGlowEffect = false;
 
         config.glassPreset = sp.getInt("glass_preset", GLASS_PRESET_DEFAULT);
         config.glassRefractIor = sp.getFloat("glass_refract_ior", 1.12f);
@@ -742,10 +904,41 @@ public class HyperOpenConfig {
         config.bubbleGlassMatteAlpha = sp.getFloat("bubble_glass_matte_alpha", 0.12f);
         config.regionGlassMatteAlpha = sp.getFloat("region_glass_matte_alpha", 0.12f);
         config.headerGlassMatteAlpha = sp.getFloat("header_glass_matte_alpha", 0.12f);
+        config.blurBaselineHealed = sp.getBoolean("blur_baseline_healed", false);
+
+        // 旧配置迁移：global_blur_radius key 不存在 = v0.50 时代旧配置
+        if (!sp.contains("global_blur_radius")) {
+            migrateFromLegacy(config);
+        }
+        config.healBlurBaselineIfNeeded();
 
         String jsonStr = sp.getString("shortcuts_json", null);
         config.shortcuts = parseShortcutsJson(jsonStr);
         return config;
+    }
+
+    /**
+     * v0.50 旧配置迁移：global_blur_radius 等字段不存在时自动适配。
+     * <p>
+     * 旧配置中 bubbleBlurRadius/regionBlurRadius/headerBlurRadius 是独立生效的，
+     * 新增的 followGlobal=true + globalBlurRadius 会覆盖它们。
+     * 迁移策略：followGlobal=false 保留旧值；同时反推 *GlassMatteAlpha 使
+     * Plan B 映射 matteToBlur(matteAlpha) 还原旧模糊半径。
+     */
+    private static void migrateFromLegacy(HyperOpenConfig config) {
+        config.bubbleMaterialFollowGlobal = false;
+        config.regionMaterialFollowGlobal = false;
+        config.headerMaterialFollowGlobal = false;
+        config.globalBlurRadius = config.bubbleBlurRadius;
+        config.globalDimAlpha = config.bubbleDimAlpha;
+        // Plan B 反推：matteToBlur(m) = m / 0.40 * 50  =>  m = blurRadius / 50 * 0.40
+        config.bubbleGlassMatteAlpha = clampMatte(config.bubbleBlurRadius / 50f * 0.40f);
+        config.regionGlassMatteAlpha = clampMatte(config.regionBlurRadius / 50f * 0.40f);
+        config.headerGlassMatteAlpha = clampMatte(config.headerBlurRadius / 50f * 0.40f);
+    }
+
+    private static float clampMatte(float v) {
+        return Math.max(0.05f, Math.min(0.40f, v));
     }
 
     /**
@@ -849,7 +1042,7 @@ public class HyperOpenConfig {
             .putBoolean("glyph_pad_enabled", glyphPadEnabled)
             .putInt("glyph_pad_color", glyphPadColor)
             .putInt("glyph_pad_mode", glyphPadMode)
-            .putBoolean("icon_glow_effect", iconGlowEffect)
+            .putBoolean("icon_glow_effect", false)
             .putInt("glass_preset", glassPreset)
             .putFloat("glass_refract_ior", glassRefractIor)
             .putFloat("glass_thickness", glassThickness)
@@ -858,6 +1051,7 @@ public class HyperOpenConfig {
             .putFloat("glass_border_light", glassBorderLight)
             .putBoolean("glass_use_native", glassUseNative)
             .putInt("global_blur_radius", globalBlurRadius)
+            .putBoolean("blur_baseline_healed", blurBaselineHealed)
             .putFloat("global_dim_alpha", globalDimAlpha)
             .putBoolean("bubble_material_follow_global", bubbleMaterialFollowGlobal)
             .putBoolean("region_material_follow_global", regionMaterialFollowGlobal)

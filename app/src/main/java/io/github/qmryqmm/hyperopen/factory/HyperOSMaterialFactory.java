@@ -19,6 +19,7 @@ import androidx.annotation.Nullable;
 import java.lang.reflect.Method;
 
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig;
+import io.github.qmryqmm.hyperopen.util.BubbleBlurSpec;
 
 /**
  * HyperOS 材质工程：柔光玻璃（Soft Light Glass）与高斯模糊（Gaussian Blur）次世代实现。
@@ -30,6 +31,17 @@ import io.github.qmryqmm.hyperopen.config.HyperOpenConfig;
 public class HyperOSMaterialFactory {
     public static final int STYLE_SOFT_GLASS = 1;
     public static final int STYLE_GAUSSIAN_BLUR = 2;
+
+    /** 统一光学描边宽度：气泡、圆形视界底衬、顶部提示胶囊共用，禁止各处私自取值 */
+    public static final float OPTICS_BORDER_STROKE_WIDTH = 1.5f;
+
+    /**
+     * 磨砂浓度统一值域：与各设置页滑块（5%~40%）及 blur tint 采样范围一致。
+     * 所有材质绘制与 tint 合成都必须经此钳制，保证同一参数在三种载体上响应完全一致。
+     */
+    public static float clampMatte(float matteAlpha) {
+        return Math.max(0.04f, Math.min(0.40f, matteAlpha));
+    }
 
     /**
      * 柔光玻璃系统级可微调光学参数结构体
@@ -78,6 +90,12 @@ public class HyperOSMaterialFactory {
                 && Math.abs(matteAlpha - other.matteAlpha) < 0.001f
                 && Math.abs(borderLight - other.borderLight) < 0.001f;
         }
+
+        /** 生成仅磨砂浓度不同的副本（组件级「柔光磨砂浓度」独立参数用），其余光学参数保持一致 */
+        public GlassParams withMatteAlpha(float matteAlpha) {
+            GlassParams p = new GlassParams(ior, thickness, specular, matteAlpha, borderLight);
+            return p;
+        }
     }
 
     /**
@@ -96,7 +114,7 @@ public class HyperOSMaterialFactory {
         if (style != STYLE_SOFT_GLASS || params == null) {
             return getUnifiedBlurTint(style);
         }
-        int alpha = Math.round(Math.max(0.04f, Math.min(0.40f, params.matteAlpha)) * 255f);
+        int alpha = Math.round(clampMatte(params.matteAlpha) * 255f);
         return (alpha << 24) | 0x00FFFFFF;
     }
 
@@ -111,11 +129,14 @@ public class HyperOSMaterialFactory {
     }
 
     public static Drawable createCircularBubbleDrawable(int style, int tintColor, boolean isSelected) {
-        return new CircularBubbleDrawable(style, tintColor, isSelected, true);
+        return new CircularBubbleDrawable(style, tintColor, isSelected);
     }
 
-    public static Drawable createCircularBubbleDrawable(int style, int tintColor, boolean isSelected, boolean glowEnabled) {
-        return new CircularBubbleDrawable(style, tintColor, isSelected, glowEnabled);
+    /** 带玻璃光学参数的气泡材质（与图标气泡 / 圆形底衬严格同一套 GlassParams） */
+    public static CircularBubbleDrawable createCircularBubbleDrawable(int style, int tintColor, boolean isSelected, @Nullable GlassParams params) {
+        CircularBubbleDrawable d = new CircularBubbleDrawable(style, tintColor, isSelected);
+        d.setGlassParams(params);
+        return d;
     }
 
     public static Drawable createHeaderPillDrawable(int style) {
@@ -126,22 +147,36 @@ public class HyperOSMaterialFactory {
         return new HeaderPillDrawable(style, dimAlpha);
     }
 
+    /** 带玻璃光学参数的胶囊材质（与气泡/圆形底衬严格同一套 GlassParams），参数为空时用系统默认 */
+    public static HeaderPillDrawable createHeaderPillDrawable(int style, float dimAlpha, @Nullable GlassParams params) {
+        return new HeaderPillDrawable(style, dimAlpha, params);
+    }
+
+    /**
+     * 创建结合系统原生 BackgroundBlur 与 HeaderPill 物理光学样式的复合胶囊背景。
+     * 模糊底色混合与光学参数与圆形视界区域底衬完全统一。
+     *
+     * @deprecated 该重载无法传入 {@link GlassParams}，会退化为默认光学参数，与气泡/底衬不一致；
+     * 请使用 {@link #createCompositeHeaderPillDrawable(View, int, int, float, GlassParams)}，
+     * 或直接使用 {@code view.HeaderPillBackdrop}（自带 blur 生命周期管理）。
+     */
+    @Deprecated
     public static Drawable createCompositeHeaderPillDrawable(@Nullable View view, int style, int blurRadiusPx) {
-        return createCompositeHeaderPillDrawable(view, style, blurRadiusPx, 0f);
+        return createCompositeHeaderPillDrawable(view, style, blurRadiusPx, 0f, null);
     }
 
     /**
      * 创建结合系统原生 BackgroundBlur 与 HeaderPill 物理光学样式的复合胶囊背景。
      * 模糊底色混合与光学参数与圆形视界区域底衬完全统一。
      */
-    public static Drawable createCompositeHeaderPillDrawable(@Nullable View view, int style, int blurRadiusPx, float dimAlpha) {
-        HeaderPillDrawable opticDrawable = new HeaderPillDrawable(style, dimAlpha);
+    public static Drawable createCompositeHeaderPillDrawable(@Nullable View view, int style, int blurRadiusPx, float dimAlpha, @Nullable GlassParams params) {
+        HeaderPillDrawable opticDrawable = new HeaderPillDrawable(style, dimAlpha, params);
         if (view == null || blurRadiusPx <= 0 || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             return opticDrawable;
         }
         int h = view.getHeight() > 0 ? view.getHeight() : 96;
         float cornerRadius = Math.max(1f, h / 2f - 1.5f);
-        int tint = getUnifiedBlurTint(style);
+        int tint = getUnifiedBlurTint(style, params);
         Drawable blurDrawable = HyperOSBlurHelper.createSystemBackdropBlurDrawable(view, cornerRadius, blurRadiusPx, tint);
         if (blurDrawable != null) {
             android.graphics.drawable.LayerDrawable layer = new android.graphics.drawable.LayerDrawable(new Drawable[]{blurDrawable, opticDrawable});
@@ -156,11 +191,16 @@ public class HyperOSMaterialFactory {
      * 气泡与视界底衬的尺寸在布局后恒定（鱼眼缩放走 RenderNode setScaleX/Y，不改变 bounds），
      * 缓存 Shader 后可在 onDraw 中实现 0 对象分配、0 Native SkShader 抖动。
      */
+    private static float clamp01(float v) {
+        return Math.max(0f, Math.min(1f, v));
+    }
+
     public static final class CircularOpticsCache {
         private int cachedW = -1;
         private int cachedH = -1;
         private int cachedStyle = -1;
         private boolean cachedSelected = false;
+        private int cachedCornerPercent = -1;
         private GlassParams cachedParams = null;
 
         Shader lensRefraction;
@@ -170,20 +210,23 @@ public class HyperOSMaterialFactory {
         int gaussianBorderColor;
 
         void ensure(int width, int height, int style, boolean isSelected) {
-            ensure(width, height, style, isSelected, null);
+            ensure(width, height, style, isSelected, null, 50);
         }
 
-        void ensure(int width, int height, int style, boolean isSelected, @Nullable GlassParams params) {
+        void ensure(int width, int height, int style, boolean isSelected, @Nullable GlassParams params, int cornerRadiusPercent) {
             boolean paramsEqual = (cachedParams == null && params == null)
                 || (cachedParams != null && cachedParams.equalsParams(params));
+            int clampedCorner = Math.max(0, Math.min(50, cornerRadiusPercent));
 
-            if (cachedW == width && cachedH == height && cachedStyle == style && cachedSelected == isSelected && paramsEqual) {
+            if (cachedW == width && cachedH == height && cachedStyle == style && cachedSelected == isSelected
+                    && cachedCornerPercent == clampedCorner && paramsEqual) {
                 return;
             }
             cachedW = width;
             cachedH = height;
             cachedStyle = style;
             cachedSelected = isSelected;
+            cachedCornerPercent = clampedCorner;
             cachedParams = params != null ? new GlassParams(params.ior, params.thickness, params.specular, params.matteAlpha, params.borderLight) : null;
 
             float cx = width / 2f;
@@ -196,21 +239,31 @@ public class HyperOSMaterialFactory {
             if (style == STYLE_SOFT_GLASS) {
                 // ================= 桌面/系统级柔光玻璃 (Soft Light Glass) =================
                 // 1. 哑光微晶扩散底衬：由中心向边缘微透柔化，无剧烈刺眼焦散
-                float baseMatte = p.matteAlpha;
+                // 磨砂浓度统一钳制（clampMatte）：气泡 / 圆形底衬 / 提示胶囊对同一参数响应一致
+                float baseMatte = clampMatte(p.matteAlpha);
                 int alphaCenter = Math.round(Math.max(0.02f, baseMatte * (isSelected ? 0.85f : 0.55f)) * 255f);
                 int alphaMid = Math.round(Math.max(0.04f, baseMatte * (isSelected ? 1.25f : 0.90f)) * 255f);
-                int alphaRim = Math.round(Math.min(0.55f, baseMatte * (1.15f + (p.thickness - 1.0f) * 0.15f)) * 255f);
-                int alphaOuter = Math.round(Math.min(0.40f, baseMatte * 0.80f) * 255f);
+                // thickness 增强：边缘光学厚度直接放大 rim 亮度（原系数 1.15/0.15 太弱，肉眼不可辨）
+                int alphaRim = Math.round(Math.min(0.65f, baseMatte * (1.8f + (p.thickness - 1.0f) * 0.35f)) * 255f);
+                int alphaOuter = Math.round(Math.min(0.50f, baseMatte * (0.9f + (p.thickness - 1.0f) * 0.10f)) * 255f);
 
                 int centerClear = (alphaCenter << 24) | 0x00FFFFFF;
                 int midRefract = (alphaMid << 24) | 0x00FFFFFF;
                 int innerRim = (alphaRim << 24) | 0x00FFFFFF;
                 int outerEdge = (alphaOuter << 24) | 0x00FFFFFF;
 
+                // ior 折射率 + 圆角联合重映射渐变 stop 位置：
+                // ior 越高 → 中心越通透、边缘越凝聚（stop 向 1.0 压缩）
+                // cornerPercent 越低（角越方）→ rim 越贴近视觉边缘（stop 向 1.0 推）
+                float cornerFactor = 1f - clampedCorner / 50f; // 0=正圆, 1=方形
+                float midStop = clamp01(0.65f + (p.ior - 1.12f) * 0.20f + cornerFactor * 0.05f);
+                float rimStop = clamp01(0.92f + (p.ior - 1.12f) * 0.06f + cornerFactor * 0.08f);
+                if (rimStop <= midStop) rimStop = Math.min(1f, midStop + 0.05f);
+
                 lensRefraction = new RadialGradient(
                     cx, cy - radius * 0.05f, radius,
                     new int[]{centerClear, midRefract, innerRim, outerEdge},
-                    new float[]{0f, 0.65f, 0.92f, 1f},
+                    new float[]{0f, midStop, rimStop, 1f},
                     Shader.TileMode.CLAMP
                 );
 
@@ -310,14 +363,10 @@ public class HyperOSMaterialFactory {
         if (width <= 0 || height <= 0) return;
         float w = width;
         float h = height;
-        int clampedPercent = Math.max(0, Math.min(50, cornerRadiusPercent));
-        float maxR = Math.min(w, h) / 2f;
-        float cornerRadius = maxR * (clampedPercent / 50f);
+        // 圆角比例公式与 Outline / 图标裁切 / 模糊贴片统一（BubbleBlurSpec 唯一实现）
+        float cornerRadius = BubbleBlurSpec.cornerRadiusOfHalfSize(Math.min(w, h) / 2f, cornerRadiusPercent);
 
-        cache.ensure(width, height, style, isSelected, params);
-
-        float halfStroke = borderPaint.getStrokeWidth() / 2f;
-        float strokeCornerRadius = Math.max(0f, cornerRadius - halfStroke);
+        cache.ensure(width, height, style, isSelected, params, cornerRadiusPercent);
 
         if (style == STYLE_SOFT_GLASS) {
             bgPaint.setShader(cache.lensRefraction);
@@ -326,144 +375,53 @@ public class HyperOSMaterialFactory {
             highlightPaint.setShader(cache.specularAndCaustic);
             canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, highlightPaint);
 
-            borderPaint.setShader(cache.borderGrad);
-            canvas.drawRoundRect(halfStroke, halfStroke, w - halfStroke, h - halfStroke, strokeCornerRadius, strokeCornerRadius, borderPaint);
+            // 柔光微光描边（borderLight 参数驱动，非白色光晕）
+            if (cache.borderGrad != null) {
+                float halfStroke = borderPaint.getStrokeWidth() / 2f;
+                float strokeCornerRadius = Math.max(0f, cornerRadius - halfStroke);
+                borderPaint.setShader(cache.borderGrad);
+                canvas.drawRoundRect(halfStroke, halfStroke, w - halfStroke, h - halfStroke, strokeCornerRadius, strokeCornerRadius, borderPaint);
+            }
         } else {
             bgPaint.setShader(cache.radialMatte);
             canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, bgPaint);
 
+            // 高斯模糊样式描边（选中高亮由 gaussianBorderColor 承载，与胶囊描边同一规格）。
+            // borderPaint.getAlpha() 约定为外部 Drawable.setAlpha 的调制系数（255=无衰减），
+            // 此处合成描边色后绘制并恢复调制系数，避免 setColor 覆盖 alpha 导致逐帧衰减。
+            int modulation = borderPaint.getAlpha();
+            float halfStroke = borderPaint.getStrokeWidth() / 2f;
+            float strokeCornerRadius = Math.max(0f, cornerRadius - halfStroke);
             borderPaint.setShader(null);
             borderPaint.setColor(cache.gaussianBorderColor);
+            borderPaint.setAlpha(Math.round(
+                android.graphics.Color.alpha(cache.gaussianBorderColor) * (modulation / 255f)));
             canvas.drawRoundRect(halfStroke, halfStroke, w - halfStroke, h - halfStroke, strokeCornerRadius, strokeCornerRadius, borderPaint);
+            borderPaint.setAlpha(modulation);
         }
     }
 
     /**
-     * 统一绘制正圆形物理光学层（供 CircularRegionBackdropView 与 CircularBubbleDrawable 共同复用）
-     */
-    public static void drawUnifiedCircularOptics(
-        @NonNull Canvas canvas,
-        int width,
-        int height,
-        int style,
-        boolean isSelected,
-        @NonNull Paint bgPaint,
-        @NonNull Paint highlightPaint,
-        @NonNull Paint borderPaint
-    ) {
-        drawUnifiedCircularOptics(canvas, width, height, style, isSelected, bgPaint, highlightPaint, borderPaint, null);
-    }
-
-    public static void drawUnifiedCircularOptics(
-        @NonNull Canvas canvas,
-        int width,
-        int height,
-        int style,
-        boolean isSelected,
-        @NonNull Paint bgPaint,
-        @NonNull Paint highlightPaint,
-        @NonNull Paint borderPaint,
-        @Nullable GlassParams params
-    ) {
-        if (width <= 0 || height <= 0) return;
-        float cx = width / 2f;
-        float cy = height / 2f;
-        float radius = Math.min(cx, cy);
-        if (radius <= 0f) return;
-
-        GlassParams p = params != null ? params : new GlassParams();
-        float halfStroke = borderPaint.getStrokeWidth() / 2f;
-        float strokeRadius = Math.max(0f, radius - halfStroke);
-
-        if (style == STYLE_SOFT_GLASS) {
-            // ================= 桌面/系统级柔光玻璃 (Soft Light Glass) =================
-            float baseMatte = p.matteAlpha;
-            int alphaCenter = Math.round(Math.max(0.02f, baseMatte * (isSelected ? 0.85f : 0.55f)) * 255f);
-            int alphaMid = Math.round(Math.max(0.04f, baseMatte * (isSelected ? 1.25f : 0.90f)) * 255f);
-            int alphaRim = Math.round(Math.min(0.55f, baseMatte * (1.15f + (p.thickness - 1.0f) * 0.15f)) * 255f);
-            int alphaOuter = Math.round(Math.min(0.40f, baseMatte * 0.80f) * 255f);
-
-            int centerClear = (alphaCenter << 24) | 0x00FFFFFF;
-            int midRefract = (alphaMid << 24) | 0x00FFFFFF;
-            int innerRim = (alphaRim << 24) | 0x00FFFFFF;
-            int outerEdge = (alphaOuter << 24) | 0x00FFFFFF;
-
-            RadialGradient lensRefraction = new RadialGradient(
-                cx, cy - radius * 0.05f, radius,
-                new int[]{centerClear, midRefract, innerRim, outerEdge},
-                new float[]{0f, 0.65f, 0.92f, 1f},
-                Shader.TileMode.CLAMP
-            );
-            bgPaint.setShader(lensRefraction);
-            canvas.drawCircle(cx, cy, radius, bgPaint);
-
-            float specFactor = p.specular;
-            int topSpecularAlpha = Math.round(Math.min(0.70f, (isSelected ? 0.38f : 0.22f) * specFactor) * 255f);
-            int topFadeAlpha = Math.round(Math.min(0.35f, (isSelected ? 0.14f : 0.06f) * specFactor) * 255f);
-            int bottomReflectAlpha = Math.round(Math.min(0.28f, (isSelected ? 0.16f : 0.08f) * specFactor) * 255f);
-
-            LinearGradient specularAndCaustic = new LinearGradient(
-                0, cy - radius, 0, cy + radius,
-                new int[]{(topSpecularAlpha << 24) | 0x00FFFFFF, (topFadeAlpha << 24) | 0x00FFFFFF, 0x00FFFFFF, 0x00FFFFFF, (bottomReflectAlpha << 24) | 0x00FFFFFF},
-                new float[]{0f, 0.32f, 0.55f, 0.82f, 1f},
-                Shader.TileMode.CLAMP
-            );
-            highlightPaint.setShader(specularAndCaustic);
-            canvas.drawCircle(cx, cy, radius, highlightPaint);
-
-            float borderFactor = p.borderLight;
-            int bTopAlpha = Math.round(Math.min(0.95f, (isSelected ? 0.85f : 0.55f) * borderFactor) * 255f);
-            int bMidAlpha = Math.round(Math.min(0.60f, (isSelected ? 0.40f : 0.22f) * borderFactor) * 255f);
-            int bWaistAlpha = Math.round(Math.min(0.35f, (isSelected ? 0.18f : 0.08f) * borderFactor) * 255f);
-            int bBottomAlpha = Math.round(Math.min(0.50f, (isSelected ? 0.35f : 0.18f) * borderFactor) * 255f);
-
-            LinearGradient borderGrad = new LinearGradient(
-                cx - radius * 0.2f, cy - radius, cx + radius * 0.2f, cy + radius,
-                new int[]{(bTopAlpha << 24) | 0x00FFFFFF, (bMidAlpha << 24) | 0x00FFFFFF, (bWaistAlpha << 24) | 0x00FFFFFF, (bBottomAlpha << 24) | 0x00FFFFFF},
-                new float[]{0f, 0.38f, 0.72f, 1f},
-                Shader.TileMode.CLAMP
-            );
-            borderPaint.setShader(borderGrad);
-            canvas.drawCircle(cx, cy, strokeRadius, borderPaint);
-        } else {
-            int d0 = isSelected ? 0x28FFFFFF : 0x14FFFFFF;
-            int d1 = isSelected ? 0x14FFFFFF : 0x0AFFFFFF;
-            RadialGradient radialMatte = new RadialGradient(
-                cx, cy, radius,
-                new int[]{d0, d1, 0x00FFFFFF},
-                new float[]{0f, 0.70f, 1f},
-                Shader.TileMode.CLAMP
-            );
-            bgPaint.setShader(radialMatte);
-            canvas.drawCircle(cx, cy, radius, bgPaint);
-
-            borderPaint.setShader(null);
-            borderPaint.setColor(isSelected ? 0x98FFFFFF : 0x45FFFFFF);
-            canvas.drawCircle(cx, cy, strokeRadius, borderPaint);
-        }
-    }
-
-    /**
-     * 顶部提示胶囊专用材质
+     * 顶部提示胶囊专用材质。
+     * <p>
+     * 光学绘制完全委托 {@link #drawUnifiedCircularOpticsCached}（与气泡、圆形视界底衬
+     * 严格同一套 shader 构建与绘制方式，胶囊自身仅提供圆角胶囊形边界与压暗层），
+     * 禁止在此类内再复制任何材质渐变公式。
      */
     public static class HeaderPillDrawable extends Drawable {
         private int style;
         private GlassParams glassParams = null;
 
         private final Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint highlightPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint dimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private float dimAlpha = 0f;
+        /** setAlpha 调制系数（与 CircularBubbleDrawable 一致）：整层随宿主透明度联动 */
+        private int alphaModulation = 255;
 
-        private final RectF pillRect = new RectF();
-        private int cachedW = -1;
-        private int cachedH = -1;
-        private int cachedStyle = -1;
-        private GlassParams cachedParams = null;
-        private Shader cachedBgShader;
-        private Shader cachedHlShader;
-        private Shader cachedBorderShader;
+        /** 与气泡 / 圆形视界底衬共用的统一光学 shader 缓存 */
+        private final CircularOpticsCache opticsCache = new CircularOpticsCache();
 
         public HeaderPillDrawable(int style) {
             this(style, 0f, null);
@@ -476,15 +434,14 @@ public class HyperOSMaterialFactory {
         public HeaderPillDrawable(int style, float dimAlpha, @Nullable GlassParams params) {
             this.style = style;
             this.glassParams = params;
-            setDimAlpha(dimAlpha);
             borderPaint.setStyle(Paint.Style.STROKE);
-            borderPaint.setStrokeWidth(1.5f);
+            borderPaint.setStrokeWidth(OPTICS_BORDER_STROKE_WIDTH);
+            setDimAlpha(dimAlpha);
         }
 
         public void setDimAlpha(float a) {
             this.dimAlpha = Math.max(0f, Math.min(1f, a));
             dimPaint.setStyle(Paint.Style.FILL);
-            dimPaint.setColor(android.graphics.Color.argb(Math.round(this.dimAlpha * 255f), 0, 0, 0));
             invalidateSelf();
         }
 
@@ -496,63 +453,9 @@ public class HyperOSMaterialFactory {
         }
 
         public void setGlassParams(@Nullable GlassParams params) {
-            this.glassParams = params;
-            invalidateSelf();
-        }
-
-        private void ensureShaders(int width, int height) {
-            boolean paramsEqual = (cachedParams == null && glassParams == null)
-                || (cachedParams != null && cachedParams.equalsParams(glassParams));
-
-            if (cachedW == width && cachedH == height && cachedStyle == style && paramsEqual) {
-                return;
-            }
-            cachedW = width;
-            cachedH = height;
-            cachedStyle = style;
-            cachedParams = glassParams != null ? new GlassParams(glassParams.ior, glassParams.thickness, glassParams.specular, glassParams.matteAlpha, glassParams.borderLight) : null;
-            pillRect.set(1.5f, 1.5f, width - 1.5f, height - 1.5f);
-
-            GlassParams p = glassParams != null ? glassParams : new GlassParams();
-
-            if (style == STYLE_SOFT_GLASS) {
-                int baseA = Math.round(Math.max(0.04f, Math.min(0.40f, p.matteAlpha)) * 255f);
-                int topA = Math.round(Math.min(0.50f, baseA * 1.3f));
-                int midA = Math.round(baseA * 0.7f);
-                int botA = Math.round(baseA * 0.9f);
-
-                cachedBgShader = new LinearGradient(
-                    0, 0, 0, height,
-                    new int[]{(topA << 24) | 0x00FFFFFF, (midA << 24) | 0x00FFFFFF, (botA << 24) | 0x00FFFFFF},
-                    new float[]{0f, 0.5f, 1f},
-                    Shader.TileMode.CLAMP
-                );
-
-                int specA = Math.round(Math.min(0.50f, 0.20f * p.specular) * 255f);
-                cachedHlShader = new LinearGradient(
-                    0, 0, 0, height,
-                    new int[]{(specA << 24) | 0x00FFFFFF, 0x00FFFFFF},
-                    new float[]{0f, 0.5f},
-                    Shader.TileMode.CLAMP
-                );
-
-                int bLight = Math.round(Math.min(0.80f, p.borderLight * 0.7f) * 255f);
-                int bFade = Math.round(Math.min(0.30f, p.borderLight * 0.25f) * 255f);
-                cachedBorderShader = new LinearGradient(
-                    0, 0, 0, height,
-                    new int[]{(bLight << 24) | 0x00FFFFFF, (bFade << 24) | 0x00FFFFFF},
-                    new float[]{0f, 1f},
-                    Shader.TileMode.CLAMP
-                );
-            } else {
-                cachedBgShader = new LinearGradient(
-                    0, 0, 0, height,
-                    new int[]{0x14FFFFFF, 0x0AFFFFFF, 0x00FFFFFF},
-                    new float[]{0f, 0.70f, 1f},
-                    Shader.TileMode.CLAMP
-                );
-                cachedHlShader = null;
-                cachedBorderShader = null;
+            if (this.glassParams != params && (this.glassParams == null || !this.glassParams.equalsParams(params))) {
+                this.glassParams = params;
+                invalidateSelf();
             }
         }
 
@@ -562,41 +465,27 @@ public class HyperOSMaterialFactory {
             int height = getBounds().height();
             if (width <= 0 || height <= 0) return;
 
-            ensureShaders(width, height);
+            // 胶囊形 = 50% 全圆角（cornerRadiusPercent=50 时统一路径的圆角恰为半高）
             float radius = Math.min(width, height) / 2f;
 
             if (dimAlpha > 0.001f) {
-                canvas.drawRoundRect(pillRect, radius, radius, dimPaint);
+                dimPaint.setColor(android.graphics.Color.argb(Math.round(dimAlpha * 255f * (alphaModulation / 255f)), 0, 0, 0));
+                canvas.drawRoundRect(0f, 0f, width, height, radius, radius, dimPaint);
             }
 
-            if (style == STYLE_SOFT_GLASS) {
-                bgPaint.setShader(cachedBgShader);
-                canvas.drawRoundRect(pillRect, radius, radius, bgPaint);
-
-                if (cachedHlShader != null) {
-                    highlightPaint.setShader(cachedHlShader);
-                    canvas.drawRoundRect(pillRect, radius, radius, highlightPaint);
-                }
-
-                if (cachedBorderShader != null) {
-                    borderPaint.setShader(cachedBorderShader);
-                    canvas.drawRoundRect(pillRect, radius, radius, borderPaint);
-                }
-            } else {
-                bgPaint.setShader(cachedBgShader);
-                canvas.drawRoundRect(pillRect, radius, radius, bgPaint);
-
-                borderPaint.setShader(null);
-                borderPaint.setColor(0x45FFFFFF);
-                canvas.drawRoundRect(pillRect, radius, radius, borderPaint);
-            }
+            // 光学层完全走统一路径：与气泡、圆形视界底衬同一套材质参数与绘制方式
+            bgPaint.setAlpha(alphaModulation);
+            highlightPaint.setAlpha(alphaModulation);
+            borderPaint.setAlpha(alphaModulation);
+            drawUnifiedCircularOpticsCached(
+                canvas, width, height, style, false, bgPaint, highlightPaint, borderPaint, opticsCache, 50, glassParams
+            );
         }
 
         @Override
         public void setAlpha(int alpha) {
-            bgPaint.setAlpha(alpha);
-            borderPaint.setAlpha(alpha);
-            highlightPaint.setAlpha(alpha);
+            this.alphaModulation = Math.max(0, Math.min(255, alpha));
+            invalidateSelf();
         }
 
         @Override
@@ -617,39 +506,30 @@ public class HyperOSMaterialFactory {
         private int style;
         private final int tintColor;
         private boolean isSelected;
-        private boolean glowEnabled;
         private GlassParams glassParams = null;
 
         private final Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint highlightPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint glowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint outerAuraPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint dimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private float dimAlpha = 0f;
+        /** setAlpha 调制系数：底衬整层随图标透明度联动（与 HeaderPillDrawable 一致） */
+        private int alphaModulation = 255;
         private int cornerRadiusPercent = 50;
 
         private final CircularOpticsCache opticsCache = new CircularOpticsCache();
-        private int glowCachedW = -1;
-        private int glowCachedH = -1;
 
         public CircularBubbleDrawable(int style, int tintColor, boolean isSelected) {
-            this(style, tintColor, isSelected, true);
-        }
-
-        public CircularBubbleDrawable(int style, int tintColor, boolean isSelected, boolean glowEnabled) {
             this.style = style;
             this.tintColor = tintColor;
             this.isSelected = isSelected;
-            this.glowEnabled = glowEnabled;
             borderPaint.setStyle(Paint.Style.STROKE);
-            borderPaint.setStrokeWidth(isSelected ? 2.0f : 1.5f);
+            borderPaint.setStrokeWidth(OPTICS_BORDER_STROKE_WIDTH);
         }
 
         public void setSelected(boolean selected) {
             if (this.isSelected != selected) {
                 this.isSelected = selected;
-                borderPaint.setStrokeWidth(selected ? 2.0f : 1.5f);
                 invalidateSelf();
             }
         }
@@ -666,19 +546,11 @@ public class HyperOSMaterialFactory {
             invalidateSelf();
         }
 
-        public void setGlowEnabled(boolean enabled) {
-            if (this.glowEnabled != enabled) {
-                this.glowEnabled = enabled;
-                invalidateSelf();
-            }
-        }
-
         public void setDimAlpha(float a) {
             float c = Math.max(0f, Math.min(1f, a));
             if (Math.abs(this.dimAlpha - c) > 0.0005f) {
                 this.dimAlpha = c;
                 dimPaint.setStyle(Paint.Style.FILL);
-                dimPaint.setColor(android.graphics.Color.argb(Math.round(c * 255f), 0, 0, 0));
                 invalidateSelf();
             }
         }
@@ -695,32 +567,6 @@ public class HyperOSMaterialFactory {
             return cornerRadiusPercent;
         }
 
-        private void ensureGlowShaders(int width, int height, float cx, float cy, float radius) {
-            if (glowCachedW == width && glowCachedH == height) {
-                return;
-            }
-            glowCachedW = width;
-            glowCachedH = height;
-
-            int coreColor = (tintColor & 0x00FFFFFF) | 0x66000000;
-            RadialGradient glowShader = new RadialGradient(
-                cx, cy, radius * 0.88f,
-                new int[]{coreColor, (coreColor & 0x00FFFFFF) | 0x14000000, 0x00000000},
-                new float[]{0f, 0.55f, 1f},
-                Shader.TileMode.CLAMP
-            );
-            glowPaint.setShader(glowShader);
-
-            int auraColor = (tintColor & 0x00FFFFFF) | 0x38000000;
-            RadialGradient auraShader = new RadialGradient(
-                cx, cy, radius,
-                new int[]{0x00000000, auraColor, 0x00000000},
-                new float[]{0.68f, 0.88f, 1f},
-                Shader.TileMode.CLAMP
-            );
-            outerAuraPaint.setShader(auraShader);
-        }
-
         @Override
         public void draw(@NonNull Canvas canvas) {
             int width = getBounds().width();
@@ -729,35 +575,26 @@ public class HyperOSMaterialFactory {
 
             float w = width;
             float h = height;
-            float maxR = Math.min(w, h) / 2f;
-            int clampedPercent = Math.max(0, Math.min(50, cornerRadiusPercent));
-            float cornerRadius = maxR * (clampedPercent / 50f);
+            // 圆角比例公式与 Outline / 图标裁切 / 模糊贴片统一（BubbleBlurSpec 唯一实现）
+            float cornerRadius = BubbleBlurSpec.cornerRadiusOfHalfSize(Math.min(w, h) / 2f, cornerRadiusPercent);
 
             if (dimAlpha > 0.001f) {
+                dimPaint.setColor(android.graphics.Color.argb(Math.round(dimAlpha * 255f * (alphaModulation / 255f)), 0, 0, 0));
                 canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, dimPaint);
             }
 
+            bgPaint.setAlpha(alphaModulation);
+            highlightPaint.setAlpha(alphaModulation);
+            borderPaint.setAlpha(alphaModulation);
             drawUnifiedCircularOpticsCached(
                 canvas, width, height, style, isSelected, bgPaint, highlightPaint, borderPaint, opticsCache, cornerRadiusPercent, glassParams
             );
-
-            if (isSelected && glowEnabled) {
-                ensureGlowShaders(width, height, w / 2f, h / 2f, maxR);
-                canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, glowPaint);
-                canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, outerAuraPaint);
-            }
         }
 
         @Override
         public void setAlpha(int alpha) {
-            bgPaint.setAlpha(alpha);
-            borderPaint.setAlpha(alpha);
-            highlightPaint.setAlpha(alpha);
-            glowPaint.setAlpha(alpha);
-            outerAuraPaint.setAlpha(alpha);
-            if (dimAlpha > 0.001f) {
-                dimPaint.setAlpha(Math.round((alpha / 255f) * dimAlpha * 255f));
-            }
+            this.alphaModulation = Math.max(0, Math.min(255, alpha));
+            invalidateSelf();
         }
 
         @Override

@@ -931,7 +931,6 @@ fun ShortcutBubbleIcon(
         item.appIconCropMode, item.glyphPadEnabled, item.glyphPadColor, item.glyphPadMode,
         item.tintColor, sizePx, resolvedStyle,
         cfg.appIconCropMode, cfg.glyphPadEnabled, cfg.glyphPadColor, cfg.glyphPadMode,
-        cfg.iconGlowEffect,
     ).joinToString("|")
 
     key(viewKey) {
@@ -944,9 +943,10 @@ fun ShortcutBubbleIcon(
             },
             modifier = modifier.size(size),
             update = { v ->
+                v.updateConfig(cfg)
                 v.setMaterialStyle(resolvedStyle)
-                v.setBlurRadius(cfg.bubbleBlurRadius.toFloat())
-                v.setDimAlpha(cfg.bubbleDimAlpha)
+                v.setBlurRadius(cfg.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE).toFloat())
+                v.setDimAlpha(cfg.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE))
                 v.setBubblePaddingPercent(cfg.bubblePaddingPercent)
                 v.setCornerRadiusPercent(cfg.iconCornerRadius)
                 v.setIconAlpha(cfg.iconAlpha)

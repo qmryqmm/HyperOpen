@@ -50,23 +50,32 @@ public final class BubbleBlurSpec {
     }
 
     /**
+     * 圆角半径统一公式（本地几何像素）：<b>唯一实现</b>，图标气泡 OutlineProvider、
+     * 光学层圆角、图标位图裁切（AppIconCropProcessor）、字形底垫（GlyphDrawable /
+     * MiuixVectorDrawable）与模糊贴片圆角全部经由此处换算，禁止任何一侧再各自写
+     * {@code halfSize * percent / 50} 散装公式。
+     *
+     * @param halfSize      目标形状的半宽（px，本地未缩放几何）
+     * @param cornerPercent 图标与气泡圆角比例 (0 ~ 50)：50 = 正圆（半宽），0 = 直角
+     */
+    public static float cornerRadiusOfHalfSize(float halfSize, int cornerPercent) {
+        int clampedPercent = Math.max(0, Math.min(50, cornerPercent));
+        float r = halfSize * (clampedPercent / 50f);
+        return Math.min(halfSize, Math.max(0f, r));
+    }
+
+    /**
      * 模糊贴片圆角半径（本地几何像素）：
      * 与 ViewOutlineProvider 严格采用完全相同的几何公式，定义在 View 本地未缩放几何空间中：
      * 50% 正圆时返回半宽，25% 圆角矩形时返回半宽的 50%。
-     * 缩放由 RenderNode GPU 矩阵整体等比放大，严禁在 Java 层再乘 scale 进行二次放大，
-     * 避免破坏三层图层的 1:1 物理几何对应关系。
+     * 供 OutlineProvider / 本地绘制（光学层）使用——这些场景的缩放由 RenderNode GPU
+     * 矩阵整体等比放大，本地几何<b>不要</b>再乘 scale；窗口坐标场景（SurfaceFlinger
+     * blur region）请使用三参重载 {@link #cornerRadiusPx(float, int, float)}。
      *
-     * @param viewMinSizePx 气泡视图短边基础尺寸（px，未缩放）
-     * @param cornerPercent 图标与气泡圆角比例 (0 ~ 50)
+     * @param viewMinSizePx 气泡视图短边尺寸（px）
      */
     public static float cornerRadiusPx(float viewMinSizePx, int cornerPercent) {
-        float halfWidth = viewMinSizePx / 2f;
-        int clampedPercent = Math.max(0, Math.min(50, cornerPercent));
-        if (clampedPercent >= 50) {
-            return halfWidth;
-        }
-        float r = halfWidth * (clampedPercent / 50f);
-        return Math.min(halfWidth, Math.max(0f, r));
+        return cornerRadiusOfHalfSize(viewMinSizePx / 2f, cornerPercent);
     }
 
     /**
