@@ -80,6 +80,7 @@ import io.github.qmryqmm.hyperopen.ui.edit.PresetActionPickerDialog
 import io.github.qmryqmm.hyperopen.ui.edit.ShortcutEditPage
 import io.github.qmryqmm.hyperopen.ui.pages.ParamsPage
 import io.github.qmryqmm.hyperopen.ui.pages.PermissionCheckPage
+import io.github.qmryqmm.hyperopen.ui.pages.BlurMaterialSettingsPage
 import io.github.qmryqmm.hyperopen.ui.pages.SettingsPage
 import io.github.qmryqmm.hyperopen.ui.pages.ShortcutsManagementPage
 import io.github.qmryqmm.hyperopen.ui.pages.SoftGlassSettingsPage
@@ -207,6 +208,15 @@ fun HyperOpenApp(
     var glassMatteAlpha by remember { mutableFloatStateOf(initialConfig.glassMatteAlpha) }
     var glassBorderLight by remember { mutableFloatStateOf(initialConfig.glassBorderLight) }
     var glassUseNative by remember { mutableStateOf(initialConfig.glassUseNative) }
+    // 全局模糊材质 / 跟随全局开关 / per-component matteAlpha
+    var globalBlurRadius by remember { mutableFloatStateOf(initialConfig.globalBlurRadius.toFloat()) }
+    var globalDimAlpha by remember { mutableFloatStateOf(initialConfig.globalDimAlpha) }
+    var bubbleMaterialFollowGlobal by remember { mutableStateOf(initialConfig.bubbleMaterialFollowGlobal) }
+    var regionMaterialFollowGlobal by remember { mutableStateOf(initialConfig.regionMaterialFollowGlobal) }
+    var headerMaterialFollowGlobal by remember { mutableStateOf(initialConfig.headerMaterialFollowGlobal) }
+    var bubbleGlassMatteAlpha by remember { mutableFloatStateOf(initialConfig.bubbleGlassMatteAlpha) }
+    var regionGlassMatteAlpha by remember { mutableFloatStateOf(initialConfig.regionGlassMatteAlpha) }
+    var headerGlassMatteAlpha by remember { mutableFloatStateOf(initialConfig.headerGlassMatteAlpha) }
     var themeMode by remember { mutableStateOf(initialConfig.themeMode) }
     var monetColors by remember { mutableStateOf(initialConfig.monetColors) }
     var barBlur by remember { mutableStateOf(initialConfig.barBlur) }
@@ -311,6 +321,7 @@ fun HyperOpenApp(
     val settingsListState = rememberLazyListState()
     val themeListState = rememberLazyListState()
     val softGlassListState = rememberLazyListState()
+    val blurMaterialListState = rememberLazyListState()
     val permissionListState = rememberLazyListState()
 
     // 导航路由：0=主界面, 1=主题设置页, 2=快捷方式编辑页, 3=整体预览页, 4=权限检测页, 5=柔光玻璃设置页
@@ -472,6 +483,14 @@ fun HyperOpenApp(
         c.glassMatteAlpha = glassMatteAlpha
         c.glassBorderLight = glassBorderLight
         c.glassUseNative = glassUseNative
+        c.globalBlurRadius = globalBlurRadius.toInt()
+        c.globalDimAlpha = globalDimAlpha
+        c.bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal
+        c.regionMaterialFollowGlobal = regionMaterialFollowGlobal
+        c.headerMaterialFollowGlobal = headerMaterialFollowGlobal
+        c.bubbleGlassMatteAlpha = bubbleGlassMatteAlpha
+        c.regionGlassMatteAlpha = regionGlassMatteAlpha
+        c.headerGlassMatteAlpha = headerGlassMatteAlpha
         c.themeMode = themeMode
         c.monetColors = monetColors
         c.barBlur = barBlur
@@ -576,6 +595,14 @@ fun HyperOpenApp(
         glassMatteAlpha = defaults.glassMatteAlpha
         glassBorderLight = defaults.glassBorderLight
         glassUseNative = defaults.glassUseNative
+        globalBlurRadius = defaults.globalBlurRadius.toFloat()
+        globalDimAlpha = defaults.globalDimAlpha
+        bubbleMaterialFollowGlobal = defaults.bubbleMaterialFollowGlobal
+        regionMaterialFollowGlobal = defaults.regionMaterialFollowGlobal
+        headerMaterialFollowGlobal = defaults.headerMaterialFollowGlobal
+        bubbleGlassMatteAlpha = defaults.bubbleGlassMatteAlpha
+        regionGlassMatteAlpha = defaults.regionGlassMatteAlpha
+        headerGlassMatteAlpha = defaults.headerGlassMatteAlpha
         themeMode = defaults.themeMode
         monetColors = defaults.monetColors
         barBlur = defaults.barBlur
@@ -800,7 +827,6 @@ fun HyperOpenApp(
                             this.headerTopMargin = headerTopMargin.toInt()
                             this.headerTitleSize = headerTitleSize.toInt()
                             this.headerSubtitleSize = headerSubtitleSize.toInt()
-                            this.headerBlurRadius = headerBlurRadius.toInt()
                             this.headerTextCentered = headerTextCentered
                             this.iconSize = iconSize.toInt()
                             this.maxIconCount = maxIconCount.toInt()
@@ -852,11 +878,49 @@ fun HyperOpenApp(
                             this.hapticStrength = hapticStrength.toInt()
                             this.hapticDurationMs = hapticDurationMs.toInt()
                             this.hapticMode = hapticMode
-                            this.regionBlurRadius = regionBlurRadius.toInt()
                             this.iconSpacingOffset = iconSpacingOffset.toInt()
                             this.bubblePaddingPercent = bubblePaddingPercent.toInt()
-                            this.bubbleBlurRadius = bubbleBlurRadius.toInt()
                             this.iconGlowEffect = iconGlowEffect
+                            this.glassPreset = glassPreset
+                            this.glassRefractIor = glassRefractIor
+                            this.glassThickness = glassThickness
+                            this.glassSpecular = glassSpecular
+                            this.glassMatteAlpha = glassMatteAlpha
+                            this.glassBorderLight = glassBorderLight
+                            this.glassUseNative = glassUseNative
+                            // Plan B + 跟随全局：柔光模式下模糊半径由 matteAlpha 驱动，高斯模式用 blur slider
+                            val isSoftGlass = materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS
+                            val matteToBlur = { m: Float -> (m / 0.40f * 50f).coerceIn(0f, 50f) }
+                            this.bubbleBlurRadius = when {
+                                isSoftGlass && bubbleMaterialFollowGlobal -> matteToBlur(glassMatteAlpha).toInt()
+                                isSoftGlass -> matteToBlur(bubbleGlassMatteAlpha).toInt()
+                                bubbleMaterialFollowGlobal -> globalBlurRadius.toInt()
+                                else -> bubbleBlurRadius.toInt()
+                            }
+                            this.regionBlurRadius = when {
+                                isSoftGlass && regionMaterialFollowGlobal -> matteToBlur(glassMatteAlpha).toInt()
+                                isSoftGlass -> matteToBlur(regionGlassMatteAlpha).toInt()
+                                regionMaterialFollowGlobal -> globalBlurRadius.toInt()
+                                else -> regionBlurRadius.toInt()
+                            }
+                            this.headerBlurRadius = when {
+                                isSoftGlass && headerMaterialFollowGlobal -> matteToBlur(glassMatteAlpha).toInt()
+                                isSoftGlass -> matteToBlur(headerGlassMatteAlpha).toInt()
+                                headerMaterialFollowGlobal -> globalBlurRadius.toInt()
+                                else -> headerBlurRadius.toInt()
+                            }
+                            // 压暗：跟随全局用 globalDimAlpha，否则用 per-component
+                            this.bubbleDimAlpha = if (bubbleMaterialFollowGlobal) globalDimAlpha else bubbleDimAlpha
+                            this.regionDimAlpha = if (regionMaterialFollowGlobal) globalDimAlpha else regionDimAlpha
+                            this.headerDimAlpha = if (headerMaterialFollowGlobal) globalDimAlpha else headerDimAlpha
+                            this.globalBlurRadius = globalBlurRadius.toInt()
+                            this.globalDimAlpha = globalDimAlpha
+                            this.bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal
+                            this.regionMaterialFollowGlobal = regionMaterialFollowGlobal
+                            this.headerMaterialFollowGlobal = headerMaterialFollowGlobal
+                            this.bubbleGlassMatteAlpha = bubbleGlassMatteAlpha
+                            this.regionGlassMatteAlpha = regionGlassMatteAlpha
+                            this.headerGlassMatteAlpha = headerGlassMatteAlpha
                             this.shortcuts = ArrayList(shortcuts)
                         }
 
@@ -993,6 +1057,21 @@ fun HyperOpenApp(
                             },
                         )
                     }
+                    6 -> {
+                        BlurMaterialSettingsPage(
+                            contentPadding = pagePadding,
+                            lazyListState = blurMaterialListState,
+                            globalBlurRadius = globalBlurRadius,
+                            onGlobalBlurRadius = { globalBlurRadius = it; persist() },
+                            globalDimAlpha = globalDimAlpha,
+                            onGlobalDimAlpha = { globalDimAlpha = it; persist() },
+                            onResetToDefaults = {
+                                globalBlurRadius = 25f
+                                globalDimAlpha = 0f
+                                persist()
+                            },
+                        )
+                    }
                     else -> {
                         // when(page) 整段抽为局部组合 lambda（编译为独立合成方法，避免 Scaffold content 方法体超 64KB）
                         val pagesContent: @Composable () -> Unit = {
@@ -1005,6 +1084,19 @@ fun HyperOpenApp(
                                     materialStyle = materialStyle,
                                     onMaterialStyle = { materialStyle = it; persist() },
                                     onOpenSoftGlassPage = { subPage = 5 },
+                                    onOpenBlurMaterialPage = { subPage = 6 },
+                                    bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal,
+                                    onBubbleMaterialFollowGlobal = { bubbleMaterialFollowGlobal = it; persist() },
+                                    regionMaterialFollowGlobal = regionMaterialFollowGlobal,
+                                    onRegionMaterialFollowGlobal = { regionMaterialFollowGlobal = it; persist() },
+                                    headerMaterialFollowGlobal = headerMaterialFollowGlobal,
+                                    onHeaderMaterialFollowGlobal = { headerMaterialFollowGlobal = it; persist() },
+                                    bubbleGlassMatteAlpha = bubbleGlassMatteAlpha,
+                                    onBubbleGlassMatteAlpha = { bubbleGlassMatteAlpha = it; persist() },
+                                    regionGlassMatteAlpha = regionGlassMatteAlpha,
+                                    onRegionGlassMatteAlpha = { regionGlassMatteAlpha = it; persist() },
+                                    headerGlassMatteAlpha = headerGlassMatteAlpha,
+                                    onHeaderGlassMatteAlpha = { headerGlassMatteAlpha = it; persist() },
                                     offsetY = offsetY,
                                     onOffsetY = { offsetY = it; persist() },
                                     regionDiameter = regionDiameter,

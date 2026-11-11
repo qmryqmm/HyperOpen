@@ -248,6 +248,22 @@ public class HyperOpenConfig {
     /** 在系统界面 (SystemUI) 内部是否优先调用硬件原生 MiGlass 材质引擎 */
     public boolean glassUseNative = true;
 
+    // ── 全局模糊材质（BlurMaterialSettingsPage）──
+    /** 统一模糊半径 (0 ~ 50 dp)，跟随全局时三组件共用 */
+    public int globalBlurRadius = 25;
+    /** 统一压暗程度 (0.0 ~ 1.0)，跟随全局时三组件共用 */
+    public float globalDimAlpha = 0f;
+
+    // ── 每组件材质跟随全局开关 ──
+    public boolean bubbleMaterialFollowGlobal = true;
+    public boolean regionMaterialFollowGlobal = true;
+    public boolean headerMaterialFollowGlobal = true;
+
+    // ── 每组件柔光玻璃 matteAlpha（跟随关闭时生效，Plan B 驱动模糊半径）──
+    public float bubbleGlassMatteAlpha = 0.12f;
+    public float regionGlassMatteAlpha = 0.12f;
+    public float headerGlassMatteAlpha = 0.12f;
+
     public List<ShortcutItem> shortcuts = new ArrayList<>();
 
     private static XSharedPreferences xPrefs;
@@ -482,6 +498,14 @@ public class HyperOpenConfig {
                     config.glassMatteAlpha = bundle.getFloat("glass_matte_alpha", 0.12f);
                     config.glassBorderLight = bundle.getFloat("glass_border_light", 0.45f);
                     config.glassUseNative = bundle.getBoolean("glass_use_native", true);
+                    config.globalBlurRadius = bundle.getInt("global_blur_radius", 25);
+                    config.globalDimAlpha = bundle.getFloat("global_dim_alpha", 0f);
+                    config.bubbleMaterialFollowGlobal = bundle.getBoolean("bubble_material_follow_global", true);
+                    config.regionMaterialFollowGlobal = bundle.getBoolean("region_material_follow_global", true);
+                    config.headerMaterialFollowGlobal = bundle.getBoolean("header_material_follow_global", true);
+                    config.bubbleGlassMatteAlpha = bundle.getFloat("bubble_glass_matte_alpha", 0.12f);
+                    config.regionGlassMatteAlpha = bundle.getFloat("region_glass_matte_alpha", 0.12f);
+                    config.headerGlassMatteAlpha = bundle.getFloat("header_glass_matte_alpha", 0.12f);
 
                     String jsonStr = bundle.getString("shortcuts_json", null);
                     config.shortcuts = parseShortcutsJson(jsonStr);
@@ -597,6 +621,14 @@ public class HyperOpenConfig {
         config.glassMatteAlpha = xPrefs.getFloat("glass_matte_alpha", 0.12f);
         config.glassBorderLight = xPrefs.getFloat("glass_border_light", 0.45f);
         config.glassUseNative = xPrefs.getBoolean("glass_use_native", true);
+        config.globalBlurRadius = xPrefs.getInt("global_blur_radius", 25);
+        config.globalDimAlpha = xPrefs.getFloat("global_dim_alpha", 0f);
+        config.bubbleMaterialFollowGlobal = xPrefs.getBoolean("bubble_material_follow_global", true);
+        config.regionMaterialFollowGlobal = xPrefs.getBoolean("region_material_follow_global", true);
+        config.headerMaterialFollowGlobal = xPrefs.getBoolean("header_material_follow_global", true);
+        config.bubbleGlassMatteAlpha = xPrefs.getFloat("bubble_glass_matte_alpha", 0.12f);
+        config.regionGlassMatteAlpha = xPrefs.getFloat("region_glass_matte_alpha", 0.12f);
+        config.headerGlassMatteAlpha = xPrefs.getFloat("header_glass_matte_alpha", 0.12f);
 
         String jsonStr = xPrefs.getString("shortcuts_json", null);
         config.shortcuts = parseShortcutsJson(jsonStr);
@@ -702,6 +734,14 @@ public class HyperOpenConfig {
         config.glassMatteAlpha = sp.getFloat("glass_matte_alpha", 0.12f);
         config.glassBorderLight = sp.getFloat("glass_border_light", 0.45f);
         config.glassUseNative = sp.getBoolean("glass_use_native", true);
+        config.globalBlurRadius = sp.getInt("global_blur_radius", 25);
+        config.globalDimAlpha = sp.getFloat("global_dim_alpha", 0f);
+        config.bubbleMaterialFollowGlobal = sp.getBoolean("bubble_material_follow_global", true);
+        config.regionMaterialFollowGlobal = sp.getBoolean("region_material_follow_global", true);
+        config.headerMaterialFollowGlobal = sp.getBoolean("header_material_follow_global", true);
+        config.bubbleGlassMatteAlpha = sp.getFloat("bubble_glass_matte_alpha", 0.12f);
+        config.regionGlassMatteAlpha = sp.getFloat("region_glass_matte_alpha", 0.12f);
+        config.headerGlassMatteAlpha = sp.getFloat("header_glass_matte_alpha", 0.12f);
 
         String jsonStr = sp.getString("shortcuts_json", null);
         config.shortcuts = parseShortcutsJson(jsonStr);
@@ -817,6 +857,14 @@ public class HyperOpenConfig {
             .putFloat("glass_matte_alpha", glassMatteAlpha)
             .putFloat("glass_border_light", glassBorderLight)
             .putBoolean("glass_use_native", glassUseNative)
+            .putInt("global_blur_radius", globalBlurRadius)
+            .putFloat("global_dim_alpha", globalDimAlpha)
+            .putBoolean("bubble_material_follow_global", bubbleMaterialFollowGlobal)
+            .putBoolean("region_material_follow_global", regionMaterialFollowGlobal)
+            .putBoolean("header_material_follow_global", headerMaterialFollowGlobal)
+            .putFloat("bubble_glass_matte_alpha", bubbleGlassMatteAlpha)
+            .putFloat("region_glass_matte_alpha", regionGlassMatteAlpha)
+            .putFloat("header_glass_matte_alpha", headerGlassMatteAlpha)
             .putString("shortcuts_json", serializeShortcutsJson(shortcuts))
             .apply();
 
