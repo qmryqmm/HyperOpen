@@ -69,7 +69,22 @@ public final class BubbleBlurSpec {
         return Math.min(halfWidth, Math.max(0f, r));
     }
 
+    /**
+     * 模糊贴片圆角半径（SurfaceFlinger 窗口坐标像素）。
+     * <p>
+     * {@code BackgroundBlurDrawable} 的 blur region 注册路径（ViewRootImpl.registerBackgroundBlur
+     * → updateBlurRegion）取的是 View 变换后的窗口 bounds（已含鱼眼缩放），但圆角传的是
+     * drawable 本地值——若不乘 scale，放大后模糊区域呈现「大矩形 + 小圆角」，溢出图标圆形
+     * 视觉区域（用户实测：模糊没有限制在图标区域内、圆角计算错误）。
+     * 因此这里返回 <b>本地圆角 × scale</b>，与变换后 bounds 的几何严格 1:1。
+     * 50% 正圆时本地圆角 = 半宽，乘 scale 后由 SurfaceFlinger 钳制为变换后 bounds 半宽，
+     * 正好完整贴合放大后的圆形图标。
+     *
+     * @param viewMinSizePx 气泡视图短边基础尺寸（px，未缩放）
+     * @param cornerPercent 图标与气泡圆角比例 (0 ~ 50)
+     * @param scale         气泡当前缩放倍率（鱼眼/动画作用后的最终值）
+     */
     public static float cornerRadiusPx(float viewMinSizePx, int cornerPercent, float scale) {
-        return cornerRadiusPx(viewMinSizePx, cornerPercent);
+        return cornerRadiusPx(viewMinSizePx, cornerPercent) * Math.max(0.1f, scale);
     }
 }

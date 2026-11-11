@@ -245,7 +245,7 @@ fun ParamsPage(
                 ) {
                     RadioButtonPreference(
                         title = "蜂窝阵列布局",
-                        summary = "图标紧凑排布在整个圆形视界内（默认）",
+                        summary = "图标紧凑排布在整个圆形显示区域内（默认）",
                         selected = layoutStyle == HyperOpenConfig.LAYOUT_HONEYCOMB,
                         onClick = { onLayoutStyle(HyperOpenConfig.LAYOUT_HONEYCOMB) },
                     )
@@ -325,7 +325,7 @@ fun ParamsPage(
                     )
                     if (layoutStyle != HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
                         SliderPreference(
-                            title = "圆形视界直径",
+                            title = "图标显示区域大小",
                             summary = "修改此项同时会影响最大图标显示数量",
                             valueText = "${regionDiameter.toInt()} dp",
                             value = regionDiameter,
@@ -683,7 +683,7 @@ fun ParamsPage(
                     )
                     if (layoutStyle != HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
                         SwitchPreference(
-                            title = "显示圆形视界底衬与边框",
+                            title = "显示图标显示区域底衬与边框",
                             summary = if (showRegionBg)
                                 "当前显示毛玻璃底衬与圆形边框；关闭后屏上只保留图标"
                             else
@@ -693,7 +693,7 @@ fun ParamsPage(
                         )
                         if (showRegionBg) {
                             SliderPreference(
-                                title = "圆形视界背景模糊半径",
+                                title = "图标显示区域背景模糊半径",
                                 summary = "结合高斯模糊与次表面散射渲染毛玻璃底盘",
                                 valueText = if (regionBlurRadius.toInt() == 0) "已关闭模糊" else "${regionBlurRadius.toInt()} dp",
                                 value = regionBlurRadius,
@@ -701,7 +701,7 @@ fun ParamsPage(
                                 onValueChange = onRegionBlurRadius,
                             )
                             SliderPreference(
-                                title = "圆形视界背景压暗程度",
+                                title = "图标显示区域背景压暗程度",
                                 summary = "在毛玻璃底盘之上叠加黑色压暗，提升图标对比度",
                                 valueText = if (kotlin.math.round(regionDimAlpha * 100f) <= 0.5f) "不压暗" else "${kotlin.math.round(regionDimAlpha * 100f).toInt()} %",
                                 value = regionDimAlpha * 100f,
@@ -986,7 +986,7 @@ fun ParamsPage(
                     )
                     SliderPreference(
                         title = "气泡留白区域模糊半径",
-                        summary = "与圆形视界区域底衬统一的高斯模糊毛玻璃样式",
+                        summary = "与图标显示区域底衬统一的高斯模糊毛玻璃样式",
                         valueText = when {
                             bubblePaddingPercent <= 0 -> "已随气泡关闭"
                             bubbleBlurRadius.toInt() == 0 -> "已关闭模糊"

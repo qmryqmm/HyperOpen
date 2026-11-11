@@ -156,13 +156,15 @@ public class CircularBubbleView extends FrameLayout {
 
     /**
      * 计算用于 SurfaceFlinger BackgroundBlurDrawable 的圆角半径——
-     * 规格统一由 {@link BubbleBlurSpec#cornerRadiusPx} 提供（50% 正圆乘 4.0f 交由 Skia 钳制为半宽，
-     * 小于 50% 时按比例并随缩放同步），真实侧与预览斑点侧不得各自再抄公式。
+     * 用实际渲染缩放（getScaleX，含鱼眼/ViewPropertyAnimator 动画的最终值）而非缓存字段，
+     * 保证动画期间每帧同步。规格统一由 {@link BubbleBlurSpec#cornerRadiusPx} 提供
+     * （本地圆角 × scale，与变换后窗口 bounds 严格 1:1）。
      */
     private float getScaledBlurCornerRadiusPx() {
         int w = getWidth() > 0 ? getWidth() : sizePx;
         int h = getHeight() > 0 ? getHeight() : sizePx;
-        return BubbleBlurSpec.cornerRadiusPx(Math.min(w, h), cornerRadiusPercent, currentScale);
+        float effectiveScale = getScaleX() > 0.01f ? getScaleX() : 1.0f;
+        return BubbleBlurSpec.cornerRadiusPx(Math.min(w, h), cornerRadiusPercent, effectiveScale);
     }
 
     private int getBlurRadiusPx() {
@@ -369,6 +371,9 @@ public class CircularBubbleView extends FrameLayout {
             this.currentScale = fisheyeScale;
             setScaleX(fisheyeScale);
             setScaleY(fisheyeScale);
+            // 鱼眼/动画逐帧同步背景模糊圆角：blur region 的 bounds 走变换后窗口坐标，
+            // 圆角必须乘 scale 才能严格贴合放大后的图标区域（否则模糊呈圆角方形溢出）
+            syncBlurCornerRadiusWithViewScale();
         }
     }
 
