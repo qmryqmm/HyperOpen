@@ -3,12 +3,11 @@ package io.github.qmryqmm.hyperopen.factory;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
-import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
-import android.graphics.RadialGradient;
-import android.graphics.Shader;
+import android.graphics.RuntimeShader;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.view.View;
 
 import androidx.annotation.NonNull;
@@ -138,130 +137,117 @@ public class HyperOSMaterialFactory {
         return new HeaderPillDrawable(style, dimAlpha, params);
     }
 
-    /**
-     * 正圆形物理光学层的 Shader 预构建缓存：
-     * 气泡与视界底衬的尺寸在布局后恒定（鱼眼缩放走 RenderNode setScaleX/Y，不改变 bounds），
-     * 缓存 Shader 后可在 onDraw 中实现 0 对象分配、0 Native SkShader 抖动。
-     */
-    private static float clamp01(float v) {
-        return Math.max(0f, Math.min(1f, v));
-    }
+    // ==================== AGSL SDF 统一光学着色器 ====================
+    //
+    // 单一圆角矩形 SDF（有符号距离场）剖面函数承载全部边缘光学：
+    // 雾面基底、贴边菲涅尔环（R/G/B 微色散）、天穹高光弧、顶部漫天光/底部反射、
+    // 细描边、微晶噪点——气泡 / 圆形底衬 / 胶囊+开关三个载体逐像素同源，
+    // 0~50% 全圆角档位（正圆 / 25% 圆角方 / 胶囊 / 直角）均数学精确贴边，
+    // 不存在旧径向渐变在宽组件上"中间浮一个圆"的几何失真。
+    // 输出为预乘 alpha 白系色（rgb ≤ a）；基于 android.graphics.RuntimeShader
+    // （API 33+，Android 13），目标三代系统界面（API 35/36/37）全部满足。
+    private static final String OPTICS_SHADER_SRC =
+        "uniform float2 uSize;\n" +
+        "uniform float uCorner;\n" +
+        "uniform float uMatte;\n" +
+        "uniform float uThickness;\n" +
+        "uniform float uSpecular;\n" +
+        "uniform float uIor;\n" +
+        "uniform float uBorderLight;\n" +
+        "uniform float uSelected;\n" +
+        "uniform float uMode;\n" +
+        "uniform float uAlpha;\n" +
+        "\n" +
+        "float sdRoundedBox(float2 p, float2 b, float r) {\n" +
+        "    float2 q = abs(p) - b + float2(r, r);\n" +
+        "    return min(max(q.x, q.y), 0.0) + length(max(q, float2(0.0, 0.0))) - r;\n" +
+        "}\n" +
+        "\n" +
+        "float hash21(float2 p) {\n" +
+        "    float3 p3 = fract(float3(p.x, p.y, p.x) * 0.1031);\n" +
+        "    float d = dot(p3, p3.yzx + 33.33);\n" +
+        "    p3 += float3(d, d, d);\n" +
+        "    return fract((p3.x + p3.y) * p3.z);\n" +
+        "}\n" +
+        "\n" +
+        "half4 main(float2 fragCoord) {\n" +
+        "    float2 hs = uSize * 0.5;\n" +
+        "    float2 p = fragCoord - hs;\n" +
+        "    float r = clamp(uCorner, 0.0, min(hs.x, hs.y));\n" +
+        "    float sd = sdRoundedBox(p, hs, r);\n" +
+        "    float inside = 1.0 - smoothstep(-1.0, 0.0, sd);\n" +
+        "    float x = max(0.0, -sd);\n" +
+        "    float halfMin = max(min(hs.x, hs.y), 1.0);\n" +
+        "    float t = clamp(x / halfMin, 0.0, 1.0);\n" +
+        "    float vTop = clamp(0.5 - p.y / max(uSize.y, 1.0), 0.0, 1.0);\n" +
+        "    float vBottom = clamp(0.5 + p.y / max(uSize.y, 1.0), 0.0, 1.0);\n" +
+        "\n" +
+        "    float3 col;\n" +
+        "    if (uMode < 0.5) {\n" +
+        "        // 雾面基底：中心通透、边缘凝聚（磨砂浓度驱动）\n" +
+        "        float frost = uMatte * mix(0.92, 0.55, smoothstep(0.0, 1.0, t));\n" +
+        "        // 贴边等距菲涅尔环 + 微色散（R/G/B 边缘错位 0.8px，真玻璃微彩虹）\n" +
+        "        float rimPos = max(1.2, 0.08 * halfMin);\n" +
+        "        float rimW = max(1.6, 0.05 * halfMin);\n" +
+        "        float disp = 0.8;\n" +
+        "        float rimR = exp(-pow((x - (rimPos - disp)) / rimW, 2.0));\n" +
+        "        float rimG = exp(-pow((x - rimPos) / rimW, 2.0));\n" +
+        "        float rimB = exp(-pow((x - (rimPos + disp)) / rimW, 2.0));\n" +
+        "        float rimGain = uMatte * (1.8 + (uThickness - 1.0) * 0.35);\n" +
+        "        // 天穹高光弧：沿上缘轮廓的弧光（厚度/高光驱动）\n" +
+        "        float arc = exp(-pow((x - rimPos) / (rimW * 1.5), 2.0)) * pow(vTop, 2.2) * uSpecular * 0.30;\n" +
+        "        // 顶部漫天光 + 底部反射 + 微晶噪点\n" +
+        "        float spec = uSpecular * (0.22 * vTop * vTop + 0.10 * vBottom * vBottom + 0.04);\n" +
+        "        float noise = (hash21(fragCoord * 0.9) - 0.5) * uMatte * 0.10;\n" +
+        "        float base = frost + spec + arc + noise;\n" +
+        "        col = float3(base + rimR * rimGain, base + rimG * rimGain, base + rimB * rimGain);\n" +
+        "        // 细描边（最外 1.5px，顶部更亮），borderLight 驱动\n" +
+        "        float borderBand = 1.0 - smoothstep(0.0, 1.5, x);\n" +
+        "        float border = uBorderLight * (0.12 + 0.50 * vTop);\n" +
+        "        col += float3(border, border, border) * borderBand;\n" +
+        "        // ior 折射率：内侧辉光微调；选中态整体增益\n" +
+        "        col *= 1.0 + (uIor - 1.12) * 0.12 * (1.0 - t);\n" +
+        "        col *= 1.0 + uSelected * 0.22;\n" +
+        "    } else {\n" +
+        "        // 高斯模糊样式：中心柔光 + 贴边描边（选中高亮）\n" +
+        "        float frost = (0.078 + 0.079 * uSelected) * smoothstep(0.0, 0.9, t) + uMatte * 0.10;\n" +
+        "        float borderBand = 1.0 - smoothstep(0.0, 1.5, x);\n" +
+        "        float border = (0.27 + 0.326 * uSelected) * (0.6 + 0.4 * vTop);\n" +
+        "        col = float3(frost, frost, frost) + float3(border, border, border) * borderBand;\n" +
+        "    }\n" +
+        "\n" +
+        "    float k = inside * uAlpha;\n" +
+        "    float3 cp = clamp(col, 0.0, 1.0) * k;\n" +
+        "    float am = max(max(cp.r, cp.g), cp.b);\n" +
+        "    return half4(half3(cp), half(am));\n" +
+        "}\n";
 
+    /** 光学层 RuntimeShader 持有者：每载体一个实例，逐帧仅注入 uniform（无编译抖动） */
     public static final class CircularOpticsCache {
-        private int cachedW = -1;
-        private int cachedH = -1;
-        private int cachedStyle = -1;
-        private boolean cachedSelected = false;
-        private int cachedCornerPercent = -1;
-        private GlassParams cachedParams = null;
+        private RuntimeShader shader;
 
-        Shader lensRefraction;
-        Shader specularAndCaustic;
-        Shader borderGrad;
-        Shader radialMatte;
-        int gaussianBorderColor;
-
-        void ensure(int width, int height, int style, boolean isSelected, @Nullable GlassParams params, int cornerRadiusPercent) {
-            boolean paramsEqual = (cachedParams == null && params == null)
-                || (cachedParams != null && cachedParams.equalsParams(params));
-            int clampedCorner = Math.max(0, Math.min(50, cornerRadiusPercent));
-
-            if (cachedW == width && cachedH == height && cachedStyle == style && cachedSelected == isSelected
-                    && cachedCornerPercent == clampedCorner && paramsEqual) {
-                return;
+        /** API < 33 时返回 null（目标三代系统界面均不触发），调用方走简单雾面兜底 */
+        @Nullable
+        RuntimeShader shader() {
+            if (shader == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                try {
+                    shader = new RuntimeShader(OPTICS_SHADER_SRC);
+                } catch (Throwable ignored) {
+                    shader = null;
+                }
             }
-            cachedW = width;
-            cachedH = height;
-            cachedStyle = style;
-            cachedSelected = isSelected;
-            cachedCornerPercent = clampedCorner;
-            cachedParams = params != null ? new GlassParams(params.ior, params.thickness, params.specular, params.matteAlpha, params.borderLight) : null;
-
-            float cx = width / 2f;
-            float cy = height / 2f;
-            float radius = Math.min(cx, cy);
-            if (radius <= 0f) return;
-
-            GlassParams p = params != null ? params : new GlassParams();
-
-            if (style == STYLE_SOFT_GLASS) {
-                // ================= 桌面/系统级柔光玻璃 (Soft Light Glass) =================
-                // 1. 哑光微晶扩散底衬：由中心向边缘微透柔化，无剧烈刺眼焦散
-                // 磨砂浓度统一钳制（clampMatte）：气泡 / 圆形底衬 / 提示胶囊对同一参数响应一致
-                float baseMatte = clampMatte(p.matteAlpha);
-                int alphaCenter = Math.round(Math.max(0.02f, baseMatte * (isSelected ? 0.85f : 0.55f)) * 255f);
-                int alphaMid = Math.round(Math.max(0.04f, baseMatte * (isSelected ? 1.25f : 0.90f)) * 255f);
-                // thickness 增强：边缘光学厚度直接放大 rim 亮度（原系数 1.15/0.15 太弱，肉眼不可辨）
-                int alphaRim = Math.round(Math.min(0.65f, baseMatte * (1.8f + (p.thickness - 1.0f) * 0.35f)) * 255f);
-                int alphaOuter = Math.round(Math.min(0.50f, baseMatte * (0.9f + (p.thickness - 1.0f) * 0.10f)) * 255f);
-
-                int centerClear = (alphaCenter << 24) | 0x00FFFFFF;
-                int midRefract = (alphaMid << 24) | 0x00FFFFFF;
-                int innerRim = (alphaRim << 24) | 0x00FFFFFF;
-                int outerEdge = (alphaOuter << 24) | 0x00FFFFFF;
-
-                // ior 折射率 + 圆角联合重映射渐变 stop 位置：
-                // ior 越高 → 中心越通透、边缘越凝聚（stop 向 1.0 压缩）
-                // cornerPercent 越低（角越方）→ rim 越贴近视觉边缘（stop 向 1.0 推）
-                float cornerFactor = 1f - clampedCorner / 50f; // 0=正圆, 1=方形
-                float midStop = clamp01(0.65f + (p.ior - 1.12f) * 0.20f + cornerFactor * 0.05f);
-                float rimStop = clamp01(0.92f + (p.ior - 1.12f) * 0.06f + cornerFactor * 0.08f);
-                if (rimStop <= midStop) rimStop = Math.min(1f, midStop + 0.05f);
-
-                lensRefraction = new RadialGradient(
-                    cx, cy - radius * 0.05f, radius,
-                    new int[]{centerClear, midRefract, innerRim, outerEdge},
-                    new float[]{0f, midStop, rimStop, 1f},
-                    Shader.TileMode.CLAMP
-                );
-
-                // 2. 顶部轻柔漫天光（告别水滴反光切面，提供温润的自然渐变）
-                float specFactor = p.specular;
-                int topSpecularAlpha = Math.round(Math.min(0.70f, (isSelected ? 0.38f : 0.22f) * specFactor) * 255f);
-                int topFadeAlpha = Math.round(Math.min(0.35f, (isSelected ? 0.14f : 0.06f) * specFactor) * 255f);
-                int bottomReflectAlpha = Math.round(Math.min(0.28f, (isSelected ? 0.16f : 0.08f) * specFactor) * 255f);
-
-                specularAndCaustic = new LinearGradient(
-                    0, 0, 0, height,
-                    new int[]{(topSpecularAlpha << 24) | 0x00FFFFFF, (topFadeAlpha << 24) | 0x00FFFFFF, 0x00FFFFFF, 0x00FFFFFF, (bottomReflectAlpha << 24) | 0x00FFFFFF},
-                    new float[]{0f, 0.32f, 0.55f, 0.82f, 1f},
-                    Shader.TileMode.CLAMP
-                );
-
-                // 3. 细腻低反差微光圆环描边 (柔和过渡，边缘不抢眼)
-                float borderFactor = p.borderLight;
-                int bTopAlpha = Math.round(Math.min(0.95f, (isSelected ? 0.85f : 0.55f) * borderFactor) * 255f);
-                int bMidAlpha = Math.round(Math.min(0.60f, (isSelected ? 0.40f : 0.22f) * borderFactor) * 255f);
-                int bWaistAlpha = Math.round(Math.min(0.35f, (isSelected ? 0.18f : 0.08f) * borderFactor) * 255f);
-                int bBottomAlpha = Math.round(Math.min(0.50f, (isSelected ? 0.35f : 0.18f) * borderFactor) * 255f);
-
-                borderGrad = new LinearGradient(
-                    cx - radius * 0.2f, 0, cx + radius * 0.2f, height,
-                    new int[]{(bTopAlpha << 24) | 0x00FFFFFF, (bMidAlpha << 24) | 0x00FFFFFF, (bWaistAlpha << 24) | 0x00FFFFFF, (bBottomAlpha << 24) | 0x00FFFFFF},
-                    new float[]{0f, 0.38f, 0.72f, 1f},
-                    Shader.TileMode.CLAMP
-                );
-                radialMatte = null;
-            } else {
-                int d0 = isSelected ? 0x28FFFFFF : 0x14FFFFFF;
-                int d1 = isSelected ? 0x14FFFFFF : 0x0AFFFFFF;
-                radialMatte = new RadialGradient(
-                    cx, cy, radius,
-                    new int[]{d0, d1, 0x00FFFFFF},
-                    new float[]{0f, 0.70f, 1f},
-                    Shader.TileMode.CLAMP
-                );
-                gaussianBorderColor = isSelected ? 0x98FFFFFF : 0x45FFFFFF;
-                lensRefraction = null;
-                specularAndCaustic = null;
-                borderGrad = null;
-            }
+            return shader;
         }
     }
 
     /**
-     * 使用预构建的 CircularOpticsCache 绘制正圆/圆角物理光学层（onDraw 零分配）。
-     * 气泡、圆形视界底衬、顶部提示胶囊三个载体必须共用本入口，保证材质效果一致。
+     * 统一物理光学层绘制（AGSL SDF 单着色器）：气泡、圆形视界底衬、顶部提示胶囊
+     * 三个载体必须共用本入口。柔光玻璃与高斯模糊两种材质在同一剖面函数内切换，
+     * 0~50% 全圆角档位（正圆 / 圆角方 / 胶囊 / 直角）均数学精确贴边。
+     * <p>
+     * bgPaint.getAlpha() 约定为外部 Drawable.setAlpha 的调制系数（255=无衰减），
+     * 读取后由着色器 uAlpha 承载并复位 paint，避免二次叠加；
+     * highlightPaint / borderPaint 参数仅为保持三载体调用签名统一而保留，不再单独绘制。
      */
     public static void drawUnifiedCircularOpticsCached(
         @NonNull Canvas canvas,
@@ -277,44 +263,36 @@ public class HyperOSMaterialFactory {
         @Nullable GlassParams params
     ) {
         if (width <= 0 || height <= 0) return;
-        float w = width;
-        float h = height;
+        GlassParams p = params != null ? params : new GlassParams();
         // 圆角比例公式与 Outline / 图标裁切 / 模糊贴片统一（BubbleBlurSpec 唯一实现）
-        float cornerRadius = BubbleBlurSpec.cornerRadiusOfHalfSize(Math.min(w, h) / 2f, cornerRadiusPercent);
+        float cornerRadius = BubbleBlurSpec.cornerRadiusOfHalfSize(Math.min(width, height) / 2f, cornerRadiusPercent);
+        float alphaMod = Math.max(0f, Math.min(1f, bgPaint.getAlpha() / 255f));
+        bgPaint.setAlpha(255);
 
-        cache.ensure(width, height, style, isSelected, params, cornerRadiusPercent);
-
-        if (style == STYLE_SOFT_GLASS) {
-            bgPaint.setShader(cache.lensRefraction);
-            canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, bgPaint);
-
-            highlightPaint.setShader(cache.specularAndCaustic);
-            canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, highlightPaint);
-
-            // 柔光微光描边（borderLight 参数驱动，非白色光晕）
-            if (cache.borderGrad != null) {
-                float halfStroke = borderPaint.getStrokeWidth() / 2f;
-                float strokeCornerRadius = Math.max(0f, cornerRadius - halfStroke);
-                borderPaint.setShader(cache.borderGrad);
-                canvas.drawRoundRect(halfStroke, halfStroke, w - halfStroke, h - halfStroke, strokeCornerRadius, strokeCornerRadius, borderPaint);
-            }
-        } else {
-            bgPaint.setShader(cache.radialMatte);
-            canvas.drawRoundRect(0f, 0f, w, h, cornerRadius, cornerRadius, bgPaint);
-
-            // 高斯模糊样式描边（选中高亮由 gaussianBorderColor 承载，与胶囊描边同一规格）。
-            // borderPaint.getAlpha() 约定为外部 Drawable.setAlpha 的调制系数（255=无衰减），
-            // 此处合成描边色后绘制并恢复调制系数，避免 setColor 覆盖 alpha 导致逐帧衰减。
-            int modulation = borderPaint.getAlpha();
-            float halfStroke = borderPaint.getStrokeWidth() / 2f;
-            float strokeCornerRadius = Math.max(0f, cornerRadius - halfStroke);
-            borderPaint.setShader(null);
-            borderPaint.setColor(cache.gaussianBorderColor);
-            borderPaint.setAlpha(Math.round(
-                android.graphics.Color.alpha(cache.gaussianBorderColor) * (modulation / 255f)));
-            canvas.drawRoundRect(halfStroke, halfStroke, w - halfStroke, h - halfStroke, strokeCornerRadius, strokeCornerRadius, borderPaint);
-            borderPaint.setAlpha(modulation);
+        RuntimeShader shader = cache.shader();
+        if (shader == null) {
+            // API < 33 兜底（目标三代系统界面均不触发）：简单雾面圆角矩形
+            int a = Math.round(Math.min(1f, clampMatte(p.matteAlpha) * (isSelected ? 1.2f : 0.9f)) * 255f * alphaMod);
+            bgPaint.setShader(null);
+            bgPaint.setColor((Math.max(0, Math.min(255, a)) << 24) | 0x00FFFFFF);
+            canvas.drawRoundRect(0f, 0f, width, height, cornerRadius, cornerRadius, bgPaint);
+            return;
         }
+
+        shader.setFloatUniform("uSize", width, height);
+        shader.setFloatUniform("uCorner", cornerRadius);
+        shader.setFloatUniform("uMatte", clampMatte(p.matteAlpha));
+        shader.setFloatUniform("uThickness", Math.max(0f, Math.min(4f, p.thickness)));
+        shader.setFloatUniform("uSpecular", Math.max(0f, Math.min(2f, p.specular)));
+        shader.setFloatUniform("uIor", Math.max(1f, Math.min(2f, p.ior)));
+        shader.setFloatUniform("uBorderLight", Math.max(0f, Math.min(1f, p.borderLight)));
+        shader.setFloatUniform("uSelected", isSelected ? 1f : 0f);
+        shader.setFloatUniform("uMode", style == STYLE_GAUSSIAN_BLUR ? 1f : 0f);
+        shader.setFloatUniform("uAlpha", alphaMod);
+
+        bgPaint.setShader(shader);
+        canvas.drawRect(0f, 0f, width, height, bgPaint);
+        bgPaint.setShader(null);
     }
 
     /**
