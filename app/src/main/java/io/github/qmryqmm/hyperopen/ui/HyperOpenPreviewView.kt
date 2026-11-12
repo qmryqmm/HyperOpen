@@ -107,6 +107,8 @@ class HyperOpenPreviewView(
     private var pendingFolderBubble: CircularBubbleView? = null
     private var activeFolderBubble: CircularBubbleView? = null
     private val folderSubBubbles = mutableListOf<CircularBubbleView>()
+    /** 图标幻影层：气泡压盖时在玻璃内显示邻居磨砂虚影（除自身录制，与真机同源） */
+    private val ghostLayer = io.github.qmryqmm.hyperopen.view.IconGhostLayer(bubbleViews, folderSubBubbles, 1.5f)
     private var currentSelectedSubBubble: CircularBubbleView? = null
 
     private val folderHoverRunnable = Runnable {
@@ -983,10 +985,19 @@ class HyperOpenPreviewView(
             b.setIconAlpha(config.iconAlpha)
             b.ensureBlurAndRefreshBackground()
         }
+        // 幻影层模糊半径 / 最大倍率热生效（与真机 refreshGhostLayerParams 同源）
+        refreshGhostLayerParams()
         if (needRebuild || bubbleViews.isEmpty()) {
             setupLayout()
         } else {
         }
+    }
+
+    /** 同步幻影层的模糊半径与最大倍率（配置热更新 / 布局重建时调用，与真机同源） */
+    private fun refreshGhostLayerParams() {
+        ghostLayer.setMaxScale(maxOf(1f, config.maxScale))
+        val blurDp = config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE)
+        ghostLayer.setBlurRadiusPx(if (blurDp > 0) dpToPx(blurDp.toFloat()) else 0f)
     }
 
     /**
@@ -1173,6 +1184,7 @@ class HyperOpenPreviewView(
             val bubble = CircularBubbleView(
                 context, item, resolvedStyle, iconSizePx.toInt(), context.classLoader, config
             )
+            bubble.setGhostLayer(ghostLayer)
             bubble.setSystemBlurEnabled(true)
             bubble.setIconAlpha(config.iconAlpha)
             bubble.targetX = finalX
@@ -1981,6 +1993,7 @@ class HyperOpenPreviewView(
             val sub = CircularBubbleView(
                 context, childItem, resolvedStyle, iconSizeInt, context.classLoader, config
             ).apply {
+                setGhostLayer(ghostLayer)
                 setSystemBlurEnabled(true)
                 this.targetX = targetX
                 this.targetY = targetY

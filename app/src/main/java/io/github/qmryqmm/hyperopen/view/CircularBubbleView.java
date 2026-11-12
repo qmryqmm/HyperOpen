@@ -1,8 +1,10 @@
 package io.github.qmryqmm.hyperopen.view;
 
 import android.content.Context;
+import android.graphics.Canvas;
 import android.graphics.Outline;
 import android.graphics.Rect;
+import android.graphics.RenderNode;
 import android.graphics.drawable.Drawable;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -43,6 +45,12 @@ public class CircularBubbleView extends FrameLayout {
     private final ImageView iconView;
     /** 光学层承载 View（背景 = CircularBubbleDrawable）：blur drawable 必须独占本 View 的背景槽 */
     private final View opticView;
+    /** 幻影视图：玻璃层内采样「除自身外」邻居气泡的磨砂虚影（见 {@link IconGhostLayer}） */
+    private final GhostView ghostView;
+    /** 以下三字段由 {@link IconGhostLayer} 录制时读写（同包） */
+    IconGhostLayer ghostLayer;
+    RenderNode ghostNode;
+    float ghostSizePx;
 
     @NonNull
     private final HyperOSMaterialFactory.CircularBubbleDrawable opticDrawable;
@@ -86,6 +94,12 @@ public class CircularBubbleView extends FrameLayout {
         setClipToOutline(true);
         setClipChildren(false);
         setClipToPadding(false);
+
+        // 幻影视图（最底层）：采样邻居气泡的磨砂虚影，层序 = 背景模糊 → 幻影 → 雾面 → 图标
+        ghostView = new GhostView(context);
+        LayoutParams ghostLp = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
+        ghostLp.gravity = Gravity.CENTER;
+        addView(ghostView, ghostLp);
 
         // 光学层承载 View：背景挂 CircularBubbleDrawable（与圆形视界底衬同一光学实现）。
         // blur drawable 需要独占本 View 的背景槽——系统界面 BackgroundBlurDrawable 的
@@ -431,5 +445,62 @@ public class CircularBubbleView extends FrameLayout {
         iconView.requestLayout();
         iconView.invalidate();
         invalidate();
+    }
+
+    /** 注入幻影层（容器持有、三载体玻璃层共用）；列表卡片等无重叠场景传 null 即可 */
+    public void setGhostLayer(@Nullable IconGhostLayer layer) {
+        this.ghostLayer = layer;
+        if (ghostView != null) {
+            ghostView.invalidate();
+        }
+    }
+
+    /**
+     * 供 {@link IconGhostLayer} 录制的「完整视觉」：光学层（雾面+描边）+ 图标。
+     * <b>刻意不含幻影视图与背景模糊</b>——前者避免幻影节点互相嵌套引用（递归），
+     * 后者避免窗口级模糊被录进幻影（幻影只应承载图标内容）。
+     */
+    void drawVisualForGhost(@NonNull Canvas canvas) {
+        if (opticView != null && opticView.getVisibility() == VISIBLE) {
+            opticView.draw(canvas);
+        }
+        if (iconView != null && iconView.getVisibility() == VISIBLE) {
+            int a = Math.round(255f * iconView.getAlpha());
+            if (a <= 0) return;
+            if (a < 255) {
+                canvas.saveLayerAlpha(0, 0, getWidth(), getHeight(), a);
+                iconView.draw(canvas);
+                canvas.restore();
+            } else {
+                iconView.draw(canvas);
+            }
+        }
+    }
+
+    /**
+     * 幻影视图：绘制时反鱼眼变换后采样幻影节点——
+     * 邻居虚影以容器真实坐标 / 真实大小呈现（放大中不会跟着放大，符合物理直觉）。
+     */
+    private class GhostView extends View {
+        GhostView(Context context) {
+            super(context);
+            setWillNotDraw(false);
+        }
+
+        @Override
+        protected void onDraw(@NonNull Canvas canvas) {
+            super.onDraw(canvas);
+            if (ghostLayer == null || ghostNode == null || paddingPercent <= 0) return;
+            if (getWidth() <= 0 || getHeight() <= 0) return;
+            // 本视图随气泡被 RenderNode 放大，画布反向缩放抵消，幻影保持真实大小
+            float s = getScaleX() > 0.01f ? getScaleX() : 1f;
+            float g = ghostSizePx;
+            canvas.save();
+            canvas.translate(getWidth() / 2f, getHeight() / 2f);
+            canvas.scale(1f / s, 1f / s);
+            canvas.translate(-g / 2f, -g / 2f);
+            ghostLayer.drawGhost(canvas, CircularBubbleView.this);
+            canvas.restore();
+        }
     }
 }

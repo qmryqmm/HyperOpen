@@ -56,6 +56,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
     private SectorOverlayView sectorOverlay;
     private FrameLayout bubblesContainer;
     private final List<CircularBubbleView> bubbles = new ArrayList<>();
+    /** 图标幻影层：气泡互相压盖时在玻璃内显示邻居的磨砂虚影（除自身录制，见 IconGhostLayer） */
+    private IconGhostLayer ghostLayer;
     private final List<StockFanPacking.StockItemSpec> stockSpecs = new ArrayList<>();
     /** 空心圆环扇区触发模式的几何规格（非扇区模式时为 null） */
     private RingSectorPacking.Result ringSectorSpec = null;
@@ -123,6 +125,19 @@ public class CustomHyperOpenContainer extends FrameLayout {
         setClipChildren(false);
         setClipToPadding(false);
         addView(bubblesContainer, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+
+        // 图标幻影层（持有 bubbles / folderSubBubbles 活引用，内容变化自动可见）
+        ghostLayer = new IconGhostLayer(bubbles, folderSubBubbles,
+                config != null ? Math.max(1f, config.maxScale) : 1.5f);
+        refreshGhostLayerParams();
+    }
+
+    /** 同步幻影层的模糊半径与最大倍率（配置热更新时调用） */
+    private void refreshGhostLayerParams() {
+        if (ghostLayer == null || config == null) return;
+        ghostLayer.setMaxScale(Math.max(1f, config.maxScale));
+        int blurDp = config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE);
+        ghostLayer.setBlurRadiusPx(blurDp > 0 ? dpToPx(blurDp) : 0);
     }
 
     public void updateConfig(HyperOpenConfig newConfig) {
@@ -164,6 +179,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 b.setCornerRadiusPercent(config.iconCornerRadius);
                 b.setIconAlpha(config.iconAlpha);
             }
+            // 幻影层模糊半径 / 最大倍率热生效
+            refreshGhostLayerParams();
         }
     }
 
@@ -732,6 +749,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 CircularBubbleView bubble = new CircularBubbleView(
                     getContext(), item, resolvedStyle, iconSizeInt, systemuiClassLoader, config
                 );
+                bubble.setGhostLayer(ghostLayer);
                 bubble.targetX = finalX;
                 bubble.targetY = finalY;
 
@@ -1110,6 +1128,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
             CircularBubbleView sub = new CircularBubbleView(
                 getContext(), childItem, resolvedStyle, iconSizeInt, systemuiClassLoader, config
             );
+            sub.setGhostLayer(ghostLayer);
             sub.targetX = targetX;
             sub.targetY = targetY;
 
