@@ -88,7 +88,6 @@ import io.github.qmryqmm.hyperopen.ui.pages.ShortcutsTreeState
 import io.github.qmryqmm.hyperopen.ui.pages.ShortcutMultiSelectBottomBar
 import io.github.qmryqmm.hyperopen.ui.pages.rememberShortcutsTreeState
 import io.github.qmryqmm.hyperopen.ui.pages.ThemeSettingsPage
-import io.github.qmryqmm.hyperopen.util.BubbleBlurSpec
 import io.github.qmryqmm.hyperopen.util.LiveWallpaperLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -110,12 +109,6 @@ import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
-import top.yukonga.miuix.kmp.blur.BlendColorEntry
-import top.yukonga.miuix.kmp.blur.BlurBlendMode
-import top.yukonga.miuix.kmp.blur.BlurColors
-import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
-import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Back
@@ -905,10 +898,7 @@ fun HyperOpenApp(
                             this.shortcuts = ArrayList(shortcuts)
                         }
 
-                        var blurScene by remember {
-                            mutableStateOf(PreviewBlurSceneState(panelVisible = false))
-                        }
-                        val density = androidx.compose.ui.platform.LocalDensity.current
+                        var previewPanelVisible by remember { mutableStateOf(false) }
 
                         // 壁纸位图（供 SurfaceView 绘制到窗口后方 Surface 上）
                         val liveWallpaperBitmap by io.github.qmryqmm.hyperopen.util.LiveWallpaperLoader.rememberLiveWallpaper(ctx)
@@ -936,7 +926,7 @@ fun HyperOpenApp(
                                     // lerp(min_window_blur_radius=1px, max_window_blur_radius=100px, ratio)
                                     // = 1 + 99 * ratio（ratio=0 时为 0）
                                     val ratio = currentConfig.fullscreenBlurMaskAlpha.coerceIn(0f, 1f)
-                                    val blurPx = if (blurScene.panelVisible && ratio > 0f) {
+                                    val blurPx = if (previewPanelVisible && ratio > 0f) {
                                         (1f + 99f * ratio).toInt()
                                     } else 0
                                     val prev = view.tag as? Int ?: -1
@@ -958,7 +948,7 @@ fun HyperOpenApp(
 
                             // 全屏压暗层（独立于模糊层，与真实侧 view.setBackgroundColor(black alpha) 同构；
                             // 面板隐藏态不绘制）
-                            if (blurScene.panelVisible && currentConfig.fullscreenDimAlpha > 0.001f) {
+                            if (previewPanelVisible && currentConfig.fullscreenDimAlpha > 0.001f) {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
@@ -990,9 +980,7 @@ fun HyperOpenApp(
                                             persist()
                                             Toast.makeText(viewCtx, "已更新并保存快捷方式排版", Toast.LENGTH_SHORT).show()
                                         },
-                                        onBlurSceneChanged = { scene ->
-                                            blurScene = scene
-                                        },
+                                        onPanelVisibleChanged = { previewPanelVisible = it },
                                     ).also { previewViewRef = it }
                                 },
                                 update = { pv ->

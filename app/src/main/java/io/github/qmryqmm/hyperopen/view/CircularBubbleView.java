@@ -50,8 +50,6 @@ public class CircularBubbleView extends FrameLayout {
     @NonNull
     private final BlurRegionSession blurSession = new BlurRegionSession();
     private boolean systemBlurEnabled = true;
-    @Nullable
-    private Runnable onScaleChangedListener;
 
     public CircularBubbleView(@NonNull Context context, ShortcutItem item, int style, int sizePx, ClassLoader classLoader, HyperOpenConfig config) {
         super(context);
@@ -125,10 +123,6 @@ public class CircularBubbleView extends FrameLayout {
         this(context, item, style, sizePx, classLoader, null);
     }
 
-    public void setOnScaleChangedListener(@Nullable Runnable listener) {
-        this.onScaleChangedListener = listener;
-    }
-
     /**
      * 配置热更新：替换内部配置快照并整体刷新。
      * 图标解析（裁切/底垫）、玻璃光学参数、模糊与压暗全部按新配置重新取值，
@@ -186,8 +180,8 @@ public class CircularBubbleView extends FrameLayout {
 
     /**
      * 控制是否启用底层窗口级 SurfaceFlinger BackgroundBlurDrawable。
-     * 在主应用预览界面 (HyperOpenPreviewView) 中，已由 Compose 的 textureBlur 渲染实时壁纸模糊，
-     * 禁用窗口级硬件模糊可避免在 Activity 窗口上叠加双层毛玻璃底色导致样式偏亮或闪烁。
+     * 应用内列表卡片（ShortcutCardList）关闭以避免逐图标触发全屏窗口模糊；
+     * 主应用预览与真机面板均启用（壁纸 Surface 在窗口后方，窗口级模糊即实时背景模糊）。
      */
     public void setSystemBlurEnabled(boolean enabled) {
         if (this.systemBlurEnabled != enabled) {
@@ -398,9 +392,6 @@ public class CircularBubbleView extends FrameLayout {
         if (Math.abs(this.fisheyeScale - scale) > 0.0005f) {
             this.fisheyeScale = scale;
             applyEffectiveScale();
-            if (onScaleChangedListener != null) {
-                onScaleChangedListener.run();
-            }
         }
     }
 

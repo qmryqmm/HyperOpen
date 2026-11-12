@@ -61,7 +61,7 @@ public class CircularRegionBackdropView extends FrameLayout {
 
     /**
      * 控制是否启用底层窗口级 SurfaceFlinger BackgroundBlurDrawable。
-     * 在主应用预览界面中由 Compose 的 textureBlur 渲染实时壁纸模糊，禁用此开关以避免双层毛玻璃底色叠加。
+     * 真机面板与主应用预览均启用（壁纸 Surface 在窗口后方，窗口级模糊即实时背景模糊）。
      */
     public void setSystemBlurEnabled(boolean enabled) {
         if (this.systemBlurEnabled != enabled) {
