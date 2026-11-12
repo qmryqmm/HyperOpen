@@ -7,10 +7,8 @@ import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.RadialGradient;
-import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
-import android.os.Build;
 import android.view.View;
 
 import androidx.annotation.NonNull;
@@ -128,10 +126,6 @@ public class HyperOSMaterialFactory {
         return STYLE_SOFT_GLASS;
     }
 
-    public static Drawable createCircularBubbleDrawable(int style, int tintColor, boolean isSelected) {
-        return new CircularBubbleDrawable(style, tintColor, isSelected);
-    }
-
     /** 带玻璃光学参数的气泡材质（与图标气泡 / 圆形底衬严格同一套 GlassParams） */
     public static CircularBubbleDrawable createCircularBubbleDrawable(int style, int tintColor, boolean isSelected, @Nullable GlassParams params) {
         CircularBubbleDrawable d = new CircularBubbleDrawable(style, tintColor, isSelected);
@@ -139,51 +133,9 @@ public class HyperOSMaterialFactory {
         return d;
     }
 
-    public static Drawable createHeaderPillDrawable(int style) {
-        return new HeaderPillDrawable(style);
-    }
-
-    public static Drawable createHeaderPillDrawable(int style, float dimAlpha) {
-        return new HeaderPillDrawable(style, dimAlpha);
-    }
-
     /** 带玻璃光学参数的胶囊材质（与气泡/圆形底衬严格同一套 GlassParams），参数为空时用系统默认 */
     public static HeaderPillDrawable createHeaderPillDrawable(int style, float dimAlpha, @Nullable GlassParams params) {
         return new HeaderPillDrawable(style, dimAlpha, params);
-    }
-
-    /**
-     * 创建结合系统原生 BackgroundBlur 与 HeaderPill 物理光学样式的复合胶囊背景。
-     * 模糊底色混合与光学参数与圆形视界区域底衬完全统一。
-     *
-     * @deprecated 该重载无法传入 {@link GlassParams}，会退化为默认光学参数，与气泡/底衬不一致；
-     * 请使用 {@link #createCompositeHeaderPillDrawable(View, int, int, float, GlassParams)}，
-     * 或直接使用 {@code view.HeaderPillBackdrop}（自带 blur 生命周期管理）。
-     */
-    @Deprecated
-    public static Drawable createCompositeHeaderPillDrawable(@Nullable View view, int style, int blurRadiusPx) {
-        return createCompositeHeaderPillDrawable(view, style, blurRadiusPx, 0f, null);
-    }
-
-    /**
-     * 创建结合系统原生 BackgroundBlur 与 HeaderPill 物理光学样式的复合胶囊背景。
-     * 模糊底色混合与光学参数与圆形视界区域底衬完全统一。
-     */
-    public static Drawable createCompositeHeaderPillDrawable(@Nullable View view, int style, int blurRadiusPx, float dimAlpha, @Nullable GlassParams params) {
-        HeaderPillDrawable opticDrawable = new HeaderPillDrawable(style, dimAlpha, params);
-        if (view == null || blurRadiusPx <= 0 || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-            return opticDrawable;
-        }
-        int h = view.getHeight() > 0 ? view.getHeight() : 96;
-        float cornerRadius = Math.max(1f, h / 2f - 1.5f);
-        int tint = getUnifiedBlurTint(style, params);
-        Drawable blurDrawable = HyperOSBlurHelper.createSystemBackdropBlurDrawable(view, cornerRadius, blurRadiusPx, tint);
-        if (blurDrawable != null) {
-            android.graphics.drawable.LayerDrawable layer = new android.graphics.drawable.LayerDrawable(new Drawable[]{blurDrawable, opticDrawable});
-            layer.setLayerInset(0, 2, 2, 2, 2);
-            return layer;
-        }
-        return opticDrawable;
     }
 
     /**
@@ -208,10 +160,6 @@ public class HyperOSMaterialFactory {
         Shader borderGrad;
         Shader radialMatte;
         int gaussianBorderColor;
-
-        void ensure(int width, int height, int style, boolean isSelected) {
-            ensure(width, height, style, isSelected, null, 50);
-        }
 
         void ensure(int width, int height, int style, boolean isSelected, @Nullable GlassParams params, int cornerRadiusPercent) {
             boolean paramsEqual = (cachedParams == null && params == null)
@@ -312,41 +260,9 @@ public class HyperOSMaterialFactory {
     }
 
     /**
-     * 使用预构建的 CircularOpticsCache 绘制正圆/圆角物理光学层（onDraw 零分配）
+     * 使用预构建的 CircularOpticsCache 绘制正圆/圆角物理光学层（onDraw 零分配）。
+     * 气泡、圆形视界底衬、顶部提示胶囊三个载体必须共用本入口，保证材质效果一致。
      */
-    public static void drawUnifiedCircularOpticsCached(
-        @NonNull Canvas canvas,
-        int width,
-        int height,
-        int style,
-        boolean isSelected,
-        @NonNull Paint bgPaint,
-        @NonNull Paint highlightPaint,
-        @NonNull Paint borderPaint,
-        @NonNull CircularOpticsCache cache
-    ) {
-        drawUnifiedCircularOpticsCached(
-            canvas, width, height, style, isSelected, bgPaint, highlightPaint, borderPaint, cache, 50, null
-        );
-    }
-
-    public static void drawUnifiedCircularOpticsCached(
-        @NonNull Canvas canvas,
-        int width,
-        int height,
-        int style,
-        boolean isSelected,
-        @NonNull Paint bgPaint,
-        @NonNull Paint highlightPaint,
-        @NonNull Paint borderPaint,
-        @NonNull CircularOpticsCache cache,
-        int cornerRadiusPercent
-    ) {
-        drawUnifiedCircularOpticsCached(
-            canvas, width, height, style, isSelected, bgPaint, highlightPaint, borderPaint, cache, cornerRadiusPercent, null
-        );
-    }
-
     public static void drawUnifiedCircularOpticsCached(
         @NonNull Canvas canvas,
         int width,
@@ -561,10 +477,6 @@ public class HyperOSMaterialFactory {
                 this.cornerRadiusPercent = clamped;
                 invalidateSelf();
             }
-        }
-
-        public int getCornerRadiusPercent() {
-            return cornerRadiusPercent;
         }
 
         @Override

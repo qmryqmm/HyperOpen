@@ -113,10 +113,4 @@ public final class HeaderPillBackdrop {
         blurSession.release();
         composite = null;
     }
-
-    /** 当前光学层（供测试 / 诊断用） */
-    @NonNull
-    public HyperOSMaterialFactory.HeaderPillDrawable optic() {
-        return optic;
-    }
 }

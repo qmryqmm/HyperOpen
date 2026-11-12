@@ -42,44 +42,13 @@ import io.github.qmryqmm.hyperopen.view.StrokeTextView
  * - 长按图标：震动进入自定义排版模式，可自由拖拽改变图标在蜂窝阵列中的位置顺序；
  * - 松手磁吸：其他图标平滑让位，松手后磁吸回网格并同步保存。
  */
-data class BubbleBlurSpot(
-    val id: String,
-    val centerX: Float,
-    val centerY: Float,
-    val diameterPx: Float,
-    val alpha: Float = 1.0f,
-)
-
-data class PreviewBlurSceneState(
-    val regionCenterX: Float = 0f,
-    val regionCenterY: Float = 0f,
-    val regionDiameterPx: Float = 0f,
-    val headerLeftPx: Float = 0f,
-    val headerTopPx: Float = 0f,
-    val headerWidthPx: Float = 0f,
-    val headerHeightPx: Float = 0f,
-    val backBtnLeftPx: Float = 0f,
-    val backBtnTopPx: Float = 0f,
-    val backBtnSizePx: Float = 0f,
-    val bubbles: List<BubbleBlurSpot> = emptyList(),
-    /** 面板是否处于展开可见态：隐藏时 Compose 层的全屏/圆形/气泡毛玻璃一并关闭 */
-    val panelVisible: Boolean = true,
-)
-
-/**
- * 整体指纹快捷面板高保真预览与长按拖拽交互视图。
- * 复用与 SystemUI 完全一致的 CircularBubbleView、CircularRegionBackdropView 与 HeaderPill 渲染，
- * 确保所见即所得。
- * - 普通滑动：模拟指纹解锁后手指滑过快捷图标的鱼眼动力学吸附与实时聚焦反馈；
- * - 长按图标：震动进入自定义排版模式，可自由拖拽改变图标在蜂窝阵列中的位置顺序；
- * - 松手磁吸：其他图标平滑让位，松手后磁吸回网格并同步保存。
- */
 class HyperOpenPreviewView(
     context: Context,
     private var config: HyperOpenConfig,
     private val onBackClick: () -> Unit,
     private val onOrderChanged: (List<ShortcutItem>) -> Unit,
-    private val onBlurSceneChanged: ((PreviewBlurSceneState) -> Unit)? = null,
+    /** 面板显隐变化回调（全屏模糊 / 压暗门控用） */
+    private val onPanelVisibleChanged: ((Boolean) -> Unit)? = null,
     /** 「始终显示面板」开关：true 时面板常驻，无需按住指纹按钮，可直接长按排版 / 滑动预览 */
     private var alwaysShowPanel: Boolean = false,
 ) : FrameLayout(context) {
@@ -111,8 +80,16 @@ class HyperOpenPreviewView(
     private var lastRegionDiameterPx = 0f
 
     // ── 面板显隐状态机（模拟指纹解锁后按住传感器 → 延迟展开 → 松手退场） ──
-    /** 当前面板是否处于展开可见态 */
-    private var panelVisible: Boolean = false
+    /** 当前面板是否处于展开可见态（变化时回调 [onPanelVisibleChanged]，供全屏模糊/压暗门控） */
+    private var panelVisibleInternal: Boolean = false
+    private var panelVisible: Boolean
+        get() = panelVisibleInternal
+        set(value) {
+            if (panelVisibleInternal != value) {
+                panelVisibleInternal = value
+                onPanelVisibleChanged?.invoke(value)
+            }
+        }
     /** 手指是否正按在「指纹按钮」上 */
     private var fingerprintHolding: Boolean = false
     /** 按住后等待 showDelayMs 再展开的任务 */
@@ -539,7 +516,6 @@ class HyperOpenPreviewView(
                 var elapsed = 0L
                 override fun run() {
                     if (!panelVisible) return
-                    notifyBlurSceneChanged()
                     if (elapsed < dur) {
                         elapsed += 16L
                         postDelayed(this, 16L)
@@ -549,7 +525,6 @@ class HyperOpenPreviewView(
         } else {
             BubblePanelAnimator.applyShownState(bubbleViews)
         }
-        notifyBlurSceneChanged()
     }
 
     /** 收起面板：播放与真实同源的退场动画，播完回到隐藏态并重新显示指纹按钮。 */
@@ -569,14 +544,12 @@ class HyperOpenPreviewView(
                 updateFingerprintButtonState()
                 setPanelChromeVisible(false)
                 BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
-                notifyBlurSceneChanged()
             }
             val dur = 200L
             post(object : Runnable {
                 var elapsed = 0L
                 override fun run() {
                     if (!isDismissing) return
-                    notifyBlurSceneChanged()
                     if (elapsed < dur) {
                         elapsed += 16L
                         postDelayed(this, 16L)
@@ -588,7 +561,6 @@ class HyperOpenPreviewView(
             updateFingerprintButtonState()
             setPanelChromeVisible(false)
             BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
-            notifyBlurSceneChanged()
         }
     }
 
@@ -632,7 +604,6 @@ class HyperOpenPreviewView(
             BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
         }
         updateFingerprintButtonState()
-        notifyBlurSceneChanged()
     }
 
     /** 当前面板是否可见（供 Compose 层读取，决定压暗层是否绘制）。 */
@@ -667,8 +638,6 @@ class HyperOpenPreviewView(
                     .translationY(0f)
                     .setDuration(220)
                     .setInterpolator(OvershootInterpolator(1.1f))
-                    .setUpdateListener { notifyBlurSceneChanged() }
-                    .withEndAction { notifyBlurSceneChanged() }
                     .start()
             } else {
                 lp.leftMargin = left
@@ -678,7 +647,6 @@ class HyperOpenPreviewView(
                 b.translationY = 0f
             }
         }
-        notifyBlurSceneChanged()
     }
 
     /**
@@ -737,7 +705,6 @@ class HyperOpenPreviewView(
             addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
                 if ((r - l) != (or - ol) || (b - t) != (ob - ot) || l != ol || t != ot) {
                     applyHeaderPillBackground()
-                    notifyBlurSceneChanged()
                 }
             }
         }
@@ -827,7 +794,7 @@ class HyperOpenPreviewView(
 
     /**
      * 按 showHeaderPillBg 开关与统一材质参数动态设置顶部提示胶囊背景
-     * （与真机 createCompositeHeaderPillDrawable 路径同源的 HeaderPillBackdrop：
+     * （与真机 CustomHyperOpenContainer 同源的 HeaderPillBackdrop：
      * 统一 GlassParams 光学参数 + BlurRegionSession blur 生命周期）
      */
     private fun applyHeaderPillBackground() {
@@ -1019,7 +986,6 @@ class HyperOpenPreviewView(
         if (needRebuild || bubbleViews.isEmpty()) {
             setupLayout()
         } else {
-            notifyBlurSceneChanged()
         }
     }
 
@@ -1209,9 +1175,6 @@ class HyperOpenPreviewView(
             )
             bubble.setSystemBlurEnabled(true)
             bubble.setIconAlpha(config.iconAlpha)
-            bubble.setOnScaleChangedListener {
-                notifyBlurSceneChanged()
-            }
             bubble.targetX = finalX
             bubble.targetY = finalY
 
@@ -1272,8 +1235,6 @@ class HyperOpenPreviewView(
             BubblePanelAnimator.applyHiddenState(bubbleViews, fodX, fodY)
         }
         updateFingerprintButtonState()
-        notifyBlurSceneChanged()
-        post { notifyBlurSceneChanged() }
     }
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
@@ -1392,7 +1353,6 @@ class HyperOpenPreviewView(
 
                     // 检测碰撞并实时重排其余气泡
                     checkDragReorder(x, y)
-                    notifyBlurSceneChanged()
                 } else if (!isEditMode) {
                     // 普通模拟指纹滑动模式：物理鱼眼动力学（手指停住时保持当前放大状态，绝不失效）
                     handleFingerHover(x, y)
@@ -1486,7 +1446,6 @@ class HyperOpenPreviewView(
         if (initialTarget != null) {
             startDragging(initialTarget, dragTouchStartX, dragTouchStartY)
         } else {
-            notifyBlurSceneChanged()
         }
     }
 
@@ -1518,7 +1477,6 @@ class HyperOpenPreviewView(
             b.setSelectedState(false)
             b.applyScale(1.0f)
         }
-        notifyBlurSceneChanged()
     }
 
     /**
@@ -1641,7 +1599,6 @@ class HyperOpenPreviewView(
         bubble.setSelectedState(false)
         bubble.bringToFront()
         bubble.applyScale(1.22f)
-        notifyBlurSceneChanged()
         triggerHaptic()
     }
 
@@ -1688,19 +1645,16 @@ class HyperOpenPreviewView(
                         .y(targetTop.toFloat())
                         .setDuration(220)
                         .setInterpolator(OvershootInterpolator(1.1f))
-                        .setUpdateListener { notifyBlurSceneChanged() }
                         .withEndAction {
                             lp.leftMargin = targetLeft
                             lp.topMargin = targetTop
                             b.layoutParams = lp
                             b.translationX = 0f
                             b.translationY = 0f
-                            notifyBlurSceneChanged()
                         }
                         .start()
                 }
             }
-            notifyBlurSceneChanged()
             triggerHaptic()
         }
     }
@@ -1738,7 +1692,6 @@ class HyperOpenPreviewView(
             }
         }
         draggingBubble = null
-        notifyBlurSceneChanged()
         triggerHaptic()
     }
 
@@ -1946,7 +1899,6 @@ class HyperOpenPreviewView(
                 headerSubtitle.text = "移至目标图标后松手直接打开"
             }
         }
-        notifyBlurSceneChanged()
     }
 
     private fun resetHoverSelection() {
@@ -1964,7 +1916,6 @@ class HyperOpenPreviewView(
         headerTitle.text = "滑动选择快捷方式"
         headerSubtitle.text = "移至目标图标后松手直接打开"
         sectorOverlay.setHighlight(-1, 0, false)
-        notifyBlurSceneChanged()
     }
 
     private fun expandFolder(folderBubble: CircularBubbleView) {
@@ -2033,7 +1984,6 @@ class HyperOpenPreviewView(
                 setSystemBlurEnabled(true)
                 this.targetX = targetX
                 this.targetY = targetY
-                setOnScaleChangedListener { notifyBlurSceneChanged() }
             }
 
             val lp = LayoutParams(iconSizeInt, iconSizeInt).apply {
@@ -2062,12 +2012,9 @@ class HyperOpenPreviewView(
                 .setStartDelay(i * 15L)
                 .setUpdateListener {
                     sub.syncBlurCornerRadiusWithViewScale()
-                    notifyBlurSceneChanged()
                 }
-                .withEndAction { notifyBlurSceneChanged() }
                 .start()
         }
-        notifyBlurSceneChanged()
     }
 
     /**
@@ -2122,7 +2069,6 @@ class HyperOpenPreviewView(
                 dismissFolderSubBubbles(animated = true)
             }
         }
-        notifyBlurSceneChanged()
     }
 
     /**
@@ -2160,7 +2106,6 @@ class HyperOpenPreviewView(
                     .setInterpolator(android.view.animation.AccelerateInterpolator())
                     .setUpdateListener {
                         sub.syncBlurCornerRadiusWithViewScale()
-                        notifyBlurSceneChanged()
                     }
                     .withEndAction { bubblesContainer.removeView(sub) }
                     .start()
@@ -2179,7 +2124,6 @@ class HyperOpenPreviewView(
                     .setInterpolator(android.view.animation.LinearInterpolator())
                     .setUpdateListener {
                         b.syncBlurCornerRadiusWithViewScale()
-                        notifyBlurSceneChanged()
                     }
                     .withEndAction { b.applyScale(1.0f); b.ensureBlurAndRefreshBackground() }
                     .start()
@@ -2189,78 +2133,6 @@ class HyperOpenPreviewView(
             }
             b.setIconAlpha(config.iconAlpha)
         }
-        notifyBlurSceneChanged()
-    }
-
-    private fun notifyBlurSceneChanged() {
-        val listener = onBlurSceneChanged ?: return
-        val iconSizePx = dpToPx(config.iconSize.toFloat())
-        val spots = ArrayList<BubbleBlurSpot>(bubbleViews.size + folderSubBubbles.size)
-        for (b in bubbleViews) {
-            val lp = b.layoutParams as? LayoutParams
-            val cx = if (lp != null) lp.leftMargin + iconSizePx / 2f + b.translationX else b.targetX
-            val cy = if (lp != null) lp.topMargin + iconSizePx / 2f + b.translationY else b.targetY
-            // 模糊斑点必须等于图标实际渲染缩放：scaleX 即视图变换后的最终倍率（稳态下与 currentScale 一致，
-            // 入场/退场动画期间则是动画值），保证模糊与图标放大的倍率始终同步
-            val scale = b.scaleX.coerceAtLeast(0.1f)
-            // 与真实窗口模糊贴片同一规格：视图边界内缩 INSET_PX 后随视图缩放（BubbleBlurSpec），
-            // 任意圆角（如 25% 圆角矩形）下毛玻璃均完整铺满气泡且绝不溢出描边
-            val effectiveDiameter = (iconSizePx - 2f * BubbleBlurSpec.INSET_PX) * scale
-            spots.add(
-                BubbleBlurSpot(
-                    id = b.item.id,
-                    centerX = cx,
-                    centerY = cy,
-                    diameterPx = effectiveDiameter,
-                    alpha = (b.iconAlpha * b.alpha).coerceIn(0f, 1f),
-                )
-            )
-        }
-        for (sub in folderSubBubbles) {
-            val lp = sub.layoutParams as? LayoutParams
-            val cx = if (lp != null) lp.leftMargin + iconSizePx / 2f + sub.translationX else sub.targetX
-            val cy = if (lp != null) lp.topMargin + iconSizePx / 2f + sub.translationY else sub.targetY
-            // 与一级气泡完全同一公式（含 INSET_PX 内缩规格）：旧实现 currentScale × scaleX 在鱼眼稳态下双重相乘
-            // （scaleX == currentScale == s，模糊直径变成 iconSize × s²，比图标实际放大的 s 倍多涨一倍）
-            val scale = sub.scaleX.coerceAtLeast(0.1f)
-            val effectiveDiameter = (iconSizePx - 2f * BubbleBlurSpec.INSET_PX) * scale
-            val effectiveAlpha = (sub.iconAlpha * sub.alpha).coerceIn(0f, 1f)
-            spots.add(
-                BubbleBlurSpot(
-                    id = "sub_" + sub.item.id,
-                    centerX = cx,
-                    centerY = cy,
-                    diameterPx = effectiveDiameter,
-                    alpha = effectiveAlpha,
-                )
-            )
-        }
-
-        val headerLeft = if (::topHeaderContainer.isInitialized && ::headerPill.isInitialized) {
-            (topHeaderContainer.left + headerPill.left).toFloat()
-        } else 0f
-        val headerTop = if (::topHeaderContainer.isInitialized && ::headerPill.isInitialized) {
-            (topHeaderContainer.top + headerPill.top).toFloat()
-        } else dpToPx(config.headerTopMargin.toFloat())
-        val headerW = if (::headerPill.isInitialized && config.showHeaderPill) headerPill.width.toFloat() else 0f
-        val headerH = if (::headerPill.isInitialized && config.showHeaderPill) headerPill.height.toFloat() else 0f
-
-        listener(
-            PreviewBlurSceneState(
-                regionCenterX = lastRegionCenterX,
-                regionCenterY = lastRegionCenterY,
-                regionDiameterPx = lastRegionDiameterPx,
-                headerLeftPx = headerLeft,
-                headerTopPx = headerTop,
-                headerWidthPx = headerW,
-                headerHeightPx = headerH,
-                backBtnLeftPx = dpToPx(18f),
-                backBtnTopPx = dpToPx(46f),
-                backBtnSizePx = (dpToPx(40f) - 6f).coerceAtLeast(1f),
-                bubbles = spots,
-                panelVisible = panelVisible,
-            )
-        )
     }
 
     private fun dpToPx(dp: Float): Float {
