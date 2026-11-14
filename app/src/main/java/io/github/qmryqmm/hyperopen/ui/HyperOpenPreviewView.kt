@@ -98,6 +98,21 @@ class HyperOpenPreviewView(
             showPanel(animated = true)
         }
     }
+    /**
+     * 面板入场动画门控：入场期间鱼眼缩放与入场缩放会互相覆盖，
+     * 因此动画期间只缓存手指最后坐标，动画结束后再补一次选中计算。
+     */
+    private var panelExpandAnimating: Boolean = false
+    private var pendingHoverX: Float = 0f
+    private var pendingHoverY: Float = 0f
+    private var hasPendingHover: Boolean = false
+    private val finishExpandGateRunnable = Runnable {
+        panelExpandAnimating = false
+        if (fingerprintHolding && panelVisible && hasPendingHover) {
+            hasPendingHover = false
+            handleFingerHover(pendingHoverX, pendingHoverY)
+        }
+    }
     /** 指纹按钮（位于 FOD 指纹中心，隐藏态时可见） */
     private var fingerprintButton: View? = null
     /** 退场动画期间的标记，避免重复触发 */
@@ -148,6 +163,9 @@ class HyperOpenPreviewView(
         private set
     private var snapToggleButton: TextView? = null
     private var alwaysShowToggleButton: TextView? = null
+    /** 预览松手是否真正执行选中的快捷方式（默认关闭，避免调参时误启动） */
+    private var executeShortcutOnRelease: Boolean = false
+    private var executeToggleButton: TextView? = null
     private val freePlacedBubbles = mutableSetOf<CircularBubbleView>()
 
     // 会话布局快照：进入界面/保存后捕获，用于返回键退出时判断是否存在未保存的排版修改
@@ -159,6 +177,7 @@ class HyperOpenPreviewView(
     init {
         snapEnabled = loadSnapEnabled()
         alwaysShowPanel = loadAlwaysShowPanel()
+        executeShortcutOnRelease = loadExecuteShortcutOnRelease()
         initVibrator()
         initViews()
     }
@@ -196,6 +215,25 @@ class HyperOpenPreviewView(
             context.getSharedPreferences("hyperopen_ui_state", Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean("always_show_panel", alwaysShowPanel)
+                .apply()
+        } catch (_: Throwable) {}
+    }
+
+    /** 「松手执行」开关跨会话记忆：默认关闭，避免在预览调参时意外启动应用 */
+    private fun loadExecuteShortcutOnRelease(): Boolean {
+        return try {
+            context.getSharedPreferences("hyperopen_ui_state", Context.MODE_PRIVATE)
+                .getBoolean("execute_shortcut_on_release", false)
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun persistExecuteShortcutOnRelease() {
+        try {
+            context.getSharedPreferences("hyperopen_ui_state", Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("execute_shortcut_on_release", executeShortcutOnRelease)
                 .apply()
         } catch (_: Throwable) {}
     }
@@ -257,7 +295,10 @@ class HyperOpenPreviewView(
         // 4.2 右上角「面板常驻」开关（吸附开关正下方，常显）
         buildAlwaysShowToggleButton()
 
-        // 4.3 指纹按钮：位于 FOD 指纹中心，按住 showDelayMs 后展开面板，松手播放退场动画
+        // 4.3 右上角「松手执行」开关（面板常驻开关正下方，常显）
+        buildExecuteToggleButton()
+
+        // 4.4 指纹按钮：位于 FOD 指纹中心，按住 showDelayMs 后展开面板，松手播放退场动画
         buildFingerprintButton()
 
         // 5. 在首次测量前提前建立蜂窝气泡视图树
@@ -310,6 +351,9 @@ class HyperOpenPreviewView(
 
     private fun alwaysShowToggleText(): String =
         if (alwaysShowPanel) "面板常驻：开" else "面板常驻：关"
+
+    private fun executeToggleText(): String =
+        if (executeShortcutOnRelease) "松手执行：开" else "松手执行：关"
 
     private fun buildSnapToggleButton() {
         val btn = TextView(context).apply {
@@ -406,6 +450,60 @@ class HyperOpenPreviewView(
     }
 
     /**
+     * 「松手执行」开关：默认关闭，只在预览页滑到图标松手时进行选中/退场反馈；
+     * 开启后松手会真正执行选中的快捷方式，与真机指纹面板行为一致。
+     */
+    private fun buildExecuteToggleButton() {
+        val btn = TextView(context).apply {
+            text = executeToggleText()
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextColor(Color.WHITE)
+            paint.isFakeBoldText = true
+            gravity = Gravity.CENTER
+            val padH = dpToPx(14f).toInt()
+            setPadding(padH, 0, padH, 0)
+            background = HyperOSMaterialFactory.createHeaderPillDrawable(
+                resolvedStyle,
+                config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_HEADER),
+                config.glassParamsFor(HyperOpenConfig.COMPONENT_HEADER)
+            )
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) {
+                    if (view.width <= 0 || view.height <= 0) return
+                    outline.setRoundRect(0, 0, view.width, view.height, Math.min(view.width, view.height) / 2f)
+                    outline.alpha = 0f
+                }
+            }
+            clipToOutline = true
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                executeShortcutOnRelease = !executeShortcutOnRelease
+                persistExecuteShortcutOnRelease()
+                text = executeToggleText()
+                triggerHaptic()
+                android.widget.Toast.makeText(
+                    context,
+                    if (executeShortcutOnRelease) {
+                        "松手执行已开启：滑动选中后松手将直接启动应用"
+                    } else {
+                        "松手执行已关闭：只预览选中效果，不启动应用"
+                    },
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+        // 位于「面板常驻」开关正下方（面板常驻 94dp 顶距 + 40dp 高 + 8dp 间距）
+        val lp = LayoutParams(LayoutParams.WRAP_CONTENT, dpToPx(40f).toInt()).apply {
+            gravity = Gravity.TOP or Gravity.END
+            rightMargin = dpToPx(18f).toInt()
+            topMargin = dpToPx(142f).toInt()
+        }
+        addView(btn, lp)
+        executeToggleButton = btn
+    }
+
+    /**
      * 指纹传感器按钮：面板隐藏态时显示在 FOD 指纹中心。
      * - 按下：启动 showDelayMs 等待（与真实「解锁后按住传感器多久进入面板」同源）；
      * - 等待结束：播放与真实 SystemUI 完全同源的入场展开动画；
@@ -438,34 +536,6 @@ class HyperOpenPreviewView(
         }
         addView(btn, lp)
         fingerprintButton = btn
-
-        btn.setOnTouchListener { _, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    if (!alwaysShowPanel && !isEditMode) {
-                        fingerprintHolding = true
-                        removeCallbacks(expandRunnable)
-                        // showDelayMs == 500 为系统默认：真实侧该值不干预原生 500ms 延迟，
-                        // 预览侧直接用配置值（0 = 立即），保证「能感觉」的等待时长对齐
-                        val delay = Math.max(0, config.showDelayMs).toLong()
-                        postDelayed(expandRunnable, delay)
-                        triggerHaptic()
-                    }
-                    true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (fingerprintHolding) {
-                        fingerprintHolding = false
-                        removeCallbacks(expandRunnable)
-                        if (panelVisible && !alwaysShowPanel) {
-                            hidePanel(animated = true)
-                        }
-                    }
-                    true
-                }
-                else -> true
-            }
-        }
     }
 
     /** 首次测量 / FOD 坐标变化时把指纹按钮摆到与真实一致的指纹中心。 */
@@ -510,8 +580,15 @@ class HyperOpenPreviewView(
         panelVisible = true
         updateFingerprintButtonState()
         setPanelChromeVisible(true)
+        removeCallbacks(finishExpandGateRunnable)
         if (animated) {
+            val expandMs = Math.max(0, config.animDurationMs)
+            panelExpandAnimating = expandMs > 0
+            hasPendingHover = false
             BubblePanelAnimator.playExpand(bubbleViews, lastFodX, lastFodY, config)
+            if (panelExpandAnimating) {
+                postDelayed(finishExpandGateRunnable, expandMs.toLong() + 100L)
+            }
             // 动画期间逐帧同步模糊斑点（缩放/位移/透明度）
             val dur = Math.max(0, config.animDurationMs).toLong() + 120L
             post(object : Runnable {
@@ -525,13 +602,18 @@ class HyperOpenPreviewView(
                 }
             })
         } else {
+            panelExpandAnimating = false
+            hasPendingHover = false
             BubblePanelAnimator.applyShownState(bubbleViews)
         }
     }
 
     /** 收起面板：播放与真实同源的退场动画，播完回到隐藏态并重新显示指纹按钮。 */
-    private fun hidePanel(animated: Boolean) {
+    private fun hidePanel(animated: Boolean, onDismissFinished: (() -> Unit)? = null) {
         if (isDismissing) return
+        removeCallbacks(finishExpandGateRunnable)
+        panelExpandAnimating = false
+        hasPendingHover = false
         // 排版模式下先退出，避免退场动画与拖拽状态冲突
         if (isEditMode) exitEditMode()
         resetHoverSelection()
@@ -546,6 +628,7 @@ class HyperOpenPreviewView(
                 updateFingerprintButtonState()
                 setPanelChromeVisible(false)
                 BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
+                onDismissFinished?.invoke()
             }
             val dur = 200L
             post(object : Runnable {
@@ -563,6 +646,7 @@ class HyperOpenPreviewView(
             updateFingerprintButtonState()
             setPanelChromeVisible(false)
             BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
+            onDismissFinished?.invoke()
         }
     }
 
@@ -594,7 +678,11 @@ class HyperOpenPreviewView(
         persistAlwaysShowPanel()
         if (!changed && panelVisible == enabled) return
         removeCallbacks(expandRunnable)
+        removeCallbacks(finishExpandGateRunnable)
         fingerprintHolding = false
+        panelExpandAnimating = false
+        hasPendingHover = false
+        isTouching = false
         if (enabled) {
             // 常驻：直接显示终态，可继续长按排版 / 滑动预览
             showPanel(animated = false)
@@ -678,6 +766,10 @@ class HyperOpenPreviewView(
             btn.invalidate()
         }
         alwaysShowToggleButton?.let { btn ->
+            btn.background = HyperOSMaterialFactory.createHeaderPillDrawable(resolvedStyle, pillDim, pillParams)
+            btn.invalidate()
+        }
+        executeToggleButton?.let { btn ->
             btn.background = HyperOSMaterialFactory.createHeaderPillDrawable(resolvedStyle, pillDim, pillParams)
             btn.invalidate()
         }
@@ -832,7 +924,10 @@ class HyperOpenPreviewView(
     override fun onDetachedFromWindow() {
         removeCallbacks(longPressRunnable)
         removeCallbacks(expandRunnable)
+        removeCallbacks(finishExpandGateRunnable)
         fingerprintHolding = false
+        panelExpandAnimating = false
+        hasPendingHover = false
         // 注意：detach 时不再自动提交排版（旧实现裸提交未结算的动画中间值，导致返回键退出后图标错位）；
         // 是否保存由 MainActivity 的返回确认弹窗决定：commitLayoutChanges() / discardLayoutChanges()
         super.onDetachedFromWindow()
@@ -1249,6 +1344,36 @@ class HyperOpenPreviewView(
         updateFingerprintButtonState()
     }
 
+    private fun isInFingerprintRegion(x: Float, y: Float): Boolean {
+        val btn = fingerprintButton ?: return false
+        if (btn.visibility != View.VISIBLE) return false
+        val slop = dpToPx(12f)
+        return x >= btn.left - slop && x <= btn.right + slop &&
+            y >= btn.top - slop && y <= btn.bottom + slop
+    }
+
+    /** 当前手指实际选中的快捷方式（文件夹子项优先；仅选中文件夹容器本身时不执行） */
+    private fun resolveSelectedShortcut(): ShortcutItem? {
+        currentSelectedSubBubble?.item?.let { return it }
+        val main = currentSelectedBubble?.item ?: return null
+        if (ShortcutItem.ACTION_FOLDER == main.actionType) return null
+        return main
+    }
+
+    /**
+     * 面板展开动画期间只缓存最后一次手指坐标，动画结束后再应用一次鱼眼；
+     * 否则 [BubblePanelAnimator.playExpand] 的缩放动画会与鱼眼缩放互相覆盖。
+     */
+    private fun handleLiveHover(x: Float, y: Float) {
+        if (panelExpandAnimating) {
+            pendingHoverX = x
+            pendingHoverY = y
+            hasPendingHover = true
+            return
+        }
+        handleFingerHover(x, y)
+    }
+
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
         // 如果点击发生在左上角悬浮返回按钮区域，放行给子 View 处理点击
         floatingBackButton?.let { btn ->
@@ -1285,19 +1410,24 @@ class HyperOpenPreviewView(
                 }
             }
         }
-        // 指纹按钮（面板隐藏态可见）：放行触摸，交给它自己的 OnTouchListener 处理按住/松手
-        fingerprintButton?.let { btn ->
+        // 右上角「松手执行」开关（常显）：放行触摸给按钮自身处理点击
+        executeToggleButton?.let { btn ->
             if (btn.visibility == View.VISIBLE) {
-                val slop = dpToPx(12f)
+                val slop = dpToPx(6f)
                 if (ev.x >= btn.left - slop && ev.x <= btn.right + slop &&
                     ev.y >= btn.top - slop && ev.y <= btn.bottom + slop) {
                     return false
                 }
             }
         }
-        // 按住指纹按钮期间（面板展开动画进行中）：绝不拦截，保证手势序列完整回到按钮、
-        // 能正常收到 ACTION_UP 触发退场；否则展开瞬间被抢占 → CANCEL → 立即退场
-        if (fingerprintHolding) return false
+        // 指纹按钮（面板隐藏态可见）：由预览容器从 DOWN 开始接管整段按压手势，
+        // 这样面板展开后同一根手指的 MOVE 仍能继续驱动鱼眼选中，而不是被子 View 吃掉。
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN &&
+            !alwaysShowPanel && !panelVisible && !isEditMode &&
+            isInFingerprintRegion(ev.x, ev.y)
+        ) {
+            return true
+        }
         // 面板隐藏态：除上述按钮外一律不拦截，避免手指误触到隐藏的气泡
         if (!panelVisible) return false
         // 其余区域拦截触摸事件以便处理全局滑动动力学与拖拽
@@ -1305,22 +1435,59 @@ class HyperOpenPreviewView(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        // 指纹按钮在展开后被隐藏（GONE），后续 ACTION_UP 会回落到父 View；
-        // 这里兜底处理「按住 → 松手」的退场，避免按钮收不到 UP 导致面板卡在展开态
+        val x = event.x
+        val y = event.y
+        // 按在指纹按钮上的整段手势由预览容器接管：展开后 MOVE 继续驱动鱼眼，松手统一收场
         if (fingerprintHolding &&
             (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL)
         ) {
+            val selected = if (event.actionMasked == MotionEvent.ACTION_UP &&
+                executeShortcutOnRelease && !isEditMode
+            ) {
+                resolveSelectedShortcut()
+            } else null
             fingerprintHolding = false
             removeCallbacks(expandRunnable)
+            removeCallbacks(finishExpandGateRunnable)
+            panelExpandAnimating = false
+            hasPendingHover = false
+            isTouching = false
             if (panelVisible && !alwaysShowPanel) {
-                hidePanel(animated = true)
+                // 与真机一致：退场动画结束后再执行动作
+                hidePanel(animated = true) {
+                    if (selected != null) {
+                        triggerHaptic()
+                        selected.executeAsync(context)
+                    }
+                }
+            } else if (selected != null) {
+                triggerHaptic()
+                selected.executeAsync(context)
             }
             return true
         }
-        // 面板隐藏态（按住触发模式下未展开）：除指纹按钮外不消费任何触摸
-        if (!panelVisible) return false
-        val x = event.x
-        val y = event.y
+        // 面板隐藏态：只处理「按在指纹按钮上开始长按」，其余触摸不消费
+        if (!panelVisible) {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN &&
+                !alwaysShowPanel && !isEditMode && isInFingerprintRegion(x, y)
+            ) {
+                fingerprintHolding = true
+                isTouching = true
+                dragTouchStartX = x
+                dragTouchStartY = y
+                pendingPressBubble = null
+                panelExpandAnimating = false
+                hasPendingHover = false
+                removeCallbacks(expandRunnable)
+                removeCallbacks(finishExpandGateRunnable)
+                // showDelayMs == 500 为系统默认：真实侧该值不干预原生 500ms 延迟，
+                // 预览侧直接用配置值（0 = 立即），保证「能感觉」的等待时长对齐
+                postDelayed(expandRunnable, Math.max(0, config.showDelayMs).toLong())
+                triggerHaptic()
+                return true
+            }
+            return fingerprintHolding
+        }
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -1367,12 +1534,17 @@ class HyperOpenPreviewView(
                     checkDragReorder(x, y)
                 } else if (!isEditMode) {
                     // 普通模拟指纹滑动模式：物理鱼眼动力学（手指停住时保持当前放大状态，绝不失效）
-                    handleFingerHover(x, y)
+                    handleLiveHover(x, y)
                 }
                 return true
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val selected = if (event.actionMasked == MotionEvent.ACTION_UP &&
+                    executeShortcutOnRelease && !isEditMode && !isDraggingActive
+                ) {
+                    resolveSelectedShortcut()
+                } else null
                 isTouching = false
                 removeCallbacks(longPressRunnable)
                 removeCallbacks(folderHoverRunnable)
@@ -1388,6 +1560,10 @@ class HyperOpenPreviewView(
                     exitEditMode()
                 }
                 pendingPressBubble = null
+                if (selected != null) {
+                    triggerHaptic()
+                    selected.executeAsync(context)
+                }
                 return true
             }
         }
