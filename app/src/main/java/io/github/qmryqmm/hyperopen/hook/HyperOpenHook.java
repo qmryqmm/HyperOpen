@@ -209,6 +209,10 @@ public class HyperOpenHook {
                     // 全屏高斯模糊与全屏压暗独立渲染：模糊受 fullscreenBlurMaskAlpha 调控，压暗受 fullscreenDimAlpha 调控
                     // 两者分别容错：applyBlur 签名随系统界面版本变化（见 applyBlurCompat），
                     // 绝不能因模糊解析/调用失败而连带丢掉全屏压暗。
+                    float appliedFullscreenBlurPx = -1f;
+                    if (latestConfig.fullscreenBlurMaskAlpha <= 0.001f) {
+                        appliedFullscreenBlurPx = 0f;
+                    }
                     try {
                         Object blurUtils = resolveBlurUtils(view);
                         if (blurUtils != null) {
@@ -222,6 +226,7 @@ public class HyperOpenHook {
                                 // 用户开启全屏模糊：根据比例动态设置全屏高斯模糊半径
                                 float blurRatio = Math.max(0.0f, Math.min(1.0f, latestConfig.fullscreenBlurMaskAlpha));
                                 float blurRadius = (float) XposedHelpers.callMethod(blurUtils, "blurRadiusOfRatio", blurRatio);
+                                appliedFullscreenBlurPx = blurRadius;
                                 if (vri != null) {
                                     applyBlurCompat(blurUtils, vri, (int) blurRadius);
                                 }
@@ -297,6 +302,9 @@ public class HyperOpenHook {
                     }
 
                     // 每次展开前，热更新容器配置！
+                    // 先注入真实全屏模糊半径：组件 blur drawable 会按
+                    // sqrt(全屏² + 组件²) 组合，避免小半径组件在面板上挖出清晰的洞。
+                    container.setFullscreenBlurRadiusPx(appliedFullscreenBlurPx);
                     container.updateConfig(latestConfig);
 
                     // 获取 FOD 精准指纹中心坐标：

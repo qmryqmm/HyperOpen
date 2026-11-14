@@ -66,6 +66,64 @@ public final class IconGhostLayer {
         this.blurRadiusPx = Math.max(0f, blurRadiusPx);
     }
 
+    public float getBlurRadiusPx() {
+        return blurRadiusPx;
+    }
+
+    /**
+     * 直接在 GhostView 画布上绘制相交的兄弟气泡（度量单位为真实屏幕物理像素）。
+     * 由 GhostView 的 View 级 RenderEffect 进行硬件高斯模糊，兼容性与渲染效果最佳。
+     */
+    public void drawDirect(@NonNull Canvas canvas, @NonNull CircularBubbleView target, float targetScale) {
+        int tw = target.getWidth();
+        int th = target.getHeight();
+        if (tw <= 0 || th <= 0) return;
+        // 当前帧屏幕真实物理中心（含动画 translationX/Y）
+        float cx = target.getX() + tw / 2f;
+        float cy = target.getY() + th / 2f;
+        float targetRadius = (tw / 2f) * targetScale;
+
+        drawDirectList(canvas, mainBubbles, target, cx, cy, targetRadius);
+        drawDirectList(canvas, subBubbles, target, cx, cy, targetRadius);
+    }
+
+    private void drawDirectList(@NonNull Canvas canvas, @NonNull List<CircularBubbleView> list,
+                                @NonNull CircularBubbleView target, float cx, float cy, float targetRadius) {
+        float targetZ = target.getTranslationZ();
+        for (int i = 0, n = list.size(); i < n; i++) {
+            CircularBubbleView o = list.get(i);
+            if (o == target || o.getVisibility() != android.view.View.VISIBLE) continue;
+            // 仅层级在当前气泡下方的邻居才会被当前气泡压盖并模糊透出（避免反向透视与同级冲突）
+            if (o.getTranslationZ() >= targetZ) continue;
+            float alpha = o.getAlpha();
+            if (alpha <= 0.002f) continue;
+
+            int ow = o.getWidth();
+            int oh = o.getHeight();
+            if (ow <= 0 || oh <= 0) continue;
+
+            float os = Math.max(0.1f, o.getScaleX());
+            // 兄弟气泡当前帧屏幕真实物理中心
+            float ocx = o.getX() + ow / 2f;
+            float ocy = o.getY() + oh / 2f;
+            float neighborRadius = (Math.max(ow, oh) / 2f) * os;
+
+            float dx = ocx - cx;
+            float dy = ocy - cy;
+            float dist = (float) Math.hypot(dx, dy);
+
+            // 严格物理相交判定：仅当邻居与当前气泡在屏幕上几何重叠时才绘制被压盖的部分
+            if (dist > targetRadius + neighborRadius) continue;
+
+            canvas.save();
+            canvas.translate(dx, dy);
+            canvas.scale(os, os);
+            canvas.translate(-ow / 2f, -oh / 2f);
+            o.drawVisualForGhost(canvas);
+            canvas.restore();
+        }
+    }
+
     /**
      * 在目标气泡的幻影视图 onDraw 中调用：录制「除自身外」幻影并以高斯模糊绘出。
      * 录制与绘制同帧同步，无失效传播问题。
@@ -77,22 +135,39 @@ public final class IconGhostLayer {
         int h = target.getHeight();
         if (w <= 0 || h <= 0) return;
 
-        int size = Math.max(2, (int) Math.ceil(Math.max(w, h) * maxScale * FOOTPRINT_MARGIN));
+        int size = footprintSizePx(target);
         RenderNode node = target.ghostNode;
         if (node == null || target.ghostSizePx != size) {
             node = new RenderNode("HyperOpenIconGhost");
+            node.setPosition(0, 0, size, size);
             target.ghostNode = node;
             target.ghostSizePx = size;
         }
 
         recordExcluding(node, size, target);
 
-        if (blurEffect == null || Math.abs(blurRadiusPx - effectRadiusPx) > 0.5f) {
-            effectRadiusPx = blurRadiusPx;
-            blurEffect = RenderEffect.createBlurEffect(blurRadiusPx, blurRadiusPx, Shader.TileMode.CLAMP);
+        // 保证磨砂虚影有足够的扩散半径，避免小模糊设置时虚影边缘生硬
+        float effectiveBlur = Math.max(20f, blurRadiusPx);
+        if (blurEffect == null || Math.abs(effectiveBlur - effectRadiusPx) > 0.5f) {
+            effectRadiusPx = effectiveBlur;
+            blurEffect = RenderEffect.createBlurEffect(effectiveBlur, effectiveBlur, Shader.TileMode.CLAMP);
         }
         node.setRenderEffect(blurEffect);
+        // 磨砂玻璃透光漫反射：半透明呈现邻居虚影，与底层的壁纸模糊产生平滑叠加融合
+        node.setAlpha(0.65f);
         canvas.drawRenderNode(node);
+    }
+
+    /**
+     * 幻影节点边长。GhostView 在首帧绘制前需要先知道这个值来居中采样，
+     * 不能依赖 drawGhost() 内部懒创建的 ghostNode / ghostSizePx。
+     */
+    public int footprintSizePx(@NonNull CircularBubbleView target) {
+        int w = target.getWidth();
+        int h = target.getHeight();
+        if (w <= 0 || h <= 0) return 2;
+        int pad = (int) Math.ceil(blurRadiusPx * 2f);
+        return Math.max(2, (int) Math.ceil(Math.max(w, h) * maxScale * FOOTPRINT_MARGIN) + pad);
     }
 
     /** 录制「除目标外」兄弟气泡的完整视觉；采样区 = 目标视觉中心周围 size × size */

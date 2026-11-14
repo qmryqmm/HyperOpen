@@ -47,6 +47,13 @@ public final class BubbleBlurSpec {
         return Math.min(halfSize, Math.max(0f, r));
     }
 
+    public static float scaledCornerRadiusPx(float viewMinSizePx, int cornerPercent, float scale) {
+        float effectiveScale = Math.max(0.01f, scale);
+        float baseCorner = cornerRadiusPx(viewMinSizePx, cornerPercent);
+        float maxHalf = (viewMinSizePx / 2f) * effectiveScale;
+        return Math.min(maxHalf, Math.max(0f, baseCorner * effectiveScale));
+    }
+
     /**
      * 模糊贴片圆角半径（本地几何像素）：
      * 与 ViewOutlineProvider 严格采用完全相同的几何公式，定义在 View 本地未缩放几何空间中：

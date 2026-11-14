@@ -640,6 +640,9 @@ fun ParamsPage(
                 )
             }
             if (isOpen("material")) item(key = "material_card") {
+                val softGlassSupported = remember {
+                    io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory.isSoftGlassSupported()
+                }
                 Card(
                     modifier = Modifier
                         .padding(horizontal = 12.dp)
@@ -647,13 +650,22 @@ fun ParamsPage(
                 ) {
                     ArrowPreference(
                         title = "柔光玻璃",
-                        summary = "Soft Light Glass · 系统级桌面与系统界面光学",
+                        summary = if (softGlassSupported) {
+                            "Soft Light Glass · 系统级桌面与系统界面光学"
+                        } else {
+                            "当前设备系统不支持原生柔光玻璃，已自动回退高斯模糊"
+                        },
+                        enabled = softGlassSupported,
                         endActions = {
-                            if (materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) {
+                            if (softGlassSupported && materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) {
                                 Text("✓", color = MiuixTheme.colorScheme.primary, fontSize = 16.sp)
                             }
                         },
-                        onClick = { onMaterialStyle(HyperOpenConfig.MATERIAL_SOFT_GLASS) },
+                        onClick = {
+                            if (softGlassSupported) {
+                                onMaterialStyle(HyperOpenConfig.MATERIAL_SOFT_GLASS)
+                            }
+                        },
                     )
                     ArrowPreference(
                         title = "高斯模糊",

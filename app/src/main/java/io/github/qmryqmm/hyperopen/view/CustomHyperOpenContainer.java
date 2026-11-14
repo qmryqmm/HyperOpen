@@ -41,6 +41,11 @@ public class CustomHyperOpenContainer extends FrameLayout {
     private final ClassLoader systemuiClassLoader;
     private int resolvedStyle;
     private int lastBuiltIconSizePx = -1;
+    /**
+     * 当前窗口级全屏模糊半径（px）。由 SystemUI Hook 在展开前用真实
+     * {@code BlurUtils#blurRadiusOfRatio} 算好后传入；-1 表示未知，退回本地近似值。
+     */
+    private float fullscreenBlurRadiusPx = -1f;
 
     private float fodCenterX = 540f;
     private float fodCenterY = 1920f;
@@ -109,7 +114,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
         regionBackdrop.setStyle(resolvedStyle);
         if (config != null) {
             regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION));
-            regionBackdrop.setBlurRadius(config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION));
+            regionBackdrop.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION));
             regionBackdrop.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION));
         }
         addView(regionBackdrop);
@@ -140,6 +145,44 @@ public class CustomHyperOpenContainer extends FrameLayout {
         ghostLayer.setBlurRadiusPx(blurDp > 0 ? dpToPx(blurDp) : 0);
     }
 
+    /**
+     * 由 SystemUI Hook 在每次展开前注入真实全屏模糊半径（px）。
+     *
+     * <p>组件的 BackgroundBlurDrawable 不会与窗口级全屏模糊做物理两级采样，
+     * 而是用自己的半径覆盖该区域；半径小于全屏时就会出现“透桌面的洞”。
+     * 这里把全屏半径与组件半径按 {@code sqrt(fs² + component²)} 组合后统一下发，
+     * 让气泡/底衬/胶囊始终不比全屏更清晰。</p>
+     */
+    public void setFullscreenBlurRadiusPx(float radiusPx) {
+        float next = Math.max(-1f, radiusPx);
+        if (Math.abs(this.fullscreenBlurRadiusPx - next) < 0.01f) return;
+        this.fullscreenBlurRadiusPx = next;
+        applyStackedBlurRadii();
+    }
+
+    /** 组件组合模糊半径 (dp)：组件自身模糊 + 当前全屏模糊的高斯近似叠加。 */
+    private float componentBlurRadiusDp(int component) {
+        if (config == null) return 0f;
+        float density = getResources().getDisplayMetrics().density;
+        return config.stackedBlurRadiusDp(component, density, fullscreenBlurRadiusPx);
+    }
+
+    /** 全量刷新所有组件的组合模糊半径（窗口级模糊变化 / 配置热更新时调用）。 */
+    private void applyStackedBlurRadii() {
+        if (config == null) return;
+        if (regionBackdrop != null) {
+            regionBackdrop.setBlurRadius(config.showRegionBg
+                ? componentBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION) : 0f);
+        }
+        for (CircularBubbleView b : bubbles) {
+            b.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
+        }
+        for (CircularBubbleView sub : folderSubBubbles) {
+            sub.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
+        }
+        applyHeaderPillStyleAndLayout();
+    }
+
     public void updateConfig(HyperOpenConfig newConfig) {
         if (newConfig != null) {
             this.config = newConfig;
@@ -153,7 +196,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
             if (regionBackdrop != null) {
                 regionBackdrop.setStyle(resolvedStyle);
                 regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION));
-                regionBackdrop.setBlurRadius(config.showRegionBg ? config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION) : 0);
+                regionBackdrop.setBlurRadius(config.showRegionBg
+                    ? componentBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION) : 0);
                 regionBackdrop.setDimAlpha(config.showRegionBg ? config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION) : 0f);
                 // 扇区分隔线样式（颜色/透明度/虚线规格）热生效
                 if (ringSectorSpec != null) {
@@ -173,7 +217,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
             for (CircularBubbleView b : bubbles) {
                 b.updateConfig(config);
                 b.setMaterialStyle(resolvedStyle);
-                b.setBlurRadius(config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
+                b.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
                 b.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE));
                 b.setBubblePaddingPercent(config.bubblePaddingPercent);
                 b.setCornerRadiusPercent(config.iconCornerRadius);
@@ -474,7 +518,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
         boolean show = config == null || config.showHeaderPillBg;
         if (show) {
             if (config != null) {
-                int blurDp = config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_HEADER);
+                int blurDp = Math.round(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_HEADER));
                 int blurPx = blurDp > 0 ? dpToPx(blurDp) : 0;
                 HyperOSMaterialFactory.GlassParams params = config.glassParamsFor(HyperOpenConfig.COMPONENT_HEADER);
                 float dim = config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_HEADER);
@@ -600,7 +644,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
         regionBackdrop.setVisibility(config.showRegionBg ? View.VISIBLE : View.GONE);
         regionBackdrop.setStyle(resolvedStyle);
         regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION));
-        regionBackdrop.setBlurRadius(config.showRegionBg ? config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION) : 0);
+        regionBackdrop.setBlurRadius(config.showRegionBg
+            ? componentBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION) : 0);
         regionBackdrop.setDimAlpha(config.showRegionBg ? config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION) : 0f);
         regionBackdrop.updateGeometry(regionRadiusPx);
 
@@ -714,9 +759,10 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 float finalY = pt.y + dpToPx(item.customOffsetY);
                 bubble.targetX = finalX;
                 bubble.targetY = finalY;
+                bubble.setGhostLayer(ghostLayer);
                 bubble.updateConfig(config);
                 bubble.setMaterialStyle(resolvedStyle);
-                bubble.setBlurRadius(config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
+                bubble.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
                 bubble.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE));
                 bubble.setBubblePaddingPercent(config.bubblePaddingPercent);
                 bubble.setCornerRadiusPercent(config.iconCornerRadius);
@@ -750,6 +796,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                     getContext(), item, resolvedStyle, iconSizeInt, systemuiClassLoader, config
                 );
                 bubble.setGhostLayer(ghostLayer);
+                bubble.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
                 bubble.targetX = finalX;
                 bubble.targetY = finalY;
 
@@ -1076,7 +1123,10 @@ public class CustomHyperOpenContainer extends FrameLayout {
             .scaleY(config != null ? config.maxScale : 1.5f)
             .setDuration(120)
             .setInterpolator(new android.view.animation.DecelerateInterpolator())
-            .setUpdateListener(anim -> folderBubble.syncBlurCornerRadiusWithViewScale())
+            .setUpdateListener(anim -> {
+                folderBubble.syncBlurCornerRadiusWithViewScale();
+                folderBubble.syncGhost();
+            })
             .withEndAction(() -> {
                 // 松手 / 选中已复位后不再展开（防竞态：放大动画期间用户抬手）
                 if (currentSelectedBubble != folderBubble || activeFolderBubble != null) return;
@@ -1128,7 +1178,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
             CircularBubbleView sub = new CircularBubbleView(
                 getContext(), childItem, resolvedStyle, iconSizeInt, systemuiClassLoader, config
             );
+            sub.setIsSubBubble(true);
             sub.setGhostLayer(ghostLayer);
+            sub.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
             sub.targetX = targetX;
             sub.targetY = targetY;
 
@@ -1156,7 +1208,10 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 .setInterpolator(EXPAND_INTERPOLATOR)
                 .setDuration(180)
                 .setStartDelay(i * 15L)
-                .setUpdateListener(anim -> sub.syncBlurCornerRadiusWithViewScale())
+                .setUpdateListener(anim -> {
+                    sub.syncBlurCornerRadiusWithViewScale();
+                    sub.syncGhost();
+                })
                 .start();
         }
     }
@@ -1234,12 +1289,15 @@ public class CustomHyperOpenContainer extends FrameLayout {
         if (!animated) {
             for (CircularBubbleView sub : subs) {
                 sub.animate().cancel();
+                sub.resetBlur();
                 bubblesContainer.removeView(sub);
             }
         } else {
             // 子气泡向文件夹中心收拢 + 缩小 + 淡出，播完后从容器移除
             for (CircularBubbleView sub : subs) {
                 sub.animate().cancel();
+                // 收拢开始时即注销子气泡的毛玻璃通道，防止收缩过程中残留背景模糊
+                sub.resetBlur();
                 float toX = (folder != null ? folder.targetX : sub.targetX) - sub.targetX;
                 float toY = (folder != null ? folder.targetY : sub.targetY) - sub.targetY;
                 sub.animate()
@@ -1251,7 +1309,10 @@ public class CustomHyperOpenContainer extends FrameLayout {
                     .setDuration(140)
                     .setInterpolator(new android.view.animation.AccelerateInterpolator())
                     .setUpdateListener(anim -> sub.syncBlurCornerRadiusWithViewScale())
-                    .withEndAction(() -> bubblesContainer.removeView(sub))
+                    .withEndAction(() -> {
+                        sub.resetBlur();
+                        bubblesContainer.removeView(sub);
+                    })
                     .start();
             }
         }
@@ -1267,12 +1328,20 @@ public class CustomHyperOpenContainer extends FrameLayout {
                     .scaleY(1.0f)
                     .setDuration(140)
                     .setInterpolator(new android.view.animation.LinearInterpolator())
-                    .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
-                    .withEndAction(() -> { b.applyScale(1.0f); b.ensureBlurAndRefreshBackground(); })
+                    .setUpdateListener(anim -> {
+                        b.syncBlurCornerRadiusWithViewScale();
+                        b.clearGhost();
+                    })
+                    .withEndAction(() -> {
+                        b.applyScale(1.0f);
+                        b.ensureBlurAndRefreshBackground();
+                        b.clearGhost();
+                    })
                     .start();
             } else {
                 b.applyScale(1.0f);
                 b.ensureBlurAndRefreshBackground();
+                b.clearGhost();
             }
             b.setIconAlpha(targetAlpha);
         }

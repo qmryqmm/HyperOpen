@@ -361,6 +361,41 @@ public class HyperOpenConfig {
         return resolved;
     }
 
+    /**
+     * 全屏模糊半径的本地近似值（px）。
+     *
+     * <p>SystemUI 侧真实半径由 {@code BlurUtils#blurRadiusOfRatio} 计算：
+     * {@code lerp(min_window_blur_radius, max_window_blur_radius, ratio)}。
+     * App 进程拿不到该实例，这里按同一语义使用 1px ~ 100px 近似；
+     * 真机侧会优先传入 {@code BlurUtils} 算出的精确 px 值。</p>
+     */
+    public float approximateFullscreenBlurRadiusPx() {
+        float ratio = Math.max(0f, Math.min(1f, fullscreenBlurMaskAlpha));
+        return ratio <= 0.001f ? 0f : (1f + 99f * ratio);
+    }
+
+    /**
+     * 「全屏模糊 + 组件自身模糊」叠加后的组件模糊半径 (dp)。
+     *
+     * <p>两个 BackgroundBlurDrawable 不会在同一窗口里做物理两级采样：
+     * 气泡/底衬区域会用自己的半径覆盖窗口级全屏模糊，半径小于全屏时就会出现
+     * 一块比周围更清晰的「洞」。这里用高斯近似的组合半径
+     * {@code sqrt(r_fullscreen² + r_component²)}，保证组件区域永远不比全屏更清晰，
+     * 同时保留组件自身的额外磨砂强度。</p>
+     *
+     * <p>组件自身模糊为 0 时返回 0：不注册自己的 drawable，直接继承窗口级全屏模糊。</p>
+     *
+     * @param fullscreenBlurPx 全屏模糊半径 px；传负数时使用本地近似值
+     */
+    public float stackedBlurRadiusDp(int component, float density, float fullscreenBlurPx) {
+        float componentDp = effectiveBlurRadiusDp(component);
+        if (componentDp <= 0.01f) return 0f;
+        float d = Math.max(0.01f, density);
+        float fsPx = fullscreenBlurPx >= 0f ? fullscreenBlurPx : approximateFullscreenBlurRadiusPx();
+        float componentPx = componentDp * d;
+        return (float) Math.sqrt(componentPx * componentPx + fsPx * fsPx) / d;
+    }
+
     /** 该组件最终生效的压暗程度 (0.0 ~ 1.0)：跟随全局用 globalDimAlpha，否则用组件独立值 */
     public float effectiveDimAlpha(int component) {
         float v;
@@ -564,6 +599,9 @@ public class HyperOpenConfig {
                 if (bundle != null) {
                     HyperOpenConfig config = new HyperOpenConfig();
                     config.materialStyle = bundle.getInt("material_style", MATERIAL_GAUSSIAN_BLUR);
+                    if (!HyperOSMaterialFactory.isSoftGlassSupported()) {
+                        config.materialStyle = MATERIAL_GAUSSIAN_BLUR;
+                    }
                     config.offsetY = bundle.getInt("offset_y", 100);
                     config.regionDiameter = bundle.getInt("region_diameter", 220);
                     config.showRegionBg = bundle.getBoolean("show_region_bg", false);
@@ -693,6 +731,9 @@ public class HyperOpenConfig {
 
         HyperOpenConfig config = new HyperOpenConfig();
         config.materialStyle = xPrefs.getInt("material_style", MATERIAL_GAUSSIAN_BLUR);
+        if (!HyperOSMaterialFactory.isSoftGlassSupported()) {
+            config.materialStyle = MATERIAL_GAUSSIAN_BLUR;
+        }
         config.offsetY = xPrefs.getInt("offset_y", 100);
         config.regionDiameter = xPrefs.getInt("region_diameter", 220);
         config.showRegionBg = xPrefs.getBoolean("show_region_bg", false);
@@ -805,6 +846,9 @@ public class HyperOpenConfig {
         SharedPreferences sp = io.github.qmryqmm.hyperopen.util.DePrefs.get(context, PREF_NAME);
         HyperOpenConfig config = new HyperOpenConfig();
         config.materialStyle = sp.getInt("material_style", MATERIAL_GAUSSIAN_BLUR);
+        if (!HyperOSMaterialFactory.isSoftGlassSupported()) {
+            config.materialStyle = MATERIAL_GAUSSIAN_BLUR;
+        }
         config.uiStyle = sp.getInt("ui_style", UI_STYLE_MATERIAL);
         config.themeMode = sp.getInt("theme_mode", THEME_FOLLOW_SYSTEM);
         config.monetColors = sp.getBoolean("monet_colors", false);

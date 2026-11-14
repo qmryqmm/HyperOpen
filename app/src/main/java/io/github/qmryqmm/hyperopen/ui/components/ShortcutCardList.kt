@@ -907,7 +907,7 @@ fun ShortcutIconBox(item: ShortcutItem) {
  * 快捷方式气泡图标：直接复用真实 SystemUI / 交互预览同一渲染实现 [CircularBubbleView]，
  * 不再单独编写绘制方法——底衬光学层、图标解析裁切、内边距、圆角裁剪、留白 0% 关闭气泡等
  * 一切渲染逻辑与实机 100% 同源，任何渲染改动自动同步。
- * 窗口级毛玻璃在应用内禁用（与交互预览一致），避免列表逐图标触发 SurfaceFlinger 全屏模糊。
+ * 预览图标与实机使用同一套窗口级材质，保证柔光玻璃和高斯模糊实时同步。
  */
 @Composable
 fun ShortcutBubbleIcon(
@@ -937,8 +937,7 @@ fun ShortcutBubbleIcon(
         AndroidView(
             factory = { viewCtx ->
                 CircularBubbleView(viewCtx, item, resolvedStyle, sizePx, viewCtx.classLoader, cfg).apply {
-                    // 与交互预览一致：应用内禁用窗口级模糊
-                    setSystemBlurEnabled(false)
+                    setSystemBlurEnabled(true)
                 }
             },
             modifier = modifier.size(size),

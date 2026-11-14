@@ -138,9 +138,12 @@ fun HyperOpenApp(
     val ctx = LocalContext.current
 
     // 配置镜像状态
+    val softGlassSupported = remember {
+        io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory.isSoftGlassSupported()
+    }
     var materialStyle by remember {
         mutableStateOf(
-            if (initialConfig.materialStyle == HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR) {
+            if (!softGlassSupported || initialConfig.materialStyle == HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR) {
                 HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR
             } else {
                 HyperOpenConfig.MATERIAL_SOFT_GLASS
@@ -927,7 +930,7 @@ fun HyperOpenApp(
                                     // = 1 + 99 * ratio（ratio=0 时为 0）
                                     val ratio = currentConfig.fullscreenBlurMaskAlpha.coerceIn(0f, 1f)
                                     val blurPx = if (previewPanelVisible && ratio > 0f) {
-                                        (1f + 99f * ratio).toInt()
+                                        currentConfig.approximateFullscreenBlurRadiusPx().toInt()
                                     } else 0
                                     val prev = view.tag as? Int ?: -1
                                     if (prev != blurPx) {
@@ -1051,7 +1054,19 @@ fun HyperOpenApp(
                                     lazyListState = paramsListStates[paramsTab.coerceIn(0, paramsListStates.lastIndex)],
                                     selectedTab = paramsTab,
                                     materialStyle = materialStyle,
-                                    onMaterialStyle = { materialStyle = it; persist() },
+                                    onMaterialStyle = {
+                                        if (it == HyperOpenConfig.MATERIAL_SOFT_GLASS && !softGlassSupported) {
+                                            android.widget.Toast.makeText(
+                                                ctx,
+                                                "当前系统不支持柔光玻璃材质，已自动使用高斯模糊",
+                                                android.widget.Toast.LENGTH_SHORT
+                                            ).show()
+                                            materialStyle = HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR
+                                        } else {
+                                            materialStyle = it
+                                        }
+                                        persist()
+                                    },
                                     onOpenSoftGlassPage = { subPage = 5 },
                                     onOpenBlurMaterialPage = { subPage = 6 },
                                     bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal,
