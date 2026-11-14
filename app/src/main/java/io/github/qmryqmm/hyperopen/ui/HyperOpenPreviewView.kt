@@ -20,6 +20,7 @@ import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
 import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory
 import io.github.qmryqmm.hyperopen.layout.ArcFanPacking
 import io.github.qmryqmm.hyperopen.layout.CircularHoneycombPacking
+import io.github.qmryqmm.hyperopen.layout.FolderChildPacking
 import io.github.qmryqmm.hyperopen.layout.HollowRingPacking
 import io.github.qmryqmm.hyperopen.layout.RingSectorPacking
 import io.github.qmryqmm.hyperopen.layout.StockFanPacking
@@ -27,6 +28,7 @@ import io.github.qmryqmm.hyperopen.model.ShortcutItem
 import io.github.qmryqmm.hyperopen.util.BubbleBlurSpec
 import io.github.qmryqmm.hyperopen.util.BubblePanelAnimator
 import io.github.qmryqmm.hyperopen.util.FisheyeScale
+import io.github.qmryqmm.hyperopen.util.FolderChildAnimator
 import io.github.qmryqmm.hyperopen.view.CircularBubbleView
 import io.github.qmryqmm.hyperopen.view.CircularRegionBackdropView
 import io.github.qmryqmm.hyperopen.view.SectorOverlayView
@@ -1024,7 +1026,13 @@ class HyperOpenPreviewView(
             old.maxIconCount != newConfig.maxIconCount ||
             old.layoutStyle != newConfig.layoutStyle ||
             old.ringSectorMode != newConfig.ringSectorMode ||
-            old.ringCount != newConfig.ringCount ||
+            old.folderChildLayoutMode != newConfig.folderChildLayoutMode ||
+            old.folderChildSpreadScale != newConfig.folderChildSpreadScale ||
+            old.folderChildArcSpanDeg != newConfig.folderChildArcSpanDeg ||
+            old.folderChildDirectionMode != newConfig.folderChildDirectionMode ||
+            old.folderChildOrderMode != newConfig.folderChildOrderMode ||
+            old.folderChildMinGapDp != newConfig.folderChildMinGapDp ||
+            old.folderChildSizeScale != newConfig.folderChildSizeScale ||
             old.glyphPadEnabled != newConfig.glyphPadEnabled ||
             old.glyphPadColor != newConfig.glyphPadColor ||
             old.glyphPadMode != newConfig.glyphPadMode ||
@@ -1207,7 +1215,7 @@ class HyperOpenPreviewView(
                 ringSectorSpec = spec
                 spec?.points ?: emptyList()
             } else {
-                // 空心同心圆环：中心留空，图标排布在 ringCount 圈同心环上
+                // 单圈空心圆环：中心留空，图标沿一圈均匀排布
                 ringSectorSpec = null
                 HollowRingPacking.calculatePoints(
                     activeShortcuts.size,
@@ -1215,8 +1223,7 @@ class HyperOpenPreviewView(
                     regionCenterY,
                     regionRadiusPx,
                     iconSizePx,
-                    spacingOffsetPx,
-                    config.ringCount
+                    spacingOffsetPx
                 )
             }
         } else if (config.layoutStyle == HyperOpenConfig.LAYOUT_ARC) {
@@ -2223,19 +2230,32 @@ class HyperOpenPreviewView(
         }
 
         val count = children.size
-        val iconSizePx = dpToPx(config.iconSize.toFloat())
-        val iconSizeInt = iconSizePx.toInt()
-        val subRadius = iconSizePx * 1.35f
-
-        val baseAngle = Math.atan2((folderBubble.targetY - lastFodY).toDouble(), (folderBubble.targetX - lastFodX).toDouble())
-        val angleStep = if (count > 1) (Math.PI * 0.85 / (count - 1)) else 0.0
-        val startAngle = if (count > 1) (baseAngle - Math.PI * 0.425) else baseAngle
+        val childIconSizePx = dpToPx(config.iconSize.toFloat() * config.folderChildSizeScale)
+        val iconSizeInt = childIconSizePx.toInt().coerceAtLeast(1)
+        val pack = FolderChildPacking.calculate(
+            count,
+            folderBubble.targetX,
+            folderBubble.targetY,
+            lastFodX,
+            lastFodY,
+            width.toFloat(),
+            height.toFloat(),
+            dpToPx(8f),
+            childIconSizePx,
+            dpToPx(config.folderChildMinGapDp.toFloat()),
+            config.folderChildSpreadScale,
+            config.folderChildArcSpanDeg.toFloat(),
+            config.folderChildDirectionMode,
+            config.folderChildOrderMode,
+            config.folderChildLayoutMode
+        )
+        val createdSubs = ArrayList<CircularBubbleView>(count)
 
         for (i in 0 until count) {
             val childItem = children[i]
-            val angle = if (count == 1) baseAngle else (startAngle + i * angleStep)
-            val targetX = (folderBubble.targetX + subRadius * Math.cos(angle)).toFloat()
-            val targetY = (folderBubble.targetY + subRadius * Math.sin(angle)).toFloat()
+            val target = pack.points[i]
+            val targetX = target.x
+            val targetY = target.y
 
             val sub = CircularBubbleView(
                 context, childItem, resolvedStyle, iconSizeInt, context.classLoader, config
@@ -2249,35 +2269,22 @@ class HyperOpenPreviewView(
             }
 
             val lp = LayoutParams(iconSizeInt, iconSizeInt).apply {
-                leftMargin = (targetX - iconSizePx / 2f).toInt()
-                topMargin = (targetY - iconSizePx / 2f).toInt()
+                leftMargin = (targetX - childIconSizePx / 2f).toInt()
+                topMargin = (targetY - childIconSizePx / 2f).toInt()
             }
             sub.layoutParams = lp
             sub.translationX = folderBubble.targetX - targetX
             sub.translationY = folderBubble.targetY - targetY
-            sub.scaleX = 0.1f
-            sub.scaleY = 0.1f
+            sub.scaleX = config.folderChildStartScale.coerceAtLeast(0.05f)
+            sub.scaleY = config.folderChildStartScale.coerceAtLeast(0.05f)
             sub.alpha = 0f
 
             bubblesContainer.addView(sub)
             folderSubBubbles.add(sub)
+            createdSubs.add(sub)
             sub.ensureBlurAndRefreshBackground()
-
-            sub.animate()
-                .translationX(0f)
-                .translationY(0f)
-                .scaleX(1.0f)
-                .scaleY(1.0f)
-                .alpha(1.0f)
-                .setInterpolator(android.view.animation.OvershootInterpolator(1.2f))
-                .setDuration(180)
-                .setStartDelay(i * 15L)
-                .setUpdateListener {
-                    sub.syncBlurCornerRadiusWithViewScale()
-                    sub.syncGhost()
-                }
-                .start()
         }
+        FolderChildAnimator.playExpand(createdSubs, folderBubble, config, pack.animationOrder)
     }
 
     /**
@@ -2355,29 +2362,13 @@ class HyperOpenPreviewView(
                 bubblesContainer.removeView(sub)
             }
         } else {
-            // 子气泡向文件夹中心收拢 + 缩小 + 淡出，播完后从容器移除
-            for (sub in subs) {
-                sub.animate().cancel()
-                // 收拢开始时即注销子气泡的毛玻璃通道，防止收缩过程中残留背景模糊
-                sub.resetBlur()
-                val toX = (folder?.targetX ?: sub.targetX) - sub.targetX
-                val toY = (folder?.targetY ?: sub.targetY) - sub.targetY
-                sub.animate()
-                    .translationX(toX)
-                    .translationY(toY)
-                    .scaleX(0.2f)
-                    .scaleY(0.2f)
-                    .alpha(0f)
-                    .setDuration(140)
-                    .setInterpolator(android.view.animation.AccelerateInterpolator())
-                    .setUpdateListener {
-                        sub.syncBlurCornerRadiusWithViewScale()
-                    }
-                    .withEndAction {
-                        sub.resetBlur()
-                        bubblesContainer.removeView(sub)
-                    }
-                    .start()
+            val collapseTarget = folder ?: subs.first()
+            FolderChildAnimator.playCollapse(subs, collapseTarget, config) {
+                for (sub in subs) {
+                    sub.animate().cancel()
+                    sub.resetBlur()
+                    bubblesContainer.removeView(sub)
+                }
             }
         }
 
@@ -2389,7 +2380,7 @@ class HyperOpenPreviewView(
                 b.animate()
                     .scaleX(1.0f)
                     .scaleY(1.0f)
-                    .setDuration(140)
+                    .setDuration(config.folderChildCollapseDurationMs.coerceAtLeast(0).toLong())
                     .setInterpolator(android.view.animation.LinearInterpolator())
                     .setUpdateListener {
                         b.syncBlurCornerRadiusWithViewScale()

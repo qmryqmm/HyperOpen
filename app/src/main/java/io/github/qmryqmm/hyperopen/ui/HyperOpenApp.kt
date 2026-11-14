@@ -79,6 +79,9 @@ import io.github.qmryqmm.hyperopen.ui.components.BackNavigationIcon
 import io.github.qmryqmm.hyperopen.ui.edit.PresetActionPickerDialog
 import io.github.qmryqmm.hyperopen.ui.edit.ShortcutEditPage
 import io.github.qmryqmm.hyperopen.ui.pages.ParamsPage
+import io.github.qmryqmm.hyperopen.ui.pages.FolderLayoutSettings
+import io.github.qmryqmm.hyperopen.ui.pages.FolderMotionSettings
+import io.github.qmryqmm.hyperopen.ui.pages.PanelMotionSettings
 import io.github.qmryqmm.hyperopen.ui.pages.PermissionCheckPage
 import io.github.qmryqmm.hyperopen.ui.pages.BlurMaterialSettingsPage
 import io.github.qmryqmm.hyperopen.ui.pages.SettingsPage
@@ -221,7 +224,6 @@ fun HyperOpenApp(
     var layoutStyle by remember { mutableStateOf(initialConfig.layoutStyle) }
     var stockSystemAnim by remember { mutableStateOf(initialConfig.stockSystemAnim) }
     var stockSystemRegion by remember { mutableStateOf(initialConfig.stockSystemRegion) }
-    var ringCount by remember { mutableStateOf(initialConfig.ringCount.toFloat()) }
     var ringSectorMode by remember { mutableStateOf(initialConfig.ringSectorMode) }
     var sectorLineColor by remember { mutableIntStateOf(initialConfig.sectorLineColor) }
     var sectorLineAlpha by remember { mutableStateOf(initialConfig.sectorLineAlpha) }
@@ -230,7 +232,13 @@ fun HyperOpenApp(
     var sectorLineWidth by remember { mutableStateOf(initialConfig.sectorLineWidth) }
     var sectorHighlightEnabled by remember { mutableStateOf(initialConfig.sectorHighlightEnabled) }
     var animDurationMs by remember { mutableFloatStateOf(initialConfig.animDurationMs.toFloat()) }
+    var panelExpandAnimType by remember { mutableIntStateOf(initialConfig.panelExpandAnimType) }
+    var panelExpandStaggerMs by remember { mutableFloatStateOf(initialConfig.panelExpandStaggerMs.toFloat()) }
     var dismissAnimEnabled by remember { mutableStateOf(initialConfig.dismissAnimEnabled) }
+    var panelCollapseAnimType by remember { mutableIntStateOf(initialConfig.panelCollapseAnimType) }
+    var panelCollapseDurationMs by remember { mutableFloatStateOf(initialConfig.panelCollapseDurationMs.toFloat()) }
+    var panelCollapseStaggerMs by remember { mutableFloatStateOf(initialConfig.panelCollapseStaggerMs.toFloat()) }
+    var panelSelectedPopScale by remember { mutableFloatStateOf(initialConfig.panelSelectedPopScale) }
     var globalHintColorMode by remember { mutableIntStateOf(initialConfig.globalHintColorMode) }
     var globalHintCustomColor by remember { mutableIntStateOf(initialConfig.globalHintCustomColor) }
     var defaultHintTextStroke by remember { mutableFloatStateOf(initialConfig.defaultHintTextStroke.toFloat()) }
@@ -240,6 +248,21 @@ fun HyperOpenApp(
     var defaultShowHintTitle by remember { mutableStateOf(initialConfig.defaultShowHintTitle) }
     var defaultShowHintSubtitle by remember { mutableStateOf(initialConfig.defaultShowHintSubtitle) }
     var folderHoverDelayMs by remember { mutableFloatStateOf(initialConfig.folderHoverDelayMs.toFloat()) }
+    var folderChildLayoutMode by remember { mutableIntStateOf(initialConfig.folderChildLayoutMode) }
+    var folderChildSpreadScale by remember { mutableFloatStateOf(initialConfig.folderChildSpreadScale) }
+    var folderChildArcSpanDeg by remember { mutableFloatStateOf(initialConfig.folderChildArcSpanDeg.toFloat()) }
+    var folderChildDirectionMode by remember { mutableIntStateOf(initialConfig.folderChildDirectionMode) }
+    var folderChildOrderMode by remember { mutableIntStateOf(initialConfig.folderChildOrderMode) }
+    var folderChildMinGapDp by remember { mutableFloatStateOf(initialConfig.folderChildMinGapDp.toFloat()) }
+    var folderChildSizeScale by remember { mutableFloatStateOf(initialConfig.folderChildSizeScale) }
+    var folderChildExpandAnimType by remember { mutableIntStateOf(initialConfig.folderChildExpandAnimType) }
+    var folderChildExpandDurationMs by remember { mutableFloatStateOf(initialConfig.folderChildExpandDurationMs.toFloat()) }
+    var folderChildExpandStaggerMs by remember { mutableFloatStateOf(initialConfig.folderChildExpandStaggerMs.toFloat()) }
+    var folderChildCollapseAnimType by remember { mutableIntStateOf(initialConfig.folderChildCollapseAnimType) }
+    var folderChildCollapseDurationMs by remember { mutableFloatStateOf(initialConfig.folderChildCollapseDurationMs.toFloat()) }
+    var folderChildCollapseStaggerMs by remember { mutableFloatStateOf(initialConfig.folderChildCollapseStaggerMs.toFloat()) }
+    var folderChildStartScale by remember { mutableFloatStateOf(initialConfig.folderChildStartScale) }
+    var folderChildOvershoot by remember { mutableFloatStateOf(initialConfig.folderChildOvershoot) }
     val shortcuts = remember { mutableStateListOf<ShortcutItem>().apply { addAll(initialConfig.shortcuts) } }
     var safetyTick by remember { mutableStateOf(0) }
     var page by remember { mutableStateOf(0) }
@@ -304,8 +327,9 @@ fun HyperOpenApp(
 
     // ── 页面滚动位置记忆：状态提升到 HyperOpenApp 顶层，跨底部导航切换与二级页进出持续存活，
     //    返回页面时停在上次滚动位置而不是回到顶部 ──
-    // 参数页按 Tab 分成 4 页，每页各自记住滚动位置，切 Tab 不会把别页的进度带过去
+    // 参数页按 Tab 分成 5 页，每页各自记住滚动位置，切 Tab 不会把别页的进度带过去
     val paramsListStates = listOf(
+        rememberLazyListState(),
         rememberLazyListState(),
         rememberLazyListState(),
         rememberLazyListState(),
@@ -343,7 +367,6 @@ fun HyperOpenApp(
         (regionDiameter / 2f) * density,
         iconSize * density,
         iconSpacingOffset * density,
-        ringCount.toInt().coerceIn(1, 4),
     )
 
     val iconCapacity = computeLayoutCapacity()
@@ -416,7 +439,6 @@ fun HyperOpenApp(
         c.layoutStyle = layoutStyle
         c.stockSystemAnim = stockSystemAnim
         c.stockSystemRegion = stockSystemRegion
-        c.ringCount = ringCount.toInt().coerceIn(1, 4)
         c.ringSectorMode = ringSectorMode
         c.sectorLineColor = sectorLineColor
         c.sectorLineAlpha = sectorLineAlpha
@@ -425,7 +447,13 @@ fun HyperOpenApp(
         c.sectorLineWidth = sectorLineWidth
         c.sectorHighlightEnabled = sectorHighlightEnabled
         c.animDurationMs = animDurationMs.toInt()
+        c.panelExpandAnimType = panelExpandAnimType
+        c.panelExpandStaggerMs = panelExpandStaggerMs.toInt()
         c.dismissAnimEnabled = dismissAnimEnabled
+        c.panelCollapseAnimType = panelCollapseAnimType
+        c.panelCollapseDurationMs = panelCollapseDurationMs.toInt()
+        c.panelCollapseStaggerMs = panelCollapseStaggerMs.toInt()
+        c.panelSelectedPopScale = panelSelectedPopScale
         c.globalHintColorMode = globalHintColorMode
         c.globalHintCustomColor = globalHintCustomColor
         c.defaultHintTextStroke = defaultHintTextStroke.toInt()
@@ -435,6 +463,21 @@ fun HyperOpenApp(
         c.defaultShowHintTitle = defaultShowHintTitle
         c.defaultShowHintSubtitle = defaultShowHintSubtitle
         c.folderHoverDelayMs = folderHoverDelayMs.toInt()
+        c.folderChildLayoutMode = folderChildLayoutMode
+        c.folderChildSpreadScale = folderChildSpreadScale
+        c.folderChildArcSpanDeg = folderChildArcSpanDeg.toInt()
+        c.folderChildDirectionMode = folderChildDirectionMode
+        c.folderChildOrderMode = folderChildOrderMode
+        c.folderChildMinGapDp = folderChildMinGapDp.toInt()
+        c.folderChildSizeScale = folderChildSizeScale
+        c.folderChildExpandAnimType = folderChildExpandAnimType
+        c.folderChildExpandDurationMs = folderChildExpandDurationMs.toInt()
+        c.folderChildExpandStaggerMs = folderChildExpandStaggerMs.toInt()
+        c.folderChildCollapseAnimType = folderChildCollapseAnimType
+        c.folderChildCollapseDurationMs = folderChildCollapseDurationMs.toInt()
+        c.folderChildCollapseStaggerMs = folderChildCollapseStaggerMs.toInt()
+        c.folderChildStartScale = folderChildStartScale
+        c.folderChildOvershoot = folderChildOvershoot
         c.maxScale = maxScale
         c.influenceRadius = influenceRadius.toInt()
         c.iconAlpha = iconAlpha
@@ -527,7 +570,6 @@ fun HyperOpenApp(
         layoutStyle = defaults.layoutStyle
         stockSystemAnim = defaults.stockSystemAnim
         stockSystemRegion = defaults.stockSystemRegion
-        ringCount = defaults.ringCount.toFloat()
         ringSectorMode = defaults.ringSectorMode
         sectorLineColor = defaults.sectorLineColor
         sectorLineAlpha = defaults.sectorLineAlpha
@@ -536,7 +578,13 @@ fun HyperOpenApp(
         sectorLineWidth = defaults.sectorLineWidth
         sectorHighlightEnabled = defaults.sectorHighlightEnabled
         animDurationMs = defaults.animDurationMs.toFloat()
+        panelExpandAnimType = defaults.panelExpandAnimType
+        panelExpandStaggerMs = defaults.panelExpandStaggerMs.toFloat()
         dismissAnimEnabled = defaults.dismissAnimEnabled
+        panelCollapseAnimType = defaults.panelCollapseAnimType
+        panelCollapseDurationMs = defaults.panelCollapseDurationMs.toFloat()
+        panelCollapseStaggerMs = defaults.panelCollapseStaggerMs.toFloat()
+        panelSelectedPopScale = defaults.panelSelectedPopScale
         globalHintColorMode = defaults.globalHintColorMode
         globalHintCustomColor = defaults.globalHintCustomColor
         defaultHintTextStroke = defaults.defaultHintTextStroke.toFloat()
@@ -546,6 +594,21 @@ fun HyperOpenApp(
         defaultShowHintTitle = defaults.defaultShowHintTitle
         defaultShowHintSubtitle = defaults.defaultShowHintSubtitle
         folderHoverDelayMs = defaults.folderHoverDelayMs.toFloat()
+        folderChildLayoutMode = defaults.folderChildLayoutMode
+        folderChildSpreadScale = defaults.folderChildSpreadScale
+        folderChildArcSpanDeg = defaults.folderChildArcSpanDeg.toFloat()
+        folderChildDirectionMode = defaults.folderChildDirectionMode
+        folderChildOrderMode = defaults.folderChildOrderMode
+        folderChildMinGapDp = defaults.folderChildMinGapDp.toFloat()
+        folderChildSizeScale = defaults.folderChildSizeScale
+        folderChildExpandAnimType = defaults.folderChildExpandAnimType
+        folderChildExpandDurationMs = defaults.folderChildExpandDurationMs.toFloat()
+        folderChildExpandStaggerMs = defaults.folderChildExpandStaggerMs.toFloat()
+        folderChildCollapseAnimType = defaults.folderChildCollapseAnimType
+        folderChildCollapseDurationMs = defaults.folderChildCollapseDurationMs.toFloat()
+        folderChildCollapseStaggerMs = defaults.folderChildCollapseStaggerMs.toFloat()
+        folderChildStartScale = defaults.folderChildStartScale
+        folderChildOvershoot = defaults.folderChildOvershoot
         maxScale = defaults.maxScale
         influenceRadius = defaults.influenceRadius.toFloat()
         iconAlpha = defaults.iconAlpha
@@ -826,7 +889,6 @@ fun HyperOpenApp(
                             this.iconSize = iconSize.toInt()
                             this.maxIconCount = maxIconCount.toInt()
                             this.layoutStyle = layoutStyle
-                            this.ringCount = ringCount.toInt().coerceIn(1, 4)
                             this.ringSectorMode = ringSectorMode
                             this.sectorLineColor = sectorLineColor
                             this.sectorLineAlpha = sectorLineAlpha
@@ -835,7 +897,13 @@ fun HyperOpenApp(
                             this.sectorLineWidth = sectorLineWidth
                             this.sectorHighlightEnabled = sectorHighlightEnabled
                             this.animDurationMs = animDurationMs.toInt()
+                            this.panelExpandAnimType = panelExpandAnimType
+                            this.panelExpandStaggerMs = panelExpandStaggerMs.toInt()
                             this.dismissAnimEnabled = dismissAnimEnabled
+                            this.panelCollapseAnimType = panelCollapseAnimType
+                            this.panelCollapseDurationMs = panelCollapseDurationMs.toInt()
+                            this.panelCollapseStaggerMs = panelCollapseStaggerMs.toInt()
+                            this.panelSelectedPopScale = panelSelectedPopScale
                             this.globalHintColorMode = globalHintColorMode
                             this.globalHintCustomColor = globalHintCustomColor
                             this.defaultHintTextStroke = defaultHintTextStroke.toInt()
@@ -845,12 +913,26 @@ fun HyperOpenApp(
                             this.defaultShowHintTitle = defaultShowHintTitle
                             this.defaultShowHintSubtitle = defaultShowHintSubtitle
                             this.folderHoverDelayMs = folderHoverDelayMs.toInt()
+                            this.folderChildLayoutMode = folderChildLayoutMode
+                            this.folderChildSpreadScale = folderChildSpreadScale
+                            this.folderChildArcSpanDeg = folderChildArcSpanDeg.toInt()
+                            this.folderChildDirectionMode = folderChildDirectionMode
+                            this.folderChildOrderMode = folderChildOrderMode
+                            this.folderChildMinGapDp = folderChildMinGapDp.toInt()
+                            this.folderChildSizeScale = folderChildSizeScale
+                            this.folderChildExpandAnimType = folderChildExpandAnimType
+                            this.folderChildExpandDurationMs = folderChildExpandDurationMs.toInt()
+                            this.folderChildExpandStaggerMs = folderChildExpandStaggerMs.toInt()
+                            this.folderChildCollapseAnimType = folderChildCollapseAnimType
+                            this.folderChildCollapseDurationMs = folderChildCollapseDurationMs.toInt()
+                            this.folderChildCollapseStaggerMs = folderChildCollapseStaggerMs.toInt()
+                            this.folderChildStartScale = folderChildStartScale
+                            this.folderChildOvershoot = folderChildOvershoot
                             this.maxScale = maxScale
                             this.influenceRadius = influenceRadius.toInt()
                             this.layoutStyle = layoutStyle
                             this.stockSystemAnim = stockSystemAnim
                             this.stockSystemRegion = stockSystemRegion
-                            this.ringCount = ringCount.toInt()
                             this.ringSectorMode = ringSectorMode
                             this.sectorLineColor = sectorLineColor
                             this.sectorLineAlpha = sectorLineAlpha
@@ -1050,13 +1132,72 @@ fun HyperOpenApp(
                     }
                     else -> {
                         // when(page) 整段抽为局部组合 lambda（编译为独立合成方法，避免 Scaffold content 方法体超 64KB）
-                        val pagesContent: @Composable () -> Unit = {
-                        when (page) {
-                            0 -> {
-                                ParamsPage(
+                        val paramsPageContent: @Composable () -> Unit = {
+                            val panelMotionSettings = PanelMotionSettings(
+                                animDurationMs = animDurationMs,
+                                onAnimDurationMs = { animDurationMs = it; persist() },
+                                expandAnimType = panelExpandAnimType,
+                                onExpandAnimType = { panelExpandAnimType = it; persist() },
+                                expandStaggerMs = panelExpandStaggerMs,
+                                onExpandStaggerMs = { panelExpandStaggerMs = it; persist() },
+                                dismissEnabled = dismissAnimEnabled,
+                                onDismissEnabled = { dismissAnimEnabled = it; persist() },
+                                collapseAnimType = panelCollapseAnimType,
+                                onCollapseAnimType = { panelCollapseAnimType = it; persist() },
+                                collapseDurationMs = panelCollapseDurationMs,
+                                onCollapseDurationMs = { panelCollapseDurationMs = it; persist() },
+                                collapseStaggerMs = panelCollapseStaggerMs,
+                                onCollapseStaggerMs = { panelCollapseStaggerMs = it; persist() },
+                                selectedPopScale = panelSelectedPopScale,
+                                onSelectedPopScale = { panelSelectedPopScale = it; persist() },
+                            )
+                            val folderLayoutSettings = FolderLayoutSettings(
+                                iconSize = iconSize,
+                                onIconSize = { iconSize = it; clampIconCountToCapacity(); persist() },
+                                iconSpacingOffset = iconSpacingOffset,
+                                onIconSpacingOffset = { iconSpacingOffset = it; clampIconCountToCapacity(); persist() },
+                                layoutMode = folderChildLayoutMode,
+                                onLayoutMode = { folderChildLayoutMode = it; persist() },
+                                spreadScale = folderChildSpreadScale,
+                                onSpreadScale = { folderChildSpreadScale = it; persist() },
+                                arcSpanDeg = folderChildArcSpanDeg,
+                                onArcSpanDeg = { folderChildArcSpanDeg = it; persist() },
+                                directionMode = folderChildDirectionMode,
+                                onDirectionMode = { folderChildDirectionMode = it; persist() },
+                                orderMode = folderChildOrderMode,
+                                onOrderMode = { folderChildOrderMode = it; persist() },
+                                minGapDp = folderChildMinGapDp,
+                                onMinGapDp = { folderChildMinGapDp = it; persist() },
+                                sizeScale = folderChildSizeScale,
+                                onSizeScale = { folderChildSizeScale = it; persist() },
+                            )
+                            val folderMotionSettings = FolderMotionSettings(
+                                hoverDelayMs = folderHoverDelayMs,
+                                onHoverDelayMs = { folderHoverDelayMs = it; persist() },
+                                expandAnimType = folderChildExpandAnimType,
+                                onExpandAnimType = { folderChildExpandAnimType = it; persist() },
+                                expandDurationMs = folderChildExpandDurationMs,
+                                onExpandDurationMs = { folderChildExpandDurationMs = it; persist() },
+                                expandStaggerMs = folderChildExpandStaggerMs,
+                                onExpandStaggerMs = { folderChildExpandStaggerMs = it; persist() },
+                                collapseAnimType = folderChildCollapseAnimType,
+                                onCollapseAnimType = { folderChildCollapseAnimType = it; persist() },
+                                collapseDurationMs = folderChildCollapseDurationMs,
+                                onCollapseDurationMs = { folderChildCollapseDurationMs = it; persist() },
+                                collapseStaggerMs = folderChildCollapseStaggerMs,
+                                onCollapseStaggerMs = { folderChildCollapseStaggerMs = it; persist() },
+                                startScale = folderChildStartScale,
+                                onStartScale = { folderChildStartScale = it; persist() },
+                                overshoot = folderChildOvershoot,
+                                onOvershoot = { folderChildOvershoot = it; persist() },
+                            )
+                            ParamsPage(
                                     contentPadding = innerPadding,
                                     lazyListState = paramsListStates[paramsTab.coerceIn(0, paramsListStates.lastIndex)],
                                     selectedTab = paramsTab,
+                                    panelMotion = panelMotionSettings,
+                                    folderLayout = folderLayoutSettings,
+                                    folderMotion = folderMotionSettings,
                                     materialStyle = materialStyle,
                                     onMaterialStyle = {
                                         if (it == HyperOpenConfig.MATERIAL_SOFT_GLASS && !softGlassSupported) {
@@ -1105,8 +1246,6 @@ fun HyperOpenApp(
                                     onHeaderBlurRadius = { headerBlurRadius = it; persist() },
                                     headerTextCentered = headerTextCentered,
                                     onHeaderTextCentered = { headerTextCentered = it; persist() },
-                                    iconSize = iconSize,
-                                    onIconSize = { iconSize = it; clampIconCountToCapacity(); persist() },
                                     maxIconCount = maxIconCount,
                                     onMaxIconCount = { maxIconCount = it; persist() },
                                     iconCapacity = iconCapacity,
@@ -1117,8 +1256,6 @@ fun HyperOpenApp(
                                     onStockSystemAnim = { stockSystemAnim = it; persist() },
                                     stockSystemRegion = stockSystemRegion,
                                     onStockSystemRegion = { stockSystemRegion = it; persist() },
-                                    ringCount = ringCount,
-                                    onRingCount = { ringCount = it; clampIconCountToCapacity(); persist() },
                                     ringSectorMode = ringSectorMode,
                                     onRingSectorMode = { ringSectorMode = it; persist() },
                                     sectorLineColor = sectorLineColor,
@@ -1133,10 +1270,6 @@ fun HyperOpenApp(
                                     onSectorLineWidth = { sectorLineWidth = it; persist() },
                                     sectorHighlightEnabled = sectorHighlightEnabled,
                                     onSectorHighlightEnabled = { sectorHighlightEnabled = it; persist() },
-                                    animDurationMs = animDurationMs,
-                                    onAnimDurationMs = { animDurationMs = it; persist() },
-                                    dismissAnimEnabled = dismissAnimEnabled,
-                                    onDismissAnimEnabled = { dismissAnimEnabled = it; persist() },
                                     globalHintColorMode = globalHintColorMode,
                                     onGlobalHintColorMode = { globalHintColorMode = it; persist() },
                                     globalHintCustomColor = globalHintCustomColor,
@@ -1153,8 +1286,6 @@ fun HyperOpenApp(
                                     onDefaultShowHintTitle = { defaultShowHintTitle = it; persist() },
                                     defaultShowHintSubtitle = defaultShowHintSubtitle,
                                     onDefaultShowHintSubtitle = { defaultShowHintSubtitle = it; persist() },
-                                    folderHoverDelayMs = folderHoverDelayMs,
-                                    onFolderHoverDelayMs = { folderHoverDelayMs = it; persist() },
                                     maxScale = maxScale,
                                     onMaxScale = { maxScale = it; persist() },
                                     influenceRadius = influenceRadius,
@@ -1213,14 +1344,15 @@ fun HyperOpenApp(
                                     onHapticSlideDoubleGapMs = { hapticSlideDoubleGapMs = it; persist() },
                                     regionBlurRadius = regionBlurRadius,
                                     onRegionBlurRadius = { regionBlurRadius = it; persist() },
-                                    iconSpacingOffset = iconSpacingOffset,
-                                    onIconSpacingOffset = { iconSpacingOffset = it; clampIconCountToCapacity(); persist() },
                                     bubblePaddingPercent = bubblePaddingPercent,
                                     onBubblePaddingPercent = { bubblePaddingPercent = it; persist() },
                                     bubbleBlurRadius = bubbleBlurRadius,
                                     onBubbleBlurRadius = { bubbleBlurRadius = it; persist() },
-                                )
-                            }
+                            )
+                        }
+                        val pagesContent: @Composable () -> Unit = {
+                        when (page) {
+                            0 -> paramsPageContent()
                             1 -> {
                                 ShortcutsManagementPage(
                                     contentPadding = innerPadding,
@@ -1691,7 +1823,7 @@ private fun ParamsTabBar(
     selectedIndex: Int,
     onSelected: (Int) -> Unit,
 ) {
-    val labels = listOf("布局", "外观", "图标", "震动")
+    val labels = listOf("布局", "动效", "外观", "图标", "震动")
     Row(
         modifier = Modifier
             .fillMaxWidth()

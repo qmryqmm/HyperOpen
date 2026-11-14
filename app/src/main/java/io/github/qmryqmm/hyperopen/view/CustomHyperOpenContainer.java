@@ -12,7 +12,6 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -21,12 +20,14 @@ import io.github.qmryqmm.hyperopen.config.HyperOpenConfig;
 import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory;
 import io.github.qmryqmm.hyperopen.layout.CircularHoneycombPacking;
 import io.github.qmryqmm.hyperopen.layout.ArcFanPacking;
+import io.github.qmryqmm.hyperopen.layout.FolderChildPacking;
 import io.github.qmryqmm.hyperopen.layout.HollowRingPacking;
 import io.github.qmryqmm.hyperopen.layout.RingSectorPacking;
 import io.github.qmryqmm.hyperopen.layout.StockFanPacking;
 import io.github.qmryqmm.hyperopen.model.ShortcutItem;
 import io.github.qmryqmm.hyperopen.util.BubblePanelAnimator;
 import io.github.qmryqmm.hyperopen.util.FisheyeScale;
+import io.github.qmryqmm.hyperopen.util.FolderChildAnimator;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,8 +35,6 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class CustomHyperOpenContainer extends FrameLayout {
-
-    private static final OvershootInterpolator EXPAND_INTERPOLATOR = new OvershootInterpolator(1.2f);
 
     private HyperOpenConfig config;
     private final ClassLoader systemuiClassLoader;
@@ -695,7 +694,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 );
                 points = ringSectorSpec != null ? ringSectorSpec.points : new ArrayList<PointF>();
             } else {
-                // 空心同心圆环布局：中心留空，图标排布在 ringCount 圈同心环上
+                // 单圈空心圆环布局：中心留空，图标沿一圈均匀排布
                 ringSectorSpec = null;
                 points = HollowRingPacking.calculatePoints(
                     activeItems.size(),
@@ -703,8 +702,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                     regionCenterY,
                     regionRadiusPx,
                     iconSizePx,
-                    spacingOffsetPx,
-                    config.ringCount
+                    spacingOffsetPx
                 );
             }
         } else if (config.layoutStyle == HyperOpenConfig.LAYOUT_ARC) {
@@ -1160,20 +1158,34 @@ public class CustomHyperOpenContainer extends FrameLayout {
         }
 
         int count = children.size();
-        float iconSizePx = dpToPx(config != null ? config.iconSize : 60);
-        int iconSizeInt = (int) iconSizePx;
-        float subRadius = iconSizePx * 1.35f;
-
-        // 计算扩散弧度范围：朝指纹中心外侧弧形展开，或均分圆周
-        double baseAngle = Math.atan2(folderBubble.targetY - fodCenterY, folderBubble.targetX - fodCenterX);
-        double angleStep = (count > 1) ? (Math.PI * 0.85 / (count - 1)) : 0;
-        double startAngle = (count > 1) ? (baseAngle - Math.PI * 0.425) : baseAngle;
+        float childIconSizePx = dpToPx((config != null ? config.iconSize : 60) *
+                (config != null ? config.folderChildSizeScale : 1f));
+        int iconSizeInt = Math.max(1, (int) childIconSizePx);
+        HyperOpenConfig cfg = config != null ? config : new HyperOpenConfig();
+        FolderChildPacking.Result pack = FolderChildPacking.calculate(
+            count,
+            folderBubble.targetX,
+            folderBubble.targetY,
+            fodCenterX,
+            fodCenterY,
+            getWidth(),
+            getHeight(),
+            dpToPx(8),
+            childIconSizePx,
+            dpToPx(cfg.folderChildMinGapDp),
+            cfg.folderChildSpreadScale,
+            cfg.folderChildArcSpanDeg,
+            cfg.folderChildDirectionMode,
+            cfg.folderChildOrderMode,
+            cfg.folderChildLayoutMode
+        );
+        List<CircularBubbleView> createdSubs = new ArrayList<>(count);
 
         for (int i = 0; i < count; i++) {
             ShortcutItem childItem = children.get(i);
-            double angle = (count == 1) ? baseAngle : (startAngle + i * angleStep);
-            float targetX = (float) (folderBubble.targetX + subRadius * Math.cos(angle));
-            float targetY = (float) (folderBubble.targetY + subRadius * Math.sin(angle));
+            PointF target = pack.points.get(i);
+            float targetX = target.x;
+            float targetY = target.y;
 
             CircularBubbleView sub = new CircularBubbleView(
                 getContext(), childItem, resolvedStyle, iconSizeInt, systemuiClassLoader, config
@@ -1185,35 +1197,22 @@ public class CustomHyperOpenContainer extends FrameLayout {
             sub.targetY = targetY;
 
             LayoutParams lp = new LayoutParams(iconSizeInt, iconSizeInt);
-            lp.leftMargin = (int) (targetX - iconSizePx / 2f);
-            lp.topMargin = (int) (targetY - iconSizePx / 2f);
+            lp.leftMargin = (int) (targetX - childIconSizePx / 2f);
+            lp.topMargin = (int) (targetY - childIconSizePx / 2f);
             sub.setLayoutParams(lp);
 
             sub.setTranslationX(folderBubble.targetX - targetX);
             sub.setTranslationY(folderBubble.targetY - targetY);
-            sub.setScaleX(0.1f);
-            sub.setScaleY(0.1f);
+            sub.setScaleX(Math.max(0.05f, cfg.folderChildStartScale));
+            sub.setScaleY(Math.max(0.05f, cfg.folderChildStartScale));
             sub.setAlpha(0f);
 
             bubblesContainer.addView(sub);
             folderSubBubbles.add(sub);
+            createdSubs.add(sub);
             sub.ensureBlurAndRefreshBackground();
-
-            sub.animate()
-                .translationX(0f)
-                .translationY(0f)
-                .scaleX(1.0f)
-                .scaleY(1.0f)
-                .alpha(1.0f)
-                .setInterpolator(EXPAND_INTERPOLATOR)
-                .setDuration(180)
-                .setStartDelay(i * 15L)
-                .setUpdateListener(anim -> {
-                    sub.syncBlurCornerRadiusWithViewScale();
-                    sub.syncGhost();
-                })
-                .start();
         }
+        FolderChildAnimator.playExpand(createdSubs, folderBubble, cfg, pack.animationOrder);
     }
 
     /**
@@ -1293,28 +1292,14 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 bubblesContainer.removeView(sub);
             }
         } else {
-            // 子气泡向文件夹中心收拢 + 缩小 + 淡出，播完后从容器移除
-            for (CircularBubbleView sub : subs) {
-                sub.animate().cancel();
-                // 收拢开始时即注销子气泡的毛玻璃通道，防止收缩过程中残留背景模糊
-                sub.resetBlur();
-                float toX = (folder != null ? folder.targetX : sub.targetX) - sub.targetX;
-                float toY = (folder != null ? folder.targetY : sub.targetY) - sub.targetY;
-                sub.animate()
-                    .translationX(toX)
-                    .translationY(toY)
-                    .scaleX(0.2f)
-                    .scaleY(0.2f)
-                    .alpha(0f)
-                    .setDuration(140)
-                    .setInterpolator(new android.view.animation.AccelerateInterpolator())
-                    .setUpdateListener(anim -> sub.syncBlurCornerRadiusWithViewScale())
-                    .withEndAction(() -> {
-                        sub.resetBlur();
-                        bubblesContainer.removeView(sub);
-                    })
-                    .start();
-            }
+            CircularBubbleView collapseTarget = folder != null ? folder : subs.get(0);
+            FolderChildAnimator.playCollapse(subs, collapseTarget, config, () -> {
+                for (CircularBubbleView sub : subs) {
+                    sub.animate().cancel();
+                    sub.resetBlur();
+                    bubblesContainer.removeView(sub);
+                }
+            });
         }
 
         // 恢复一级气泡大小与透明度（含文件夹图标）：
@@ -1326,7 +1311,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 b.animate()
                     .scaleX(1.0f)
                     .scaleY(1.0f)
-                    .setDuration(140)
+                    .setDuration(Math.max(0, config != null ? config.folderChildCollapseDurationMs : 140))
                     .setInterpolator(new android.view.animation.LinearInterpolator())
                     .setUpdateListener(anim -> {
                         b.syncBlurCornerRadiusWithViewScale();
