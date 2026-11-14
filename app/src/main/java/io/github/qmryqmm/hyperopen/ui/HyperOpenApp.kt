@@ -984,6 +984,10 @@ fun HyperOpenApp(
                                             Toast.makeText(viewCtx, "已更新并保存快捷方式排版", Toast.LENGTH_SHORT).show()
                                         },
                                         onPanelVisibleChanged = { previewPanelVisible = it },
+                                        onHeaderTopMarginChanged = {
+                                            headerTopMargin = it
+                                            persist()
+                                        },
                                     ).also { previewViewRef = it }
                                 },
                                 update = { pv ->

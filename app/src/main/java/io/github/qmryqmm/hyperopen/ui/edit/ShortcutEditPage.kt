@@ -234,6 +234,7 @@ fun ShortcutEditPage(
     var actionPayload by remember { mutableStateOf(initialItem.actionPayload) }
     var iconPackage by remember { mutableStateOf(initialItem.iconPackage) }
     var iconGlyph by remember { mutableStateOf(initialItem.iconGlyph) }
+    var iconColor by remember { mutableIntStateOf(initialItem.tintColor) }
     var glyphPadEnabled by remember { mutableStateOf(initialItem.glyphPadEnabled) }
     var glyphPadColor by remember { mutableIntStateOf(initialItem.glyphPadColor) }
     var glyphPadMode by remember { mutableIntStateOf(initialItem.glyphPadMode) }
@@ -323,6 +324,7 @@ fun ShortcutEditPage(
         }
         newItem.iconPackage = iconPackage.trim()
         newItem.iconGlyph = iconGlyph.trim()
+        newItem.tintColor = iconColor
         newItem.glyphPadEnabled = glyphPadEnabled
         newItem.glyphPadColor = glyphPadColor
         newItem.glyphPadMode = glyphPadMode
@@ -360,6 +362,9 @@ fun ShortcutEditPage(
     var showIconDialog by remember { mutableStateOf(false) }
     var showTextDialog by remember { mutableStateOf(false) }
 
+    var iconHexInput by remember {
+        mutableStateOf(String.format("#%06X", initialItem.tintColor and 0xFFFFFF))
+    }
     // 自定义矢量图标底垫颜色：十六进制文本框（与 RGB 分量滑条双向同步）
     var padHexInput by remember {
         mutableStateOf(String.format("#%06X", initialItem.glyphPadColor and 0xFFFFFF))
@@ -377,6 +382,9 @@ fun ShortcutEditPage(
         (0xFF shl 24) or ((r and 0xFF) shl 16) or ((g and 0xFF) shl 8) or (b and 0xFF)
     fun syncPadHexFromColor() {
         padHexInput = String.format("#%06X", glyphPadColor and 0xFFFFFF)
+    }
+    fun syncIconHexFromColor() {
+        iconHexInput = String.format("#%06X", iconColor and 0xFFFFFF)
     }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
@@ -418,13 +426,14 @@ fun ShortcutEditPage(
     // 检查是否有未保存的修改（基准为「最近一次保存」的快照：保存修改后留在编辑页时重置基准，
     // 返回键不会因已保存内容误弹未保存弹窗）
     var savedBaseline by remember { mutableStateOf(initialItem) }
-    val isModified = remember(title, subtitle, actionType, actionPayload, iconPackage, iconGlyph, glyphPadEnabled, glyphPadColor, glyphPadMode, appIconCropMode, enabled, pickedUser, shellAsRoot, actAction, actData, actComponent, actPackage, actExtras, actNewTask, actUseRoot, savedBaseline, followGlobalHintStyle, hintTextColor, hintTextAlpha, hintTextColorSub, hintTextAlphaSub, hintTextShadow, hintTextStroke, hintTextWeight, hintTextLetterSpacing, showHintTitle, showHintSubtitle, childrenRev) {
+    val isModified = remember(title, subtitle, actionType, actionPayload, iconPackage, iconGlyph, iconColor, glyphPadEnabled, glyphPadColor, glyphPadMode, appIconCropMode, enabled, pickedUser, shellAsRoot, actAction, actData, actComponent, actPackage, actExtras, actNewTask, actUseRoot, savedBaseline, followGlobalHintStyle, hintTextColor, hintTextAlpha, hintTextColorSub, hintTextAlphaSub, hintTextShadow, hintTextStroke, hintTextWeight, hintTextLetterSpacing, showHintTitle, showHintSubtitle, childrenRev) {
         title != savedBaseline.title ||
         subtitle != savedBaseline.subtitle ||
         actionType != savedBaseline.actionType ||
         (actionType != ShortcutItem.ACTION_FOLDER && actionPayload != savedBaseline.actionPayload) ||
         iconPackage != savedBaseline.iconPackage ||
         iconGlyph != savedBaseline.iconGlyph ||
+        iconColor != savedBaseline.tintColor ||
         glyphPadEnabled != savedBaseline.glyphPadEnabled ||
         glyphPadColor != savedBaseline.glyphPadColor ||
         glyphPadMode != savedBaseline.glyphPadMode ||
@@ -484,7 +493,7 @@ fun ShortcutEditPage(
 
     val previewItem = remember(
         initialItem, title, subtitle, actionType, actionPayload,
-        iconPackage, iconGlyph, appIconCropMode, glyphPadEnabled, glyphPadColor, glyphPadMode
+        iconPackage, iconGlyph, iconColor, appIconCropMode, glyphPadEnabled, glyphPadColor, glyphPadMode
     ) {
         initialItem.copy().apply {
             this.title = title.trim().ifBlank { "快捷方式" }
@@ -497,6 +506,7 @@ fun ShortcutEditPage(
             }
             this.iconPackage = iconPackage.trim()
             this.iconGlyph = iconGlyph.trim()
+            this.tintColor = iconColor
             this.appIconCropMode = appIconCropMode
             this.glyphPadEnabled = glyphPadEnabled
             this.glyphPadColor = glyphPadColor
@@ -1277,8 +1287,115 @@ fun ShortcutEditPage(
                             }
                         }
 
-                        // ── 矢量图标底垫与色彩（仅矢量图标）──
+                        // ── 矢量图标颜色与底垫（仅图标库矢量图标）──
                         if (vectorIcon != null && iconPackage.isBlank()) {
+                            item(key = "icon_dialog_icon_color") {
+                                Column {
+                                    Text(
+                                        text = "矢量图标颜色",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MiuixTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
+                                    )
+
+                                    val iconBrandColors = listOf(
+                                        "微信绿" to 0xFF07C160.toInt(),
+                                        "支付宝蓝" to 0xFF1677FF.toInt(),
+                                        "小米橙" to 0xFFFF6900.toInt(),
+                                        "网易红" to 0xFFE60026.toInt(),
+                                        "极客紫" to 0xFF7928CA.toInt(),
+                                        "暗夜黑" to 0xFF1F2329.toInt(),
+                                        "科技蓝" to 0xFF2A82E4.toInt(),
+                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                    ) {
+                                        iconBrandColors.forEach { (_, colorValue) ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(colorValue))
+                                                    .clickable {
+                                                        iconColor = colorValue
+                                                        syncIconHexFromColor()
+                                                    },
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                if (iconColor == colorValue) {
+                                                    Text("✓", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(iconColor)),
+                                        )
+                                        TextField(
+                                            value = iconHexInput,
+                                            onValueChange = { value ->
+                                                iconHexInput = value
+                                                parseHexColor(value)?.let { iconColor = it }
+                                            },
+                                            label = "图标颜色 (#RRGGBB)",
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                    }
+
+                                    SliderPreference(
+                                        title = "图标红色分量",
+                                        valueText = "${(iconColor shr 16) and 0xFF}",
+                                        value = ((iconColor shr 16) and 0xFF).toFloat(),
+                                        valueRange = 0f..255f,
+                                        onValueChange = { red ->
+                                            iconColor = composePadColor(
+                                                red.toInt(), (iconColor shr 8) and 0xFF, iconColor and 0xFF
+                                            )
+                                            syncIconHexFromColor()
+                                        },
+                                    )
+                                    SliderPreference(
+                                        title = "图标绿色分量",
+                                        valueText = "${(iconColor shr 8) and 0xFF}",
+                                        value = ((iconColor shr 8) and 0xFF).toFloat(),
+                                        valueRange = 0f..255f,
+                                        onValueChange = { green ->
+                                            iconColor = composePadColor(
+                                                (iconColor shr 16) and 0xFF, green.toInt(), iconColor and 0xFF
+                                            )
+                                            syncIconHexFromColor()
+                                        },
+                                    )
+                                    SliderPreference(
+                                        title = "图标蓝色分量",
+                                        valueText = "${iconColor and 0xFF}",
+                                        value = (iconColor and 0xFF).toFloat(),
+                                        valueRange = 0f..255f,
+                                        onValueChange = { blue ->
+                                            iconColor = composePadColor(
+                                                (iconColor shr 16) and 0xFF, (iconColor shr 8) and 0xFF, blue.toInt()
+                                            )
+                                            syncIconHexFromColor()
+                                        },
+                                    )
+                                }
+                            }
                             item(key = "icon_dialog_pad") {
                                 Column {
                                     SwitchPreference(

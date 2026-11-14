@@ -52,6 +52,7 @@ class HyperOpenPreviewView(
     private val onPanelVisibleChanged: ((Boolean) -> Unit)? = null,
     /** 「始终显示面板」开关：true 时面板常驻，无需按住指纹按钮，可直接长按排版 / 滑动预览 */
     private var alwaysShowPanel: Boolean = false,
+    private val onHeaderTopMarginChanged: (Float) -> Unit = {},
 ) : FrameLayout(context) {
 
     private var resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(context, config.materialStyle)
@@ -65,6 +66,16 @@ class HyperOpenPreviewView(
     /** 顶部提示胶囊背景控制器（与真机 CustomHyperOpenContainer 同源：统一材质参数 + blur 生命周期） */
     private var headerPillBackdrop: io.github.qmryqmm.hyperopen.view.HeaderPillBackdrop? = null
     private val previewMaterialControllers = java.util.WeakHashMap<View, ViewMaterialController>()
+    private val headerHeightLongPressRunnable = Runnable {
+        headerHeightDragging = true
+        editingHeaderHeight = true
+        enterEditMode()
+    }
+    private var headerHeightDragging = false
+    private var headerHeightGestureActive = false
+    private var editingHeaderHeight = false
+    private var headerDragStartRawY = 0f
+    private var headerDragStartTopMargin = 0f
 
     private lateinit var regionBackdrop: CircularRegionBackdropView
     /** 全屏扇区分隔虚线覆盖层（独立于圆形底衬，虚线可延伸到屏幕外） */
@@ -842,7 +853,7 @@ class HyperOpenPreviewView(
         val titleSp = config.headerTitleSize.coerceIn(12, 26).toFloat()
         val subtitleSp = config.headerSubtitleSize.coerceIn(9, 18).toFloat()
         val centered = config.headerTextCentered
-        val topMarginDp = config.headerTopMargin.coerceIn(20, 420).toFloat()
+        val topMarginDp = config.headerTopMargin.coerceIn(24, 360).toFloat()
 
         headerTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSp)
         headerTitle.gravity = if (centered) Gravity.CENTER else Gravity.START
@@ -905,6 +916,7 @@ class HyperOpenPreviewView(
 
     override fun onDetachedFromWindow() {
         removeCallbacks(longPressRunnable)
+        removeCallbacks(headerHeightLongPressRunnable)
         removeCallbacks(expandRunnable)
         removeCallbacks(finishExpandGateRunnable)
         previewMaterialControllers.values.forEach { it.release() }
@@ -1421,6 +1433,70 @@ class HyperOpenPreviewView(
         return true
     }
 
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (::headerPill.isInitialized && headerPill.isShown) {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                headerHeightGestureActive = isHeaderHeightTouch(event.x, event.y)
+            }
+            if (headerHeightGestureActive) {
+                return handleHeaderHeightTouch(event)
+            }
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
+    private fun isHeaderHeightTouch(x: Float, y: Float): Boolean {
+        if (!::topHeaderContainer.isInitialized || !::headerPill.isInitialized) return false
+        val horizontalInset = dpToPx(16f)
+        val verticalInset = dpToPx(28f)
+        val left = topHeaderContainer.left + headerPill.left - horizontalInset
+        val top = topHeaderContainer.top + headerPill.top - verticalInset
+        val right = left + headerPill.width + horizontalInset * 2f
+        val bottom = top + headerPill.height + verticalInset * 2f
+        return x >= left && x <= right && y >= top && y <= bottom
+    }
+
+    private fun handleHeaderHeightTouch(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                headerDragStartRawY = event.rawY
+                headerDragStartTopMargin = config.headerTopMargin.toFloat()
+                removeCallbacks(headerHeightLongPressRunnable)
+                if (isEditMode) {
+                    headerHeightDragging = true
+                    editingHeaderHeight = true
+                    headerSubtitle.text = "拖动提示文字调整高度，点击空白完成"
+                } else {
+                    headerHeightDragging = false
+                    postDelayed(headerHeightLongPressRunnable, 450L)
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (headerHeightDragging) {
+                    val deltaDp = (event.rawY - headerDragStartRawY) / resources.displayMetrics.density
+                    val next = (headerDragStartTopMargin + deltaDp).toInt().coerceIn(24, 360)
+                    if (next != config.headerTopMargin) {
+                        config.headerTopMargin = next
+                        applyHeaderPillStyleAndLayout()
+                    }
+                } else if (Math.abs(event.rawY - headerDragStartRawY) > dpToPx(10f)) {
+                    removeCallbacks(headerHeightLongPressRunnable)
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(headerHeightLongPressRunnable)
+                if (headerHeightDragging) {
+                    onHeaderTopMarginChanged(config.headerTopMargin.toFloat())
+                    triggerHaptic()
+                }
+                headerHeightDragging = false
+                headerHeightGestureActive = false
+                performClick()
+            }
+        }
+        return true
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val x = event.x
         val y = event.y
@@ -1609,7 +1685,11 @@ class HyperOpenPreviewView(
         HintTextStyler.reset(headerSubtitle, false, config)
         headerTitle.text = "自定义排版模式"
         headerTitle.setTextColor(0xFFFF9933.toInt())
-        headerSubtitle.text = "长按并拖动图标交换位置，点击空白完成"
+        headerSubtitle.text = if (editingHeaderHeight) {
+            "拖动提示文字调整高度，点击空白完成"
+        } else {
+            "长按并拖动图标交换位置，点击空白完成"
+        }
 
         // 所有气泡进入统一排版微放状态，清除单点悬停缩放
         for (b in bubbleViews) {
@@ -1631,6 +1711,7 @@ class HyperOpenPreviewView(
         pendingFolderBubble = null
         dismissFolderSubBubbles()
         isEditMode = false
+        editingHeaderHeight = false
         triggerHaptic()
 
         editBanner.animate().alpha(0f).setDuration(150).withEndAction {
