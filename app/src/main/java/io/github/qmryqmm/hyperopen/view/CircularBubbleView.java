@@ -271,30 +271,6 @@ public class CircularBubbleView extends FrameLayout {
         return HyperOSMaterialFactory.GlassParams.fromConfig(null);
     }
 
-    /**
-     * blur region 圆角 = 本地几何圆角（<b>不乘缩放</b>）。
-     * <p>
-     * background 挂载契约下，blur region 的注册锚点携带视图 RenderNode 变换
-     * （setScaleX/Y 的鱼眼缩放），缩放由锚点天然携带；若再乘 scale 预补偿，
-     * 缩放会被应用两次（区域按倍率²增长），表现为放大时气泡外鼓出一圈
-     * 半透明磨砂底衬。历史上的「本地圆角 × scale」补偿只适用于旧的
-     * 字段持有注册锚点（不含视图变换），background 契约下必须去掉。
-     */
-    private float getBlurCornerRadiusPx() {
-        int w = getWidth() > 0 ? getWidth() : sizePx;
-        int h = getHeight() > 0 ? getHeight() : sizePx;
-        // 保持本地未缩放圆角，由 View 的 RenderNode 统一负责矩阵等比变换；严禁私乘 scale，
-        // 否则圆角随放大被二次放大，导致圆角矩形逐渐异化为正圆。
-        return BubbleBlurSpec.cornerRadiusPx(Math.min(w, h), cornerRadiusPercent);
-    }
-
-    /** blur region bounds = 视图本地 bounds（缩放由注册锚点携带，严禁再预缩放） */
-    private Rect blurBounds() {
-        int w = getWidth() > 0 ? getWidth() : sizePx;
-        int h = getHeight() > 0 ? getHeight() : sizePx;
-        return new Rect(0, 0, w, h);
-    }
-
     private int getBlurRadiusPx() {
         // 留白 0% = 气泡整体关闭，气泡模糊跟随停用（开关规格统一由 BubbleBlurSpec 提供）
         if (!systemBlurEnabled || !BubbleBlurSpec.isEnabled(blurRadiusDp, paddingPercent)) return 0;
@@ -554,12 +530,9 @@ public class CircularBubbleView extends FrameLayout {
     /**
      * 同步 blur region 几何。
      * <p>
-     * 缩放已由注册锚点（视图 RenderNode 变换）携带，本地几何（bounds / 圆角）
-     * 不随缩放改变——保留此入口用于尺寸 / 圆角变化后的兜底同步；
-     * 鱼眼逐帧调用时内部几何未变即短路，零反射开销。
-     * （历史注释中「getLocationInWindow 不随 setScaleX/Y 变化需手动预缩放」的
-     * 结论只适用于旧字段持有锚点；background 契约下再预缩放会双重放大，
-     * 表现为放大时气泡外鼓出一圈半透明底衬。）
+     * BlurCarrierView 在 onDraw 中按当前缩放同步窗口坐标 bounds 与圆角，
+     * 本入口仅在缩放变化时失效承载视图，使其重新执行几何同步；
+     * 平移或其他不改变缩放的动画不会触发重新绘制。
      */
     public void syncBlurCornerRadiusWithViewScale() {
         float scale = Math.max(0.01f, getScaleX());

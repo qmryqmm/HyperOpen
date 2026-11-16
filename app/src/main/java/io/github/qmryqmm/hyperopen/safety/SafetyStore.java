@@ -298,6 +298,7 @@ public final class SafetyStore {
 
             p.edit()
                 .putString(KEY_CRASH_TIMES, "")
+                .putInt(KEY_TOTAL_CRASH, 0)
                 .putString(KEY_CRASH_LOG, joinLog(log))
                 .putLong(KEY_SESSION_START, 0L)
                 .putBoolean(KEY_SESSION_HEALTHY, true)

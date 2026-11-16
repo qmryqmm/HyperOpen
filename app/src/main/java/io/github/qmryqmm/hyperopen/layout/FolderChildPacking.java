@@ -38,13 +38,13 @@ public final class FolderChildPacking {
         }
     }
 
-    private static final class ScoreContext {
+    private static final class BoundsContext {
         final float minX;
         final float maxX;
         final float minY;
         final float maxY;
 
-        ScoreContext(float minX, float maxX, float minY, float maxY) {
+        BoundsContext(float minX, float maxX, float minY, float maxY) {
             this.minX = minX;
             this.maxX = maxX;
             this.minY = minY;
@@ -96,7 +96,7 @@ public final class FolderChildPacking {
             maxY = centerY;
         }
 
-        ScoreContext scoreContext = new ScoreContext(minX, maxX, minY, maxY);
+        BoundsContext boundsContext = new BoundsContext(minX, maxX, minY, maxY);
         float outwardDeg = (float) Math.toDegrees(Math.atan2(folderY - fodY, folderX - fodX));
         float preferredDeg = resolveDirectionDeg(
                 outwardDeg, directionMode, directionOffsetDeg
@@ -117,7 +117,7 @@ public final class FolderChildPacking {
                 count, folderX, folderY, radius, angleStepDeg, preferredDeg
         );
 
-        List<PointF> fittedPoints = clampPointsToSafeBounds(selected.points, scoreContext);
+        List<PointF> fittedPoints = clampPointsToSafeBounds(selected.points, boundsContext);
         List<Integer> order = buildOrder(
                 fittedPoints, folderX, folderY, selected.directionDeg, orderMode
         );
@@ -142,7 +142,7 @@ public final class FolderChildPacking {
     }
 
     private static List<PointF> clampPointsToSafeBounds(List<PointF> points,
-                                                        ScoreContext scoreContext) {
+                                                        BoundsContext boundsContext) {
         if (points.isEmpty()) {
             return new ArrayList<>();
         }
@@ -158,21 +158,21 @@ public final class FolderChildPacking {
         }
 
         float shiftX = 0f;
-        if (minimumX < scoreContext.minX && maximumX > scoreContext.maxX) {
-            shiftX = (scoreContext.minX + scoreContext.maxX - minimumX - maximumX) / 2f;
-        } else if (minimumX < scoreContext.minX) {
-            shiftX = scoreContext.minX - minimumX;
-        } else if (maximumX > scoreContext.maxX) {
-            shiftX = scoreContext.maxX - maximumX;
+        if (minimumX < boundsContext.minX && maximumX > boundsContext.maxX) {
+            shiftX = (boundsContext.minX + boundsContext.maxX - minimumX - maximumX) / 2f;
+        } else if (minimumX < boundsContext.minX) {
+            shiftX = boundsContext.minX - minimumX;
+        } else if (maximumX > boundsContext.maxX) {
+            shiftX = boundsContext.maxX - maximumX;
         }
 
         float shiftY = 0f;
-        if (minimumY < scoreContext.minY && maximumY > scoreContext.maxY) {
-            shiftY = (scoreContext.minY + scoreContext.maxY - minimumY - maximumY) / 2f;
-        } else if (minimumY < scoreContext.minY) {
-            shiftY = scoreContext.minY - minimumY;
-        } else if (maximumY > scoreContext.maxY) {
-            shiftY = scoreContext.maxY - maximumY;
+        if (minimumY < boundsContext.minY && maximumY > boundsContext.maxY) {
+            shiftY = (boundsContext.minY + boundsContext.maxY - minimumY - maximumY) / 2f;
+        } else if (minimumY < boundsContext.minY) {
+            shiftY = boundsContext.minY - minimumY;
+        } else if (maximumY > boundsContext.maxY) {
+            shiftY = boundsContext.maxY - maximumY;
         }
 
         List<PointF> fitted = new ArrayList<>(points.size());

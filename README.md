@@ -67,8 +67,8 @@
 - **模糊与压暗独立容错**：全屏高斯模糊与全屏压暗分别包裹容错，模糊解析或调用失败不再连带丢弃全屏压暗，异常日志附带宿主 SystemUI 版本号便于定位。
 
 ### 4. 指纹解锁进入等待时间可调（Hook 系统界面底层）
-- **等待阈值可调节**：通过 Hook `MiuiGxzwManager#dismissGxzwView` 中调度系统快捷面板的
-  `Handler.postDelayed(mShowRunnable, …)` 延迟，将「指纹解锁后需按住传感器多久才唤出面板」做成可调项（0 ~ 2000 ms）。
+- **等待阈值可调节**：`MiuiGxzwManager#dismissGxzwView` 会调度系统快捷面板的
+  `Handler.postDelayed(mShowRunnable, …)`；模块直接 Hook `android.os.Handler#postDelayed` 并替换该 Runnable 的延迟，将「指纹解锁后需按住传感器多久才唤出面板」做成可调项（0 ~ 2000 ms）。
 - **滑块 500 ms 即系统默认**：500 ms 位置不干预系统原生判定（普通场景 500 ms / 无障碍 TalkBack 下 1000 ms），滑块默认即停在该位置；`0 ms` 为解锁后立即弹出，其余数值强制覆盖系统延迟。
 - **精准识别展开任务**：系统 `MiuiGxzwQuickOpenView$1` 被 R8 复用为多个 Runnable，模块在构造时给真正的展开 Runnable 打上附加字段标记，仅拦截该实例，不影响 `fod_auth_fingerprint` 写入等其他逻辑。
 
