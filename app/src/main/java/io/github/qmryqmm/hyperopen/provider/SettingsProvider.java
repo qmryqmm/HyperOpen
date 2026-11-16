@@ -220,7 +220,9 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putBoolean("default_show_hint_subtitle", sp.getBoolean("default_show_hint_subtitle", true));
                 bundle.putInt("folder_hover_delay_ms", sp.getInt("folder_hover_delay_ms", 250));
                 bundle.putFloat("folder_child_display_range_scale", sp.getFloat("folder_child_display_range_scale", 1f));
-                bundle.putInt("folder_child_direction_mode", sp.getInt("folder_child_direction_mode", 0));
+                bundle.putInt("folder_child_direction_mode", HyperOpenConfig.normalizeFolderChildDirectionMode(
+                        sp.getInt("folder_child_direction_mode", HyperOpenConfig.FOLDER_CHILD_DIRECTION_OUTWARD)
+                ));
                 bundle.putFloat("folder_child_direction_offset_deg", sp.getFloat("folder_child_direction_offset_deg", 0f));
                 bundle.putInt("folder_child_order_mode", sp.getInt("folder_child_order_mode", 0));
                 bundle.putInt("folder_child_min_gap_dp", sp.getInt("folder_child_min_gap_dp", 8));

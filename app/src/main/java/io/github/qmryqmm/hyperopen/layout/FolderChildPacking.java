@@ -3,14 +3,12 @@ package io.github.qmryqmm.hyperopen.layout;
 import android.graphics.PointF;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
 /** 文件夹二级子项的固定圆环布局，真机与应用预览共享几何和动画顺序。 */
 public final class FolderChildPacking {
 
-    public static final int DIRECTION_AUTO = 0;
     public static final int DIRECTION_OUTWARD = 1;
     public static final int DIRECTION_INWARD = 2;
     public static final int DIRECTION_UP = 3;
@@ -41,30 +39,16 @@ public final class FolderChildPacking {
     }
 
     private static final class ScoreContext {
-        final float folderX;
-        final float folderY;
-        final float fodX;
-        final float fodY;
         final float minX;
         final float maxX;
         final float minY;
         final float maxY;
-        final float iconSize;
-        final float spacing;
 
-        ScoreContext(float folderX, float folderY, float fodX, float fodY,
-                     float minX, float maxX, float minY, float maxY,
-                     float iconSize, float spacing) {
-            this.folderX = folderX;
-            this.folderY = folderY;
-            this.fodX = fodX;
-            this.fodY = fodY;
+        ScoreContext(float minX, float maxX, float minY, float maxY) {
             this.minX = minX;
             this.maxX = maxX;
             this.minY = minY;
             this.maxY = maxY;
-            this.iconSize = iconSize;
-            this.spacing = spacing;
         }
     }
 
@@ -72,13 +56,11 @@ public final class FolderChildPacking {
         final List<PointF> points;
         final float radius;
         final float directionDeg;
-        final double score;
 
-        Candidate(List<PointF> points, float radius, float directionDeg, double score) {
+        Candidate(List<PointF> points, float radius, float directionDeg) {
             this.points = points;
             this.radius = radius;
             this.directionDeg = directionDeg;
-            this.score = score;
         }
     }
 
@@ -114,18 +96,11 @@ public final class FolderChildPacking {
             maxY = centerY;
         }
 
-        ScoreContext scoreContext = new ScoreContext(
-                folderX, folderY, fodX, fodY,
-                minX, maxX, minY, maxY,
-                iconSize, spacing
-        );
+        ScoreContext scoreContext = new ScoreContext(minX, maxX, minY, maxY);
         float outwardDeg = (float) Math.toDegrees(Math.atan2(folderY - fodY, folderX - fodX));
         float preferredDeg = resolveDirectionDeg(
                 outwardDeg, directionMode, directionOffsetDeg
         );
-        List<Float> candidateAngles = directionMode == DIRECTION_AUTO
-                ? buildAutoAngles()
-                : Collections.singletonList(preferredDeg);
         float rangeScale = clamp(displayRangeScale, 0.5f, 2.5f);
         float angleStepDeg = count == 1
                 ? 0f
@@ -138,16 +113,9 @@ public final class FolderChildPacking {
                 minimumRadius
         );
 
-        Candidate selected = null;
-        for (float directionDeg : candidateAngles) {
-            Candidate candidate = buildRing(
-                    count, folderX, folderY, radius, angleStepDeg,
-                    directionDeg, scoreContext
-            );
-            if (selected == null || candidate.score < selected.score) {
-                selected = candidate;
-            }
-        }
+        Candidate selected = buildRing(
+                count, folderX, folderY, radius, angleStepDeg, preferredDeg
+        );
 
         List<PointF> fittedPoints = clampPointsToSafeBounds(selected.points, scoreContext);
         List<Integer> order = buildOrder(
@@ -161,8 +129,7 @@ public final class FolderChildPacking {
 
     private static Candidate buildRing(int count, float folderX, float folderY,
                                        float radius, float angleStepDeg,
-                                       float directionDeg,
-                                       ScoreContext scoreContext) {
+                                       float directionDeg) {
         List<PointF> points = new ArrayList<>(count);
         double centerIndex = (count - 1) / 2d;
         double directionRad = Math.toRadians(directionDeg);
@@ -171,75 +138,7 @@ public final class FolderChildPacking {
             double angle = directionRad + (index - centerIndex) * stepRad;
             points.add(pointAt(folderX, folderY, radius, angle));
         }
-        double score = boundaryScore(points, scoreContext)
-                + collisionScore(points, scoreContext)
-                + fodScore(points, scoreContext);
-        return new Candidate(points, radius, directionDeg, score);
-    }
-
-    private static double boundaryScore(List<PointF> points, ScoreContext scoreContext) {
-        double score = 0d;
-        for (PointF point : points) {
-            if (point.x < scoreContext.minX) {
-                double overflow = scoreContext.minX - point.x;
-                score += overflow * overflow * 3d;
-            }
-            if (point.x > scoreContext.maxX) {
-                double overflow = point.x - scoreContext.maxX;
-                score += overflow * overflow * 3d;
-            }
-            if (point.y < scoreContext.minY) {
-                double overflow = scoreContext.minY - point.y;
-                score += overflow * overflow * 3d;
-            }
-            if (point.y > scoreContext.maxY) {
-                double overflow = point.y - scoreContext.maxY;
-                score += overflow * overflow * 3d;
-            }
-        }
-        return score;
-    }
-
-    private static double collisionScore(List<PointF> points, ScoreContext scoreContext) {
-        double score = 0d;
-        float folderClearance = scoreContext.iconSize * 1.04f;
-        float childClearance = scoreContext.spacing * 0.92f;
-        for (PointF point : points) {
-            float folderDistance = (float) Math.hypot(
-                    point.x - scoreContext.folderX, point.y - scoreContext.folderY
-            );
-            if (folderDistance < folderClearance) {
-                double overlap = folderClearance - folderDistance;
-                score += overlap * overlap * 5d;
-            }
-        }
-        for (int firstIndex = 0; firstIndex < points.size(); firstIndex++) {
-            PointF first = points.get(firstIndex);
-            for (int secondIndex = firstIndex + 1; secondIndex < points.size(); secondIndex++) {
-                PointF second = points.get(secondIndex);
-                float distance = (float) Math.hypot(first.x - second.x, first.y - second.y);
-                if (distance < childClearance) {
-                    double overlap = childClearance - distance;
-                    score += overlap * overlap * 2.5d;
-                }
-            }
-        }
-        return score;
-    }
-
-    private static double fodScore(List<PointF> points, ScoreContext scoreContext) {
-        double score = 0d;
-        float minimumDistance = scoreContext.iconSize * 1.05f;
-        for (PointF point : points) {
-            float distance = (float) Math.hypot(
-                    point.x - scoreContext.fodX, point.y - scoreContext.fodY
-            );
-            if (distance < minimumDistance) {
-                double overlap = minimumDistance - distance;
-                score += overlap * overlap * 0.45d;
-            }
-        }
-        return score;
+        return new Candidate(points, radius, directionDeg);
     }
 
     private static List<PointF> clampPointsToSafeBounds(List<PointF> points,
@@ -291,14 +190,6 @@ public final class FolderChildPacking {
         );
     }
 
-    private static List<Float> buildAutoAngles() {
-        List<Float> angles = new ArrayList<>(72);
-        for (int index = 0; index < 72; index++) {
-            angles.add(index * 5f);
-        }
-        return angles;
-    }
-
     private static float resolveDirectionDeg(float outwardDeg, int directionMode,
                                              float directionOffsetDeg) {
         switch (directionMode) {
@@ -314,7 +205,6 @@ public final class FolderChildPacking {
                 return 0f;
             case DIRECTION_CUSTOM:
                 return normalizeDeg(outwardDeg + directionOffsetDeg);
-            case DIRECTION_AUTO:
             case DIRECTION_OUTWARD:
             default:
                 return normalizeDeg(outwardDeg);

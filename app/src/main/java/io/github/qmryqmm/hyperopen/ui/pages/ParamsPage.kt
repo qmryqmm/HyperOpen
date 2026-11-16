@@ -518,12 +518,6 @@ fun ParamsPage(
                     )
                     SmallTitle(text = "展开方向")
                     RadioButtonPreference(
-                        title = "智能避边",
-                        summary = "综合屏幕安全区、遮挡和间距自动选择最佳方向",
-                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_AUTO,
-                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_AUTO) },
-                    )
-                    RadioButtonPreference(
                         title = "背离指纹",
                         summary = "沿指纹中心到文件夹的延长线展开",
                         selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_OUTWARD,

@@ -76,7 +76,6 @@ public class HyperOpenConfig {
     public static final int PANEL_COLLAPSE_STOCK_LINE = 3;
 
     /** 文件夹子项展开方向 */
-    public static final int FOLDER_CHILD_DIRECTION_AUTO = 0;
     public static final int FOLDER_CHILD_DIRECTION_OUTWARD = 1;
     public static final int FOLDER_CHILD_DIRECTION_INWARD = 2;
     public static final int FOLDER_CHILD_DIRECTION_UP = 3;
@@ -105,6 +104,14 @@ public class HyperOpenConfig {
         return layoutStyle == LAYOUT_SYSTEM_STOCK && legacyStockSystemAnim
                 ? PANEL_EXPAND_STOCK_LINE
                 : PANEL_EXPAND_BLOOM;
+    }
+
+    /** 旧版智能避边使用 0；现统一迁移为固定的“背离指纹”方向。 */
+    public static int normalizeFolderChildDirectionMode(int storedMode) {
+        if (storedMode == 0) {
+            return FOLDER_CHILD_DIRECTION_OUTWARD;
+        }
+        return Math.max(FOLDER_CHILD_DIRECTION_OUTWARD, Math.min(FOLDER_CHILD_DIRECTION_CUSTOM, storedMode));
     }
 
     public int materialStyle = MATERIAL_GAUSSIAN_BLUR;
@@ -204,7 +211,7 @@ public class HyperOpenConfig {
     /** 文件夹二级气泡悬停展开延迟 (100 ~ 600 ms，默认 250 ms) */
     public int folderHoverDelayMs = 250;
     public float folderChildDisplayRangeScale = 1f;
-    public int folderChildDirectionMode = 0;
+    public int folderChildDirectionMode = FOLDER_CHILD_DIRECTION_OUTWARD;
     public float folderChildDirectionOffsetDeg = 0f;
     public int folderChildOrderMode = 0;
     public int folderChildMinGapDp = 8;
@@ -704,7 +711,9 @@ public class HyperOpenConfig {
                     config.folderHoverDelayMs = bundle.getInt("folder_hover_delay_ms", 250);
                     config.stockSystemRegion = bundle.getBoolean("stock_system_region", true);
                     config.folderChildDisplayRangeScale = bundle.getFloat("folder_child_display_range_scale", 1f);
-                    config.folderChildDirectionMode = bundle.getInt("folder_child_direction_mode", 0);
+                    config.folderChildDirectionMode = normalizeFolderChildDirectionMode(
+                            bundle.getInt("folder_child_direction_mode", FOLDER_CHILD_DIRECTION_OUTWARD)
+                    );
                     config.folderChildDirectionOffsetDeg = bundle.getFloat("folder_child_direction_offset_deg", 0f);
                     config.folderChildOrderMode = bundle.getInt("folder_child_order_mode", 0);
                     config.folderChildMinGapDp = bundle.getInt("folder_child_min_gap_dp", 8);
@@ -858,7 +867,9 @@ public class HyperOpenConfig {
         config.folderHoverDelayMs = xPrefs.getInt("folder_hover_delay_ms", 250);
         config.stockSystemRegion = xPrefs.getBoolean("stock_system_region", true);
         config.folderChildDisplayRangeScale = xPrefs.getFloat("folder_child_display_range_scale", 1f);
-        config.folderChildDirectionMode = xPrefs.getInt("folder_child_direction_mode", 0);
+        config.folderChildDirectionMode = normalizeFolderChildDirectionMode(
+                xPrefs.getInt("folder_child_direction_mode", FOLDER_CHILD_DIRECTION_OUTWARD)
+        );
         config.folderChildDirectionOffsetDeg = xPrefs.getFloat("folder_child_direction_offset_deg", 0f);
         config.folderChildOrderMode = xPrefs.getInt("folder_child_order_mode", 0);
         config.folderChildMinGapDp = xPrefs.getInt("folder_child_min_gap_dp", 8);
@@ -1003,7 +1014,9 @@ public class HyperOpenConfig {
         config.folderHoverDelayMs = sp.getInt("folder_hover_delay_ms", 250);
         config.stockSystemRegion = sp.getBoolean("stock_system_region", true);
         config.folderChildDisplayRangeScale = sp.getFloat("folder_child_display_range_scale", 1f);
-        config.folderChildDirectionMode = sp.getInt("folder_child_direction_mode", 0);
+        config.folderChildDirectionMode = normalizeFolderChildDirectionMode(
+                sp.getInt("folder_child_direction_mode", FOLDER_CHILD_DIRECTION_OUTWARD)
+        );
         config.folderChildDirectionOffsetDeg = sp.getFloat("folder_child_direction_offset_deg", 0f);
         config.folderChildOrderMode = sp.getInt("folder_child_order_mode", 0);
         config.folderChildMinGapDp = sp.getInt("folder_child_min_gap_dp", 8);
