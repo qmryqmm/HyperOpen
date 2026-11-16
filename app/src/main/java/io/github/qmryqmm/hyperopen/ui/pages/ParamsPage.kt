@@ -64,7 +64,6 @@ private fun hapticModeNameOf(mode: Int): String = when (mode) {
 }
 
 private fun panelExpandAnimNameOf(type: Int): String = when (type) {
-    HyperOpenConfig.PANEL_EXPAND_FOLLOW_LAYOUT -> "跟随布局"
     HyperOpenConfig.PANEL_EXPAND_STOCK_LINE -> "原生直线"
     HyperOpenConfig.PANEL_EXPAND_BLOOM -> "弹性绽放"
     HyperOpenConfig.PANEL_EXPAND_FADE_SCALE -> "淡入缩放"
@@ -76,15 +75,6 @@ private fun panelCollapseAnimNameOf(type: Int): String = when (type) {
     HyperOpenConfig.PANEL_COLLAPSE_FADE_SCALE -> "淡出缩小"
     HyperOpenConfig.PANEL_COLLAPSE_SELECTED_POP -> "选中回弹"
     HyperOpenConfig.PANEL_COLLAPSE_STOCK_LINE -> "原生直线回收"
-    else -> "自定义"
-}
-
-private fun folderLayoutNameOf(type: Int): String = when (type) {
-    HyperOpenConfig.FOLDER_CHILD_LAYOUT_AUTO -> "智能布局"
-    HyperOpenConfig.FOLDER_CHILD_LAYOUT_OUTER_ARC -> "外向单弧"
-    HyperOpenConfig.FOLDER_CHILD_LAYOUT_DOUBLE_ARC -> "外向双弧"
-    HyperOpenConfig.FOLDER_CHILD_LAYOUT_RING -> "环绕圆环"
-    HyperOpenConfig.FOLDER_CHILD_LAYOUT_HONEYCOMB -> "蜂窝阵列"
     else -> "自定义"
 }
 
@@ -127,16 +117,12 @@ data class FolderLayoutSettings(
     val onIconSize: (Float) -> Unit,
     val iconSpacingOffset: Float,
     val onIconSpacingOffset: (Float) -> Unit,
-    val layoutMode: Int,
-    val onLayoutMode: (Int) -> Unit,
-    val spreadScale: Float,
-    val onSpreadScale: (Float) -> Unit,
-    val arcSpanDeg: Float,
-    val onArcSpanDeg: (Float) -> Unit,
+    val displayRangeScale: Float,
+    val onDisplayRangeScale: (Float) -> Unit,
     val directionMode: Int,
     val onDirectionMode: (Int) -> Unit,
-    val orderMode: Int,
-    val onOrderMode: (Int) -> Unit,
+    val directionOffsetDeg: Float,
+    val onDirectionOffsetDeg: (Float) -> Unit,
     val minGapDp: Float,
     val onMinGapDp: (Float) -> Unit,
     val sizeScale: Float,
@@ -158,6 +144,8 @@ data class FolderMotionSettings(
     val onCollapseDurationMs: (Float) -> Unit,
     val collapseStaggerMs: Float,
     val onCollapseStaggerMs: (Float) -> Unit,
+    val orderMode: Int,
+    val onOrderMode: (Int) -> Unit,
     val startScale: Float,
     val onStartScale: (Float) -> Unit,
     val overshoot: Float,
@@ -192,7 +180,6 @@ fun ParamsPage(
     maxIconCount: Float, onMaxIconCount: (Float) -> Unit,
     iconCapacity: Int, enabledShortcutsCount: Int,
     layoutStyle: Int, onLayoutStyle: (Int) -> Unit,
-    stockSystemAnim: Boolean, onStockSystemAnim: (Boolean) -> Unit,
     stockSystemRegion: Boolean, onStockSystemRegion: (Boolean) -> Unit,
     ringSectorMode: Boolean, onRingSectorMode: (Boolean) -> Unit,
     sectorLineColor: Int, onSectorLineColor: (Int) -> Unit,
@@ -272,16 +259,12 @@ fun ParamsPage(
     val onIconSize: (Float) -> Unit = { folderLayout.onIconSize(it) }
     val iconSpacingOffset = folderLayout.iconSpacingOffset
     val onIconSpacingOffset: (Float) -> Unit = { folderLayout.onIconSpacingOffset(it) }
-    val folderChildLayoutMode = folderLayout.layoutMode
-    val onFolderChildLayoutMode: (Int) -> Unit = { folderLayout.onLayoutMode(it) }
-    val folderChildSpreadScale = folderLayout.spreadScale
-    val onFolderChildSpreadScale: (Float) -> Unit = { folderLayout.onSpreadScale(it) }
-    val folderChildArcSpanDeg = folderLayout.arcSpanDeg
-    val onFolderChildArcSpanDeg: (Float) -> Unit = { folderLayout.onArcSpanDeg(it) }
+    val folderChildDisplayRangeScale = folderLayout.displayRangeScale
+    val onFolderChildDisplayRangeScale: (Float) -> Unit = { folderLayout.onDisplayRangeScale(it) }
     val folderChildDirectionMode = folderLayout.directionMode
     val onFolderChildDirectionMode: (Int) -> Unit = { folderLayout.onDirectionMode(it) }
-    val folderChildOrderMode = folderLayout.orderMode
-    val onFolderChildOrderMode: (Int) -> Unit = { folderLayout.onOrderMode(it) }
+    val folderChildDirectionOffsetDeg = folderLayout.directionOffsetDeg
+    val onFolderChildDirectionOffsetDeg: (Float) -> Unit = { folderLayout.onDirectionOffsetDeg(it) }
     val folderChildMinGapDp = folderLayout.minGapDp
     val onFolderChildMinGapDp: (Float) -> Unit = { folderLayout.onMinGapDp(it) }
     val folderChildSizeScale = folderLayout.sizeScale
@@ -301,6 +284,8 @@ fun ParamsPage(
     val onFolderChildCollapseDurationMs: (Float) -> Unit = { folderMotion.onCollapseDurationMs(it) }
     val folderChildCollapseStaggerMs = folderMotion.collapseStaggerMs
     val onFolderChildCollapseStaggerMs: (Float) -> Unit = { folderMotion.onCollapseStaggerMs(it) }
+    val folderChildOrderMode = folderMotion.orderMode
+    val onFolderChildOrderMode: (Int) -> Unit = { folderMotion.onOrderMode(it) }
     val folderChildStartScale = folderMotion.startScale
     val onFolderChildStartScale: (Float) -> Unit = { folderMotion.onStartScale(it) }
     val folderChildOvershoot = folderMotion.overshoot
@@ -487,7 +472,7 @@ fun ParamsPage(
                     title = "图标 / 文件夹布局与几何",
                     expanded = isOpen("folder_layout"),
                     onToggle = { toggle("folder_layout") },
-                    summary = "${folderLayoutNameOf(folderChildLayoutMode)} · 扩散 ${"%.2f".format(folderChildSpreadScale)}x · 子项 ${(folderChildSizeScale * 100).toInt()}%",
+                    summary = "固定圆环 · 显示范围 ${(folderChildDisplayRangeScale * 100).toInt()}% · 子项 ${(folderChildSizeScale * 100).toInt()}%",
                 )
             }
             if (isOpen("folder_layout")) item(key = "folder_layout_card") {
@@ -508,57 +493,14 @@ fun ParamsPage(
                         valueRange = -10f..20f,
                         onValueChange = onIconSpacingOffset,
                     )
-                    RadioButtonPreference(
-                        title = "智能布局",
-                        summary = "根据子项数量和屏幕边界自动选择单弧、双弧、圆环或蜂窝",
-                        selected = folderChildLayoutMode == HyperOpenConfig.FOLDER_CHILD_LAYOUT_AUTO,
-                        onClick = { onFolderChildLayoutMode(HyperOpenConfig.FOLDER_CHILD_LAYOUT_AUTO) },
-                    )
-                    RadioButtonPreference(
-                        title = "外向单弧",
-                        summary = "子项沿文件夹外侧单弧展开",
-                        selected = folderChildLayoutMode == HyperOpenConfig.FOLDER_CHILD_LAYOUT_OUTER_ARC,
-                        onClick = { onFolderChildLayoutMode(HyperOpenConfig.FOLDER_CHILD_LAYOUT_OUTER_ARC) },
-                    )
-                    RadioButtonPreference(
-                        title = "外向双弧",
-                        summary = "子项分布在内外两条弧线上，适合 5～10 项",
-                        selected = folderChildLayoutMode == HyperOpenConfig.FOLDER_CHILD_LAYOUT_DOUBLE_ARC,
-                        onClick = { onFolderChildLayoutMode(HyperOpenConfig.FOLDER_CHILD_LAYOUT_DOUBLE_ARC) },
-                    )
-                    RadioButtonPreference(
-                        title = "环绕圆环",
-                        summary = "子项围绕文件夹形成完整圆环",
-                        selected = folderChildLayoutMode == HyperOpenConfig.FOLDER_CHILD_LAYOUT_RING,
-                        onClick = { onFolderChildLayoutMode(HyperOpenConfig.FOLDER_CHILD_LAYOUT_RING) },
-                    )
-                    RadioButtonPreference(
-                        title = "蜂窝阵列",
-                        summary = "子项从文件夹周围逐环扩散，适合 9～15 项",
-                        selected = folderChildLayoutMode == HyperOpenConfig.FOLDER_CHILD_LAYOUT_HONEYCOMB,
-                        onClick = { onFolderChildLayoutMode(HyperOpenConfig.FOLDER_CHILD_LAYOUT_HONEYCOMB) },
-                    )
                     SliderPreference(
-                        title = "子项扩散半径",
-                        summary = "文件夹中心到第一层子项中心的距离倍率",
-                        valueText = "${"%.2f".format(folderChildSpreadScale)}x",
-                        value = folderChildSpreadScale,
-                        valueRange = 0.8f..2.5f,
-                        onValueChange = onFolderChildSpreadScale,
+                        title = "子项显示范围",
+                        summary = "缩放固定圆环的显示范围，不改变子项图标尺寸",
+                        valueText = "${(folderChildDisplayRangeScale * 100).toInt()}%",
+                        value = folderChildDisplayRangeScale * 100f,
+                        valueRange = 60f..180f,
+                        onValueChange = { onFolderChildDisplayRangeScale(it / 100f) },
                     )
-                    if (folderChildLayoutMode == HyperOpenConfig.FOLDER_CHILD_LAYOUT_OUTER_ARC ||
-                        folderChildLayoutMode == HyperOpenConfig.FOLDER_CHILD_LAYOUT_DOUBLE_ARC ||
-                        folderChildLayoutMode == HyperOpenConfig.FOLDER_CHILD_LAYOUT_AUTO
-                    ) {
-                        SliderPreference(
-                            title = "扇形张角",
-                            summary = "单弧或双弧围绕文件夹外侧展开的角度",
-                            valueText = "${folderChildArcSpanDeg.toInt()}°",
-                            value = folderChildArcSpanDeg,
-                            valueRange = 60f..300f,
-                            onValueChange = onFolderChildArcSpanDeg,
-                        )
-                    }
                     SliderPreference(
                         title = "子项最小间距",
                         valueText = "${folderChildMinGapDp.toInt()} dp",
@@ -576,52 +518,61 @@ fun ParamsPage(
                     )
                     SmallTitle(text = "展开方向")
                     RadioButtonPreference(
-                        title = "自动避边",
-                        summary = "根据屏幕边界自动旋转或切换布局",
-                        selected = folderChildDirectionMode == 0,
-                        onClick = { onFolderChildDirectionMode(0) },
+                        title = "智能避边",
+                        summary = "综合屏幕安全区、遮挡和间距自动选择最佳方向",
+                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_AUTO,
+                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_AUTO) },
                     )
                     RadioButtonPreference(
-                        title = "朝屏幕外侧",
-                        selected = folderChildDirectionMode == 1,
-                        onClick = { onFolderChildDirectionMode(1) },
+                        title = "背离指纹",
+                        summary = "沿指纹中心到文件夹的延长线展开",
+                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_OUTWARD,
+                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_OUTWARD) },
                     )
                     RadioButtonPreference(
-                        title = "朝指纹中心",
-                        selected = folderChildDirectionMode == 2,
-                        onClick = { onFolderChildDirectionMode(2) },
+                        title = "指向指纹",
+                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_INWARD,
+                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_INWARD) },
                     )
                     RadioButtonPreference(
-                        title = "朝屏幕上侧",
-                        selected = folderChildDirectionMode == 3,
-                        onClick = { onFolderChildDirectionMode(3) },
-                    )
-                    SmallTitle(text = "展开顺序")
-                    RadioButtonPreference(
-                        title = "几何顺序",
-                        selected = folderChildOrderMode == 0,
-                        onClick = { onFolderChildOrderMode(0) },
+                        title = "向上",
+                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_UP,
+                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_UP) },
                     )
                     RadioButtonPreference(
-                        title = "从左到右",
-                        selected = folderChildOrderMode == 1,
-                        onClick = { onFolderChildOrderMode(1) },
+                        title = "向下",
+                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_DOWN,
+                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_DOWN) },
                     )
                     RadioButtonPreference(
-                        title = "从右到左",
-                        selected = folderChildOrderMode == 2,
-                        onClick = { onFolderChildOrderMode(2) },
+                        title = "向左",
+                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_LEFT,
+                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_LEFT) },
                     )
                     RadioButtonPreference(
-                        title = "由内向外",
-                        selected = folderChildOrderMode == 3,
-                        onClick = { onFolderChildOrderMode(3) },
+                        title = "向右",
+                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_RIGHT,
+                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_RIGHT) },
                     )
                     RadioButtonPreference(
-                        title = "中心波浪",
-                        selected = folderChildOrderMode == 4,
-                        onClick = { onFolderChildOrderMode(4) },
+                        title = "自定义相对角度",
+                        summary = "以背离指纹方向为 0°，自由偏转子项展开方向",
+                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_CUSTOM,
+                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_CUSTOM) },
                     )
+                    if (folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_CUSTOM) {
+                        SliderPreference(
+                            title = "自定义方向偏移",
+                            valueText = if (folderChildDirectionOffsetDeg > 0f) {
+                                "+${folderChildDirectionOffsetDeg.toInt()}°"
+                            } else {
+                                "${folderChildDirectionOffsetDeg.toInt()}°"
+                            },
+                            value = folderChildDirectionOffsetDeg,
+                            valueRange = -180f..180f,
+                            onValueChange = onFolderChildDirectionOffsetDeg,
+                        )
+                    }
                 }
             }
 
@@ -885,21 +836,7 @@ fun ParamsPage(
                         checked = faceUnlockQuickOpen,
                         onCheckedChange = onFaceUnlockQuickOpen,
                     )
-                    if (layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
-                        SwitchPreference(
-                            title = "复用系统直线发射动画",
-                            summary = "展开类型选择“跟随布局”时使用系统原生 150ms 直线飞出动画",
-                            checked = stockSystemAnim,
-                            onCheckedChange = onStockSystemAnim,
-                        )
-                    }
                     SmallTitle(text = "面板展开")
-                    RadioButtonPreference(
-                        title = "跟随布局",
-                        summary = "系统经典布局使用原生直线，其余布局使用弹性绽放",
-                        selected = panelExpandAnimType == HyperOpenConfig.PANEL_EXPAND_FOLLOW_LAYOUT,
-                        onClick = { onPanelExpandAnimType(HyperOpenConfig.PANEL_EXPAND_FOLLOW_LAYOUT) },
-                    )
                     RadioButtonPreference(
                         title = "原生直线",
                         selected = panelExpandAnimType == HyperOpenConfig.PANEL_EXPAND_STOCK_LINE,
@@ -1072,6 +1009,32 @@ fun ParamsPage(
                         value = folderChildCollapseStaggerMs,
                         valueRange = 0f..100f,
                         onValueChange = onFolderChildCollapseStaggerMs,
+                    )
+                    SmallTitle(text = "展开顺序")
+                    RadioButtonPreference(
+                        title = "几何顺序",
+                        selected = folderChildOrderMode == 0,
+                        onClick = { onFolderChildOrderMode(0) },
+                    )
+                    RadioButtonPreference(
+                        title = "从左到右",
+                        selected = folderChildOrderMode == 1,
+                        onClick = { onFolderChildOrderMode(1) },
+                    )
+                    RadioButtonPreference(
+                        title = "从右到左",
+                        selected = folderChildOrderMode == 2,
+                        onClick = { onFolderChildOrderMode(2) },
+                    )
+                    RadioButtonPreference(
+                        title = "由内向外",
+                        selected = folderChildOrderMode == 3,
+                        onClick = { onFolderChildOrderMode(3) },
+                    )
+                    RadioButtonPreference(
+                        title = "中心波浪",
+                        selected = folderChildOrderMode == 4,
+                        onClick = { onFolderChildOrderMode(4) },
                     )
                     SmallTitle(text = "高级参数")
                     SliderPreference(

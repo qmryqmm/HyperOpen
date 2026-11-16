@@ -64,8 +64,7 @@ public class HyperOpenConfig {
     public static final int HAPTIC_STOCK_WAVE_FLICK = 2;
     public static final int HAPTIC_STOCK_WAVE_POP = 3;
 
-    /** 面板展开动画类型：跟随布局 / 原生直线 / 弹性绽放 / 淡入缩放 */
-    public static final int PANEL_EXPAND_FOLLOW_LAYOUT = 0;
+    /** 面板展开动画类型：原生直线 / 弹性绽放 / 淡入缩放 */
     public static final int PANEL_EXPAND_STOCK_LINE = 1;
     public static final int PANEL_EXPAND_BLOOM = 2;
     public static final int PANEL_EXPAND_FADE_SCALE = 3;
@@ -76,12 +75,15 @@ public class HyperOpenConfig {
     public static final int PANEL_COLLAPSE_SELECTED_POP = 2;
     public static final int PANEL_COLLAPSE_STOCK_LINE = 3;
 
-    /** 文件夹子项布局类型 */
-    public static final int FOLDER_CHILD_LAYOUT_AUTO = 0;
-    public static final int FOLDER_CHILD_LAYOUT_OUTER_ARC = 1;
-    public static final int FOLDER_CHILD_LAYOUT_DOUBLE_ARC = 2;
-    public static final int FOLDER_CHILD_LAYOUT_RING = 3;
-    public static final int FOLDER_CHILD_LAYOUT_HONEYCOMB = 4;
+    /** 文件夹子项展开方向 */
+    public static final int FOLDER_CHILD_DIRECTION_AUTO = 0;
+    public static final int FOLDER_CHILD_DIRECTION_OUTWARD = 1;
+    public static final int FOLDER_CHILD_DIRECTION_INWARD = 2;
+    public static final int FOLDER_CHILD_DIRECTION_UP = 3;
+    public static final int FOLDER_CHILD_DIRECTION_DOWN = 4;
+    public static final int FOLDER_CHILD_DIRECTION_LEFT = 5;
+    public static final int FOLDER_CHILD_DIRECTION_RIGHT = 6;
+    public static final int FOLDER_CHILD_DIRECTION_CUSTOM = 7;
 
     /** 文件夹子项展开动画类型 */
     public static final int FOLDER_CHILD_EXPAND_FAN_SPRING = 0;
@@ -93,6 +95,17 @@ public class HyperOpenConfig {
     public static final int FOLDER_CHILD_COLLAPSE_CENTER = 0;
     public static final int FOLDER_CHILD_COLLAPSE_FADE_SCALE = 1;
     public static final int FOLDER_CHILD_COLLAPSE_REVERSE_WAVE = 2;
+
+    /** 将旧版“跟随布局”转换成明确动画类型；旧数值 0 不再对外暴露。 */
+    public static int normalizePanelExpandAnimType(int storedType, int layoutStyle,
+                                                   boolean legacyStockSystemAnim) {
+        if (storedType >= PANEL_EXPAND_STOCK_LINE && storedType <= PANEL_EXPAND_FADE_SCALE) {
+            return storedType;
+        }
+        return layoutStyle == LAYOUT_SYSTEM_STOCK && legacyStockSystemAnim
+                ? PANEL_EXPAND_STOCK_LINE
+                : PANEL_EXPAND_BLOOM;
+    }
 
     public int materialStyle = MATERIAL_GAUSSIAN_BLUR;
     /** 设置界面风格（仅 App 内生效）：UI_STYLE_MATERIAL / UI_STYLE_MIUIX */
@@ -137,8 +150,6 @@ public class HyperOpenConfig {
     public static final int LAYOUT_SYSTEM_STOCK = 3;
     /** 图标布局样式 (LAYOUT_HONEYCOMB / LAYOUT_RING / LAYOUT_ARC / LAYOUT_SYSTEM_STOCK，默认蜂窝) */
     public int layoutStyle = LAYOUT_HONEYCOMB;
-    /** 系统经典布局：复用系统原生直线飞出展开动画（150ms 轨迹飞入） */
-    public boolean stockSystemAnim = true;
     /** 系统经典布局：复用系统原生精准扇区多边形选中算法（关闭则走欧氏距离） */
     public boolean stockSystemRegion = true;
     /**
@@ -162,7 +173,7 @@ public class HyperOpenConfig {
 
     /** 面板展开动画时长 (0 ~ 500 ms，默认 320 ms，0 为无动画瞬显) */
     public int animDurationMs = 320;
-    public int panelExpandAnimType = PANEL_EXPAND_FOLLOW_LAYOUT;
+    public int panelExpandAnimType = PANEL_EXPAND_BLOOM;
     public int panelExpandStaggerMs = 12;
     /** 松手时是否启用向心收拢/弹跳动效 */
     public boolean dismissAnimEnabled = true;
@@ -192,10 +203,9 @@ public class HyperOpenConfig {
 
     /** 文件夹二级气泡悬停展开延迟 (100 ~ 600 ms，默认 250 ms) */
     public int folderHoverDelayMs = 250;
-    public int folderChildLayoutMode = FOLDER_CHILD_LAYOUT_AUTO;
-    public float folderChildSpreadScale = 1.35f;
-    public int folderChildArcSpanDeg = 153;
+    public float folderChildDisplayRangeScale = 1f;
     public int folderChildDirectionMode = 0;
+    public float folderChildDirectionOffsetDeg = 0f;
     public int folderChildOrderMode = 0;
     public int folderChildMinGapDp = 8;
     public float folderChildSizeScale = 1f;
@@ -664,7 +674,6 @@ public class HyperOpenConfig {
                     config.iconSize = bundle.getInt("icon_size", 60);
                     config.maxIconCount = bundle.getInt("max_icon_count", 0);
                     config.layoutStyle = bundle.getInt("layout_style", LAYOUT_HONEYCOMB);
-                    config.stockSystemAnim = bundle.getBoolean("stock_system_anim", true);
                     config.ringSectorMode = bundle.getBoolean("ring_sector_mode", true);
                     config.sectorLineColor = bundle.getInt("sector_line_color", 0xFFBFBFBF);
                     config.sectorLineAlpha = bundle.getFloat("sector_line_alpha", 0.4f);
@@ -673,7 +682,11 @@ public class HyperOpenConfig {
                     config.sectorLineWidth = bundle.getFloat("sector_line_width", 1.2f);
                     config.sectorHighlightEnabled = bundle.getBoolean("sector_highlight_enabled", true);
                     config.animDurationMs = bundle.getInt("anim_duration_ms", 320);
-                    config.panelExpandAnimType = bundle.getInt("panel_expand_anim_type", PANEL_EXPAND_FOLLOW_LAYOUT);
+                    config.panelExpandAnimType = normalizePanelExpandAnimType(
+                            bundle.getInt("panel_expand_anim_type", PANEL_EXPAND_BLOOM),
+                            config.layoutStyle,
+                            bundle.getBoolean("stock_system_anim", true)
+                    );
                     config.panelExpandStaggerMs = bundle.getInt("panel_expand_stagger_ms", 12);
                     config.dismissAnimEnabled = bundle.getBoolean("dismiss_anim_enabled", true);
                     config.panelCollapseAnimType = bundle.getInt("panel_collapse_anim_type", PANEL_COLLAPSE_SELECTED_POP);
@@ -690,10 +703,9 @@ public class HyperOpenConfig {
                     config.defaultShowHintSubtitle = bundle.getBoolean("default_show_hint_subtitle", true);
                     config.folderHoverDelayMs = bundle.getInt("folder_hover_delay_ms", 250);
                     config.stockSystemRegion = bundle.getBoolean("stock_system_region", true);
-                    config.folderChildLayoutMode = bundle.getInt("folder_child_layout_mode", FOLDER_CHILD_LAYOUT_AUTO);
-                    config.folderChildSpreadScale = bundle.getFloat("folder_child_spread_scale", 1.35f);
-                    config.folderChildArcSpanDeg = bundle.getInt("folder_child_arc_span_deg", 153);
+                    config.folderChildDisplayRangeScale = bundle.getFloat("folder_child_display_range_scale", 1f);
                     config.folderChildDirectionMode = bundle.getInt("folder_child_direction_mode", 0);
+                    config.folderChildDirectionOffsetDeg = bundle.getFloat("folder_child_direction_offset_deg", 0f);
                     config.folderChildOrderMode = bundle.getInt("folder_child_order_mode", 0);
                     config.folderChildMinGapDp = bundle.getInt("folder_child_min_gap_dp", 8);
                     config.folderChildSizeScale = bundle.getFloat("folder_child_size_scale", 1f);
@@ -816,7 +828,6 @@ public class HyperOpenConfig {
         config.iconSize = xPrefs.getInt("icon_size", 60);
         config.maxIconCount = xPrefs.getInt("max_icon_count", 0);
         config.layoutStyle = xPrefs.getInt("layout_style", LAYOUT_HONEYCOMB);
-        config.stockSystemAnim = xPrefs.getBoolean("stock_system_anim", true);
         config.ringSectorMode = xPrefs.getBoolean("ring_sector_mode", true);
         config.sectorLineColor = xPrefs.getInt("sector_line_color", 0xFFBFBFBF);
         config.sectorLineAlpha = xPrefs.getFloat("sector_line_alpha", 0.4f);
@@ -825,7 +836,11 @@ public class HyperOpenConfig {
         config.sectorLineWidth = xPrefs.getFloat("sector_line_width", 1.2f);
         config.sectorHighlightEnabled = xPrefs.getBoolean("sector_highlight_enabled", true);
         config.animDurationMs = xPrefs.getInt("anim_duration_ms", 320);
-        config.panelExpandAnimType = xPrefs.getInt("panel_expand_anim_type", PANEL_EXPAND_FOLLOW_LAYOUT);
+        config.panelExpandAnimType = normalizePanelExpandAnimType(
+                xPrefs.getInt("panel_expand_anim_type", PANEL_EXPAND_BLOOM),
+                config.layoutStyle,
+                xPrefs.getBoolean("stock_system_anim", true)
+        );
         config.panelExpandStaggerMs = xPrefs.getInt("panel_expand_stagger_ms", 12);
         config.dismissAnimEnabled = xPrefs.getBoolean("dismiss_anim_enabled", true);
         config.panelCollapseAnimType = xPrefs.getInt("panel_collapse_anim_type", PANEL_COLLAPSE_SELECTED_POP);
@@ -842,10 +857,9 @@ public class HyperOpenConfig {
         config.defaultShowHintSubtitle = xPrefs.getBoolean("default_show_hint_subtitle", true);
         config.folderHoverDelayMs = xPrefs.getInt("folder_hover_delay_ms", 250);
         config.stockSystemRegion = xPrefs.getBoolean("stock_system_region", true);
-        config.folderChildLayoutMode = xPrefs.getInt("folder_child_layout_mode", FOLDER_CHILD_LAYOUT_AUTO);
-        config.folderChildSpreadScale = xPrefs.getFloat("folder_child_spread_scale", 1.35f);
-        config.folderChildArcSpanDeg = xPrefs.getInt("folder_child_arc_span_deg", 153);
+        config.folderChildDisplayRangeScale = xPrefs.getFloat("folder_child_display_range_scale", 1f);
         config.folderChildDirectionMode = xPrefs.getInt("folder_child_direction_mode", 0);
+        config.folderChildDirectionOffsetDeg = xPrefs.getFloat("folder_child_direction_offset_deg", 0f);
         config.folderChildOrderMode = xPrefs.getInt("folder_child_order_mode", 0);
         config.folderChildMinGapDp = xPrefs.getInt("folder_child_min_gap_dp", 8);
         config.folderChildSizeScale = xPrefs.getFloat("folder_child_size_scale", 1f);
@@ -959,7 +973,6 @@ public class HyperOpenConfig {
         config.iconSize = sp.getInt("icon_size", 60);
         config.maxIconCount = sp.getInt("max_icon_count", 0);
         config.layoutStyle = sp.getInt("layout_style", LAYOUT_HONEYCOMB);
-        config.stockSystemAnim = sp.getBoolean("stock_system_anim", true);
         config.ringSectorMode = sp.getBoolean("ring_sector_mode", true);
         config.sectorLineColor = sp.getInt("sector_line_color", 0xFFBFBFBF);
         config.sectorLineAlpha = sp.getFloat("sector_line_alpha", 0.4f);
@@ -968,7 +981,11 @@ public class HyperOpenConfig {
         config.sectorLineWidth = sp.getFloat("sector_line_width", 1.2f);
         config.sectorHighlightEnabled = sp.getBoolean("sector_highlight_enabled", true);
         config.animDurationMs = sp.getInt("anim_duration_ms", 320);
-        config.panelExpandAnimType = sp.getInt("panel_expand_anim_type", PANEL_EXPAND_FOLLOW_LAYOUT);
+        config.panelExpandAnimType = normalizePanelExpandAnimType(
+                sp.getInt("panel_expand_anim_type", PANEL_EXPAND_BLOOM),
+                config.layoutStyle,
+                sp.getBoolean("stock_system_anim", true)
+        );
         config.panelExpandStaggerMs = sp.getInt("panel_expand_stagger_ms", 12);
         config.dismissAnimEnabled = sp.getBoolean("dismiss_anim_enabled", true);
         config.panelCollapseAnimType = sp.getInt("panel_collapse_anim_type", PANEL_COLLAPSE_SELECTED_POP);
@@ -985,10 +1002,9 @@ public class HyperOpenConfig {
         config.defaultShowHintSubtitle = sp.getBoolean("default_show_hint_subtitle", true);
         config.folderHoverDelayMs = sp.getInt("folder_hover_delay_ms", 250);
         config.stockSystemRegion = sp.getBoolean("stock_system_region", true);
-        config.folderChildLayoutMode = sp.getInt("folder_child_layout_mode", FOLDER_CHILD_LAYOUT_AUTO);
-        config.folderChildSpreadScale = sp.getFloat("folder_child_spread_scale", 1.35f);
-        config.folderChildArcSpanDeg = sp.getInt("folder_child_arc_span_deg", 153);
+        config.folderChildDisplayRangeScale = sp.getFloat("folder_child_display_range_scale", 1f);
         config.folderChildDirectionMode = sp.getInt("folder_child_direction_mode", 0);
+        config.folderChildDirectionOffsetDeg = sp.getFloat("folder_child_direction_offset_deg", 0f);
         config.folderChildOrderMode = sp.getInt("folder_child_order_mode", 0);
         config.folderChildMinGapDp = sp.getInt("folder_child_min_gap_dp", 8);
         config.folderChildSizeScale = sp.getFloat("folder_child_size_scale", 1f);
@@ -1136,7 +1152,6 @@ public class HyperOpenConfig {
             .putInt("icon_size", iconSize)
             .putInt("max_icon_count", maxIconCount)
             .putInt("layout_style", layoutStyle)
-            .putBoolean("stock_system_anim", stockSystemAnim)
             .putBoolean("stock_system_region", stockSystemRegion)
             .putBoolean("ring_sector_mode", ringSectorMode)
             .putInt("sector_line_color", sectorLineColor)
@@ -1162,10 +1177,9 @@ public class HyperOpenConfig {
             .putBoolean("default_show_hint_title", defaultShowHintTitle)
             .putBoolean("default_show_hint_subtitle", defaultShowHintSubtitle)
             .putInt("folder_hover_delay_ms", folderHoverDelayMs)
-            .putInt("folder_child_layout_mode", folderChildLayoutMode)
-            .putFloat("folder_child_spread_scale", folderChildSpreadScale)
-            .putInt("folder_child_arc_span_deg", folderChildArcSpanDeg)
+            .putFloat("folder_child_display_range_scale", folderChildDisplayRangeScale)
             .putInt("folder_child_direction_mode", folderChildDirectionMode)
+            .putFloat("folder_child_direction_offset_deg", folderChildDirectionOffsetDeg)
             .putInt("folder_child_order_mode", folderChildOrderMode)
             .putInt("folder_child_min_gap_dp", folderChildMinGapDp)
             .putFloat("folder_child_size_scale", folderChildSizeScale)
@@ -1212,6 +1226,10 @@ public class HyperOpenConfig {
             // 旧版选中强调倍率已废弃：命中图标最终倍率统一为 max_scale 单值，写入时清掉遗留键
             .remove("selected_icon_scale")
             .remove("ring_count")
+            .remove("stock_system_anim")
+            .remove("folder_child_layout_mode")
+            .remove("folder_child_spread_scale")
+            .remove("folder_child_arc_span_deg")
             .putInt("app_icon_crop_mode", appIconCropMode)
             .putBoolean("glyph_pad_enabled", glyphPadEnabled)
             .putInt("glyph_pad_color", glyphPadColor)

@@ -11,8 +11,12 @@ import android.view.View;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Collections;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig;
 import io.github.qmryqmm.hyperopen.util.BubbleBlurSpec;
@@ -309,6 +313,8 @@ public class HyperOSMaterialFactory {
         private static volatile Field sLateSetPassBlurEnabledField;
         private static volatile Field sNeedPassWindowBlurField;
         private static volatile Field sRenderNodeField;
+        private static final Map<View, WeakReference<Object>> sBlurViewRoots =
+            Collections.synchronizedMap(new WeakHashMap<>());
         private static volatile boolean sInitialized = false;
         private static volatile boolean sSupported = false;
 
@@ -415,18 +421,40 @@ public class HyperOSMaterialFactory {
                     return false;
                 }
 
+                WeakReference<Object> previousRef = sBlurViewRoots.get(view);
+                Object previousViewRoot = previousRef != null ? previousRef.get() : null;
+                if (enabled
+                    && previousViewRoot == viewRoot
+                    && sNeedPassWindowBlurField.getBoolean(view)) {
+                    sSetMiBackgroundBlurModeMethod.invoke(view, 0);
+                    sSetMiBackgroundBlurModeMethod.invoke(view, 1);
+                    return true;
+                }
+
                 sLateSetPassBlurEnabledField.setBoolean(view, false);
                 sNeedPassWindowBlurField.setBoolean(view, enabled);
                 Object renderNode = sRenderNodeField.get(view);
                 if (renderNode != null) {
                     sRenderNodeSetPassWindowBlurEnabledMethod.invoke(renderNode, enabled);
                 }
+                if (previousViewRoot != null
+                    && previousViewRoot != viewRoot
+                    && sRemoveTextureViewMethod != null) {
+                    sRemoveTextureViewMethod.invoke(previousViewRoot, view);
+                }
                 if (viewRoot != null) {
                     if (enabled) {
+                        if (previousViewRoot == viewRoot && sRemoveTextureViewMethod != null) {
+                            sRemoveTextureViewMethod.invoke(viewRoot, view);
+                        }
                         sAddTextureViewMethod.invoke(viewRoot, view);
+                        sBlurViewRoots.put(view, new WeakReference<>(viewRoot));
                     } else if (sRemoveTextureViewMethod != null) {
                         sRemoveTextureViewMethod.invoke(viewRoot, view);
                     }
+                }
+                if (!enabled) {
+                    sBlurViewRoots.remove(view);
                 }
                 sSetMiBackgroundBlurModeMethod.invoke(view, 0);
                 if (enabled) {
@@ -491,6 +519,7 @@ public class HyperOSMaterialFactory {
         public static void clearGlass(@NonNull View view) {
             ensureInit();
             if (!sSupported) return;
+            forcePassWindowBlur(view, false);
             try {
                 sSetMiViewMaterialTypeMethod.invoke(view, 0);
                 sSetMiGlassMethod.invoke(view, (Object) new float[42]);
@@ -503,7 +532,6 @@ public class HyperOSMaterialFactory {
                 if (sSetMiBackgroundBlurRadiusMethod != null) {
                     sSetMiBackgroundBlurRadiusMethod.invoke(view, 0);
                 }
-                forcePassWindowBlur(view, false);
             } catch (Throwable ignored) {}
         }
     }

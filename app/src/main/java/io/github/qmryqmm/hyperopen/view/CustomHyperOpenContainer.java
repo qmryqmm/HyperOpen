@@ -640,6 +640,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 && activeItems.size() < RingSectorPacking.MAX_SECTOR_COUNT_EXCLUSIVE;
 
         // 更新底衬大小与位置：完全跟随「显示圆形区域底衬」开关（分隔虚线由全屏覆盖层独立绘制）
+        regionBackdrop.prepareForUse();
         regionBackdrop.setVisibility(config.showRegionBg ? View.VISIBLE : View.GONE);
         regionBackdrop.setStyle(resolvedStyle);
         regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION));
@@ -1162,22 +1163,23 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 (config != null ? config.folderChildSizeScale : 1f));
         int iconSizeInt = Math.max(1, (int) childIconSizePx);
         HyperOpenConfig cfg = config != null ? config : new HyperOpenConfig();
+        float[] safeBounds = folderSafeBounds();
         FolderChildPacking.Result pack = FolderChildPacking.calculate(
             count,
             folderBubble.targetX,
             folderBubble.targetY,
             fodCenterX,
             fodCenterY,
-            getWidth(),
-            getHeight(),
-            dpToPx(8),
+            safeBounds[0],
+            safeBounds[1],
+            safeBounds[2],
+            safeBounds[3],
             childIconSizePx,
             dpToPx(cfg.folderChildMinGapDp),
-            cfg.folderChildSpreadScale,
-            cfg.folderChildArcSpanDeg,
+            cfg.folderChildDisplayRangeScale,
             cfg.folderChildDirectionMode,
-            cfg.folderChildOrderMode,
-            cfg.folderChildLayoutMode
+            cfg.folderChildDirectionOffsetDeg,
+            cfg.folderChildOrderMode
         );
         List<CircularBubbleView> createdSubs = new ArrayList<>(count);
 
@@ -1336,6 +1338,30 @@ public class CustomHyperOpenContainer extends FrameLayout {
         return (int) TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP, dp, getResources().getDisplayMetrics()
         );
+    }
+
+    private float[] folderSafeBounds() {
+        float margin = dpToPx(8);
+        float left = margin;
+        float top = margin;
+        float right = getWidth() - margin;
+        float bottom = getHeight() - margin;
+        android.view.WindowInsets insets = getRootWindowInsets();
+        if (insets != null) {
+            android.graphics.Insets systemInsets = insets.getSystemWindowInsets();
+            left = Math.max(left, systemInsets.left);
+            top = Math.max(top, systemInsets.top);
+            right = Math.min(right, getWidth() - systemInsets.right);
+            bottom = Math.min(bottom, getHeight() - systemInsets.bottom);
+            android.view.DisplayCutout cutout = insets.getDisplayCutout();
+            if (cutout != null) {
+                left = Math.max(left, cutout.getSafeInsetLeft());
+                top = Math.max(top, cutout.getSafeInsetTop());
+                right = Math.min(right, getWidth() - cutout.getSafeInsetRight());
+                bottom = Math.min(bottom, getHeight() - cutout.getSafeInsetBottom());
+            }
+        }
+        return new float[]{left, top, right, bottom};
     }
 
     private float dpToPx(float dp) {

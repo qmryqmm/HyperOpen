@@ -1026,10 +1026,9 @@ class HyperOpenPreviewView(
             old.maxIconCount != newConfig.maxIconCount ||
             old.layoutStyle != newConfig.layoutStyle ||
             old.ringSectorMode != newConfig.ringSectorMode ||
-            old.folderChildLayoutMode != newConfig.folderChildLayoutMode ||
-            old.folderChildSpreadScale != newConfig.folderChildSpreadScale ||
-            old.folderChildArcSpanDeg != newConfig.folderChildArcSpanDeg ||
+            old.folderChildDisplayRangeScale != newConfig.folderChildDisplayRangeScale ||
             old.folderChildDirectionMode != newConfig.folderChildDirectionMode ||
+            old.folderChildDirectionOffsetDeg != newConfig.folderChildDirectionOffsetDeg ||
             old.folderChildOrderMode != newConfig.folderChildOrderMode ||
             old.folderChildMinGapDp != newConfig.folderChildMinGapDp ||
             old.folderChildSizeScale != newConfig.folderChildSizeScale ||
@@ -2232,22 +2231,23 @@ class HyperOpenPreviewView(
         val count = children.size
         val childIconSizePx = dpToPx(config.iconSize.toFloat() * config.folderChildSizeScale)
         val iconSizeInt = childIconSizePx.toInt().coerceAtLeast(1)
+        val safeBounds = folderSafeBounds()
         val pack = FolderChildPacking.calculate(
             count,
             folderBubble.targetX,
             folderBubble.targetY,
             lastFodX,
             lastFodY,
-            width.toFloat(),
-            height.toFloat(),
-            dpToPx(8f),
+            safeBounds[0],
+            safeBounds[1],
+            safeBounds[2],
+            safeBounds[3],
             childIconSizePx,
             dpToPx(config.folderChildMinGapDp.toFloat()),
-            config.folderChildSpreadScale,
-            config.folderChildArcSpanDeg.toFloat(),
+            config.folderChildDisplayRangeScale,
             config.folderChildDirectionMode,
-            config.folderChildOrderMode,
-            config.folderChildLayoutMode
+            config.folderChildDirectionOffsetDeg,
+            config.folderChildOrderMode
         )
         val createdSubs = ArrayList<CircularBubbleView>(count)
 
@@ -2403,6 +2403,31 @@ class HyperOpenPreviewView(
 
     private fun dpToPx(dp: Float): Float {
         return dp * context.resources.displayMetrics.density
+    }
+
+    private fun folderSafeBounds(): FloatArray {
+        val margin = dpToPx(8f)
+        var left = margin
+        var top = margin
+        var right = width - margin
+        var bottom = height - margin
+        val insets = rootWindowInsets
+        if (insets != null) {
+            @Suppress("DEPRECATION")
+            val systemInsets = insets.systemWindowInsets
+            left = maxOf(left, systemInsets.left.toFloat())
+            top = maxOf(top, systemInsets.top.toFloat())
+            right = minOf(right, width - systemInsets.right.toFloat())
+            bottom = minOf(bottom, height - systemInsets.bottom.toFloat())
+            val cutout = insets.displayCutout
+            if (cutout != null) {
+                left = maxOf(left, cutout.safeInsetLeft.toFloat())
+                top = maxOf(top, cutout.safeInsetTop.toFloat())
+                right = minOf(right, width - cutout.safeInsetRight.toFloat())
+                bottom = minOf(bottom, height - cutout.safeInsetBottom.toFloat())
+            }
+        }
+        return floatArrayOf(left, top, right, bottom)
     }
 
     /** 组件模糊 + 全屏模糊的高斯近似叠加，与 SystemUI 真机侧同源。 */

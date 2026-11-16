@@ -95,6 +95,10 @@ public class CircularRegionBackdropView extends FrameLayout {
 
     public void reset() {
         materialController.release();
+    }
+
+    /** 下一次面板展开前恢复材质生命周期；收起期间保持释放，避免隐藏窗口残留 blur region。 */
+    public void prepareForUse() {
         materialController.attach(this);
         refreshVisuals();
     }

@@ -23,6 +23,7 @@ public final class ViewMaterialController {
     private float dimAlpha;
     private boolean systemBlurEnabled = true;
     private boolean released;
+    private View.OnAttachStateChangeListener attachListener;
 
     public ViewMaterialController(
         int shape,
@@ -52,7 +53,7 @@ public final class ViewMaterialController {
         release();
         released = false;
         this.host = host;
-        host.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+        attachListener = new View.OnAttachStateChangeListener() {
             @Override
             public void onViewAttachedToWindow(@NonNull View view) {
                 view.post(() -> {
@@ -67,7 +68,8 @@ public final class ViewMaterialController {
                 clearLayers(view);
                 blurSession.release();
             }
-        });
+        };
+        host.addOnAttachStateChangeListener(attachListener);
         applyOutline(host);
         apply();
     }
@@ -136,7 +138,11 @@ public final class ViewMaterialController {
         released = true;
         if (host != null) {
             clearLayers(host);
+            if (attachListener != null) {
+                host.removeOnAttachStateChangeListener(attachListener);
+            }
         }
+        attachListener = null;
         blurSession.release();
         host = null;
     }

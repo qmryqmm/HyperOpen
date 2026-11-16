@@ -49,7 +49,10 @@ public final class BubblePanelAnimator {
                                   HyperOpenConfig config) {
         int duration = config != null ? Math.max(0, config.animDurationMs) : 320;
         int stagger = config != null ? Math.max(0, config.panelExpandStaggerMs) : 12;
-        int type = resolveExpandType(config);
+        int type = config != null
+                ? HyperOpenConfig.normalizePanelExpandAnimType(
+                        config.panelExpandAnimType, config.layoutStyle, false)
+                : HyperOpenConfig.PANEL_EXPAND_BLOOM;
 
         for (int i = 0; i < bubbles.size(); i++) {
             CircularBubbleView b = bubbles.get(i);
@@ -98,7 +101,6 @@ public final class BubblePanelAnimator {
                         .setInterpolator(new DecelerateInterpolator())
                         .setDuration(duration)
                         .setStartDelay(delay)
-                        .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
                         .withEndAction(() -> b.applyScale(1f))
                         .start();
             } else {
@@ -201,12 +203,4 @@ public final class BubblePanelAnimator {
         }
     }
 
-    private static int resolveExpandType(HyperOpenConfig config) {
-        if (config == null) return HyperOpenConfig.PANEL_EXPAND_BLOOM;
-        if (config.panelExpandAnimType != HyperOpenConfig.PANEL_EXPAND_FOLLOW_LAYOUT) {
-            return config.panelExpandAnimType;
-        }
-        boolean useStock = config.layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK && config.stockSystemAnim;
-        return useStock ? HyperOpenConfig.PANEL_EXPAND_STOCK_LINE : HyperOpenConfig.PANEL_EXPAND_BLOOM;
-    }
 }

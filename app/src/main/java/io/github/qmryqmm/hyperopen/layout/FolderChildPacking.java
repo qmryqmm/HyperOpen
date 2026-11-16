@@ -3,17 +3,21 @@ package io.github.qmryqmm.hyperopen.layout;
 import android.graphics.PointF;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
-/** 文件夹二级子项布局：与真机、应用预览共享同一套几何和动画顺序。 */
+/** 文件夹二级子项的固定圆环布局，真机与应用预览共享几何和动画顺序。 */
 public final class FolderChildPacking {
 
-    public static final int MODE_AUTO = 0;
-    public static final int MODE_OUTER_ARC = 1;
-    public static final int MODE_DOUBLE_ARC = 2;
-    public static final int MODE_RING = 3;
-    public static final int MODE_HONEYCOMB = 4;
+    public static final int DIRECTION_AUTO = 0;
+    public static final int DIRECTION_OUTWARD = 1;
+    public static final int DIRECTION_INWARD = 2;
+    public static final int DIRECTION_UP = 3;
+    public static final int DIRECTION_DOWN = 4;
+    public static final int DIRECTION_LEFT = 5;
+    public static final int DIRECTION_RIGHT = 6;
+    public static final int DIRECTION_CUSTOM = 7;
 
     public static final int ORDER_GEOMETRY = 0;
     public static final int ORDER_LEFT_TO_RIGHT = 1;
@@ -24,261 +28,328 @@ public final class FolderChildPacking {
     public static final class Result {
         public final List<PointF> points;
         public final List<Integer> animationOrder;
-        public final int usedMode;
-        public final float primaryRadius;
+        public final float radius;
+        public final float directionDeg;
 
-        Result(List<PointF> points, List<Integer> animationOrder, int usedMode, float primaryRadius) {
+        Result(List<PointF> points, List<Integer> animationOrder,
+               float radius, float directionDeg) {
             this.points = points;
             this.animationOrder = animationOrder;
-            this.usedMode = usedMode;
-            this.primaryRadius = primaryRadius;
+            this.radius = radius;
+            this.directionDeg = directionDeg;
+        }
+    }
+
+    private static final class ScoreContext {
+        final float folderX;
+        final float folderY;
+        final float fodX;
+        final float fodY;
+        final float minX;
+        final float maxX;
+        final float minY;
+        final float maxY;
+        final float iconSize;
+        final float spacing;
+
+        ScoreContext(float folderX, float folderY, float fodX, float fodY,
+                     float minX, float maxX, float minY, float maxY,
+                     float iconSize, float spacing) {
+            this.folderX = folderX;
+            this.folderY = folderY;
+            this.fodX = fodX;
+            this.fodY = fodY;
+            this.minX = minX;
+            this.maxX = maxX;
+            this.minY = minY;
+            this.maxY = maxY;
+            this.iconSize = iconSize;
+            this.spacing = spacing;
         }
     }
 
     private static final class Candidate {
-        final int mode;
-        final float radius;
         final List<PointF> points;
+        final float radius;
+        final float directionDeg;
         final double score;
 
-        Candidate(int mode, float radius, List<PointF> points, double score) {
-            this.mode = mode;
-            this.radius = radius;
+        Candidate(List<PointF> points, float radius, float directionDeg, double score) {
             this.points = points;
+            this.radius = radius;
+            this.directionDeg = directionDeg;
             this.score = score;
         }
     }
 
     private FolderChildPacking() {}
 
-    public static Result calculate(int count, float folderX, float folderY,
+    public static Result calculate(int count,
+                                   float folderX, float folderY,
                                    float fodX, float fodY,
-                                   float screenWidth, float screenHeight,
-                                   float safeMargin, float iconSize,
-                                   float minGap, float spreadScale,
-                                   float arcSpanDeg, int directionMode,
-                                   int orderMode, int requestedMode) {
+                                   float safeLeft, float safeTop,
+                                   float safeRight, float safeBottom,
+                                   float iconSize, float minGap,
+                                   float displayRangeScale,
+                                   int directionMode, float directionOffsetDeg,
+                                   int orderMode) {
         if (count <= 0) {
-            return new Result(new ArrayList<>(), new ArrayList<>(), MODE_OUTER_ARC, 0f);
+            return new Result(new ArrayList<>(), new ArrayList<>(), 0f, 0f);
         }
 
         float spacing = iconSize + Math.max(0f, minGap);
-        float baseAngle = resolveBaseAngle(folderX, folderY, fodX, fodY, directionMode);
-        float spreadRadius = Math.max(iconSize * 1.05f, iconSize * spreadScale);
-
-        List<Candidate> candidates = new ArrayList<>();
-        candidates.add(buildOuterArc(count, folderX, folderY, screenWidth, screenHeight,
-                safeMargin, iconSize, spacing, spreadRadius, arcSpanDeg, baseAngle));
-        candidates.add(buildDoubleArc(count, folderX, folderY, screenWidth, screenHeight,
-                safeMargin, iconSize, spacing, spreadRadius, arcSpanDeg, baseAngle));
-        candidates.add(buildRing(count, folderX, folderY, screenWidth, screenHeight,
-                safeMargin, iconSize, spacing, spreadRadius, baseAngle));
-        candidates.add(buildHoneycomb(count, folderX, folderY, screenWidth, screenHeight,
-                safeMargin, iconSize, spacing, spreadRadius, baseAngle));
-
-        Candidate selected;
-        if (requestedMode >= MODE_OUTER_ARC && requestedMode <= MODE_HONEYCOMB) {
-            selected = candidates.get(requestedMode - MODE_OUTER_ARC);
-        } else if (count <= 4) {
-            selected = candidates.get(0);
-        } else if (count <= 8) {
-            selected = candidates.get(1).score <= candidates.get(2).score
-                    ? candidates.get(1) : candidates.get(2);
-        } else {
-            selected = candidates.get(3);
+        float halfIconSize = iconSize / 2f;
+        float minX = safeLeft + halfIconSize;
+        float maxX = safeRight - halfIconSize;
+        float minY = safeTop + halfIconSize;
+        float maxY = safeBottom - halfIconSize;
+        if (maxX < minX) {
+            float centerX = (safeLeft + safeRight) / 2f;
+            minX = centerX;
+            maxX = centerX;
+        }
+        if (maxY < minY) {
+            float centerY = (safeTop + safeBottom) / 2f;
+            minY = centerY;
+            maxY = centerY;
         }
 
-        List<Integer> order = buildOrder(selected.points, folderX, folderY, baseAngle, orderMode);
-        return new Result(selected.points, order, selected.mode, selected.radius);
-    }
+        ScoreContext scoreContext = new ScoreContext(
+                folderX, folderY, fodX, fodY,
+                minX, maxX, minY, maxY,
+                iconSize, spacing
+        );
+        float outwardDeg = (float) Math.toDegrees(Math.atan2(folderY - fodY, folderX - fodX));
+        float preferredDeg = resolveDirectionDeg(
+                outwardDeg, directionMode, directionOffsetDeg
+        );
+        List<Float> candidateAngles = directionMode == DIRECTION_AUTO
+                ? buildAutoAngles()
+                : Collections.singletonList(preferredDeg);
+        float rangeScale = clamp(displayRangeScale, 0.5f, 2.5f);
+        float angleStepDeg = count == 1
+                ? 0f
+                : Math.min(36f, 300f / (count - 1));
+        float minimumRadius = count == 1
+                ? iconSize * 1.25f
+                : spacing / (2f * (float) Math.sin(Math.toRadians(angleStepDeg) / 2d));
+        float radius = Math.max(
+                iconSize * 1.35f * rangeScale,
+                minimumRadius
+        );
 
-    private static Candidate buildOuterArc(int count, float cx, float cy,
-                                           float width, float height, float margin,
-                                           float iconSize, float spacing,
-                                           float requestedRadius, float spanDeg,
-                                           float baseAngle) {
-        float radius = requestedRadius;
-        if (count > 1 && spanDeg > 1f) {
-            float step = (float) Math.toRadians(spanDeg / (count - 1));
-            radius = Math.max(radius, spacing / (2f * (float) Math.sin(step / 2f)));
-        }
-        List<PointF> best = null;
-        double bestScore = Double.MAX_VALUE;
-        for (int offsetDeg = -60; offsetDeg <= 60; offsetDeg += 5) {
-            List<PointF> points = arcPoints(count, cx, cy, radius, spanDeg,
-                    baseAngle + (float) Math.toRadians(offsetDeg));
-            double score = boundaryScore(points, cx, cy, width, height, margin, iconSize);
-            if (score < bestScore) {
-                bestScore = score;
-                best = points;
+        Candidate selected = null;
+        for (float directionDeg : candidateAngles) {
+            Candidate candidate = buildRing(
+                    count, folderX, folderY, radius, angleStepDeg,
+                    directionDeg, scoreContext
+            );
+            if (selected == null || candidate.score < selected.score) {
+                selected = candidate;
             }
         }
-        return new Candidate(MODE_OUTER_ARC, radius, best, bestScore);
-    }
 
-    private static Candidate buildDoubleArc(int count, float cx, float cy,
-                                            float width, float height, float margin,
-                                            float iconSize, float spacing,
-                                            float requestedRadius, float spanDeg,
-                                            float baseAngle) {
-        int innerCount = (count + 1) / 2;
-        int outerCount = count - innerCount;
-        float innerRadius = requestedRadius;
-        float outerRadius = requestedRadius * 1.55f;
-        if (innerCount > 1 && spanDeg > 1f) {
-            float step = (float) Math.toRadians(spanDeg / (innerCount - 1));
-            innerRadius = Math.max(innerRadius, spacing / (2f * (float) Math.sin(step / 2f)));
-        }
-        if (outerCount > 1 && spanDeg > 1f) {
-            float step = (float) Math.toRadians(spanDeg / (outerCount - 1));
-            outerRadius = Math.max(outerRadius, spacing / (2f * (float) Math.sin(step / 2f)));
-        }
-
-        List<PointF> best = null;
-        double bestScore = Double.MAX_VALUE;
-        for (int offsetDeg = -50; offsetDeg <= 50; offsetDeg += 5) {
-            float angle = baseAngle + (float) Math.toRadians(offsetDeg);
-            List<PointF> points = new ArrayList<>(count);
-            points.addAll(arcPoints(innerCount, cx, cy, innerRadius, spanDeg, angle));
-            if (outerCount > 0) {
-                points.addAll(arcPoints(outerCount, cx, cy, outerRadius, spanDeg, angle));
-            }
-            double score = boundaryScore(points, cx, cy, width, height, margin, iconSize);
-            if (score < bestScore) {
-                bestScore = score;
-                best = points;
-            }
-        }
-        return new Candidate(MODE_DOUBLE_ARC, innerRadius, best, bestScore);
-    }
-
-    private static Candidate buildRing(int count, float cx, float cy,
-                                       float width, float height, float margin,
-                                       float iconSize, float spacing,
-                                       float requestedRadius, float baseAngle) {
-        float minRadius = count == 1
-                ? requestedRadius
-                : spacing / (2f * (float) Math.sin(Math.PI / count));
-        float radius = Math.max(requestedRadius, minRadius);
-        List<PointF> best = null;
-        double bestScore = Double.MAX_VALUE;
-        for (int offsetDeg = -90; offsetDeg <= 90; offsetDeg += 5) {
-            float startAngle = baseAngle + (float) Math.toRadians(offsetDeg);
-            List<PointF> points = new ArrayList<>(count);
-            for (int i = 0; i < count; i++) {
-                double angle = startAngle + i * 2d * Math.PI / count;
-                points.add(pointAt(cx, cy, radius, angle));
-            }
-            double score = boundaryScore(points, cx, cy, width, height, margin, iconSize);
-            if (score < bestScore) {
-                bestScore = score;
-                best = points;
-            }
-        }
-        return new Candidate(MODE_RING, radius, best, bestScore);
-    }
-
-    private static Candidate buildHoneycomb(int count, float cx, float cy,
-                                            float width, float height, float margin,
-                                            float iconSize, float spacing,
-                                            float requestedRadius, float baseAngle) {
-        List<PointF> candidates = new ArrayList<>();
-        float ringSpacing = Math.max(requestedRadius * 0.72f, spacing * 0.92f);
-        candidates.add(pointAt(cx, cy, requestedRadius, baseAngle));
-        for (int ring = 1; candidates.size() < count && ring <= 5; ring++) {
-            float radius = requestedRadius + ringSpacing * ring;
-            int ringItemCount = Math.min(6 * ring, count - candidates.size());
-            float start = baseAngle + (ring % 2 == 0 ? (float) Math.PI / ringItemCount : 0f);
-            for (int i = 0; i < ringItemCount; i++) {
-                double angle = start + i * 2d * Math.PI / ringItemCount;
-                candidates.add(pointAt(cx, cy, radius, angle));
-            }
-        }
-        if (candidates.size() > count) candidates = new ArrayList<>(candidates.subList(0, count));
-        double score = boundaryScore(candidates, cx, cy, width, height, margin, iconSize);
-        return new Candidate(MODE_HONEYCOMB, requestedRadius, candidates, score);
-    }
-
-    private static List<PointF> arcPoints(int count, float cx, float cy,
-                                          float radius, float spanDeg, float centerAngle) {
-        List<PointF> points = new ArrayList<>(count);
-        if (count <= 0) return points;
-        double start = count == 1
-                ? centerAngle
-                : centerAngle - Math.toRadians(spanDeg) / 2d;
-        double step = count == 1 ? 0d : Math.toRadians(spanDeg) / (count - 1);
-        for (int i = 0; i < count; i++) {
-            points.add(pointAt(cx, cy, radius, start + i * step));
-        }
-        return points;
-    }
-
-    private static PointF pointAt(float cx, float cy, float radius, double angle) {
-        return new PointF(
-                cx + radius * (float) Math.cos(angle),
-                cy + radius * (float) Math.sin(angle)
+        List<PointF> fittedPoints = clampPointsToSafeBounds(selected.points, scoreContext);
+        List<Integer> order = buildOrder(
+                fittedPoints, folderX, folderY, selected.directionDeg, orderMode
+        );
+        return new Result(
+                fittedPoints, order, selected.radius,
+                normalizeDeg(selected.directionDeg)
         );
     }
 
-    private static float resolveBaseAngle(float folderX, float folderY,
-                                          float fodX, float fodY, int directionMode) {
-        float outward = (float) Math.atan2(folderY - fodY, folderX - fodX);
-        switch (directionMode) {
-            case 1:
-                return outward;
-            case 2:
-                return outward + (float) Math.PI;
-            case 3:
-                return (float) (-Math.PI / 2d);
-            default:
-                return outward;
+    private static Candidate buildRing(int count, float folderX, float folderY,
+                                       float radius, float angleStepDeg,
+                                       float directionDeg,
+                                       ScoreContext scoreContext) {
+        List<PointF> points = new ArrayList<>(count);
+        double centerIndex = (count - 1) / 2d;
+        double directionRad = Math.toRadians(directionDeg);
+        double stepRad = Math.toRadians(angleStepDeg);
+        for (int index = 0; index < count; index++) {
+            double angle = directionRad + (index - centerIndex) * stepRad;
+            points.add(pointAt(folderX, folderY, radius, angle));
         }
+        double score = boundaryScore(points, scoreContext)
+                + collisionScore(points, scoreContext)
+                + fodScore(points, scoreContext);
+        return new Candidate(points, radius, directionDeg, score);
     }
 
-    private static double boundaryScore(List<PointF> points, float folderX, float folderY,
-                                        float width, float height, float margin,
-                                        float iconSize) {
+    private static double boundaryScore(List<PointF> points, ScoreContext scoreContext) {
         double score = 0d;
-        float half = iconSize / 2f;
-        float minX = margin + half;
-        float maxX = width - margin - half;
-        float minY = margin + half;
-        float maxY = height - margin - half;
-        for (PointF p : points) {
-            if (p.x < minX) score += (minX - p.x) * (minX - p.x);
-            if (p.x > maxX) score += (p.x - maxX) * (p.x - maxX);
-            if (p.y < minY) score += (minY - p.y) * (minY - p.y);
-            if (p.y > maxY) score += (p.y - maxY) * (p.y - maxY);
-            float distanceFromFolder = (float) Math.hypot(p.x - folderX, p.y - folderY);
-            if (distanceFromFolder < iconSize * 1.02f) {
-                score += Math.pow(iconSize * 1.02f - distanceFromFolder, 2d) * 4d;
+        for (PointF point : points) {
+            if (point.x < scoreContext.minX) {
+                double overflow = scoreContext.minX - point.x;
+                score += overflow * overflow * 3d;
+            }
+            if (point.x > scoreContext.maxX) {
+                double overflow = point.x - scoreContext.maxX;
+                score += overflow * overflow * 3d;
+            }
+            if (point.y < scoreContext.minY) {
+                double overflow = scoreContext.minY - point.y;
+                score += overflow * overflow * 3d;
+            }
+            if (point.y > scoreContext.maxY) {
+                double overflow = point.y - scoreContext.maxY;
+                score += overflow * overflow * 3d;
             }
         }
         return score;
     }
 
-    private static List<Integer> buildOrder(List<PointF> points, float folderX, float folderY,
-                                            float baseAngle, int orderMode) {
+    private static double collisionScore(List<PointF> points, ScoreContext scoreContext) {
+        double score = 0d;
+        float folderClearance = scoreContext.iconSize * 1.04f;
+        float childClearance = scoreContext.spacing * 0.92f;
+        for (PointF point : points) {
+            float folderDistance = (float) Math.hypot(
+                    point.x - scoreContext.folderX, point.y - scoreContext.folderY
+            );
+            if (folderDistance < folderClearance) {
+                double overlap = folderClearance - folderDistance;
+                score += overlap * overlap * 5d;
+            }
+        }
+        for (int firstIndex = 0; firstIndex < points.size(); firstIndex++) {
+            PointF first = points.get(firstIndex);
+            for (int secondIndex = firstIndex + 1; secondIndex < points.size(); secondIndex++) {
+                PointF second = points.get(secondIndex);
+                float distance = (float) Math.hypot(first.x - second.x, first.y - second.y);
+                if (distance < childClearance) {
+                    double overlap = childClearance - distance;
+                    score += overlap * overlap * 2.5d;
+                }
+            }
+        }
+        return score;
+    }
+
+    private static double fodScore(List<PointF> points, ScoreContext scoreContext) {
+        double score = 0d;
+        float minimumDistance = scoreContext.iconSize * 1.05f;
+        for (PointF point : points) {
+            float distance = (float) Math.hypot(
+                    point.x - scoreContext.fodX, point.y - scoreContext.fodY
+            );
+            if (distance < minimumDistance) {
+                double overlap = minimumDistance - distance;
+                score += overlap * overlap * 0.45d;
+            }
+        }
+        return score;
+    }
+
+    private static List<PointF> clampPointsToSafeBounds(List<PointF> points,
+                                                        ScoreContext scoreContext) {
+        if (points.isEmpty()) {
+            return new ArrayList<>();
+        }
+        float minimumX = Float.MAX_VALUE;
+        float maximumX = -Float.MAX_VALUE;
+        float minimumY = Float.MAX_VALUE;
+        float maximumY = -Float.MAX_VALUE;
+        for (PointF point : points) {
+            minimumX = Math.min(minimumX, point.x);
+            maximumX = Math.max(maximumX, point.x);
+            minimumY = Math.min(minimumY, point.y);
+            maximumY = Math.max(maximumY, point.y);
+        }
+
+        float shiftX = 0f;
+        if (minimumX < scoreContext.minX && maximumX > scoreContext.maxX) {
+            shiftX = (scoreContext.minX + scoreContext.maxX - minimumX - maximumX) / 2f;
+        } else if (minimumX < scoreContext.minX) {
+            shiftX = scoreContext.minX - minimumX;
+        } else if (maximumX > scoreContext.maxX) {
+            shiftX = scoreContext.maxX - maximumX;
+        }
+
+        float shiftY = 0f;
+        if (minimumY < scoreContext.minY && maximumY > scoreContext.maxY) {
+            shiftY = (scoreContext.minY + scoreContext.maxY - minimumY - maximumY) / 2f;
+        } else if (minimumY < scoreContext.minY) {
+            shiftY = scoreContext.minY - minimumY;
+        } else if (maximumY > scoreContext.maxY) {
+            shiftY = scoreContext.maxY - maximumY;
+        }
+
+        List<PointF> fitted = new ArrayList<>(points.size());
+        for (PointF point : points) {
+            fitted.add(new PointF(point.x + shiftX, point.y + shiftY));
+        }
+        return fitted;
+    }
+
+    private static PointF pointAt(float folderX, float folderY,
+                                  float radius, double angle) {
+        return new PointF(
+                folderX + radius * (float) Math.cos(angle),
+                folderY + radius * (float) Math.sin(angle)
+        );
+    }
+
+    private static List<Float> buildAutoAngles() {
+        List<Float> angles = new ArrayList<>(72);
+        for (int index = 0; index < 72; index++) {
+            angles.add(index * 5f);
+        }
+        return angles;
+    }
+
+    private static float resolveDirectionDeg(float outwardDeg, int directionMode,
+                                             float directionOffsetDeg) {
+        switch (directionMode) {
+            case DIRECTION_INWARD:
+                return normalizeDeg(outwardDeg + 180f);
+            case DIRECTION_UP:
+                return -90f;
+            case DIRECTION_DOWN:
+                return 90f;
+            case DIRECTION_LEFT:
+                return 180f;
+            case DIRECTION_RIGHT:
+                return 0f;
+            case DIRECTION_CUSTOM:
+                return normalizeDeg(outwardDeg + directionOffsetDeg);
+            case DIRECTION_AUTO:
+            case DIRECTION_OUTWARD:
+            default:
+                return normalizeDeg(outwardDeg);
+        }
+    }
+
+    private static List<Integer> buildOrder(List<PointF> points,
+                                            float folderX, float folderY,
+                                            float directionDeg, int orderMode) {
         List<Integer> order = new ArrayList<>(points.size());
-        for (int i = 0; i < points.size(); i++) order.add(i);
+        for (int index = 0; index < points.size(); index++) {
+            order.add(index);
+        }
         switch (orderMode) {
             case ORDER_LEFT_TO_RIGHT:
-                order.sort(Comparator.comparingDouble(i -> points.get(i).x));
+                order.sort(Comparator.comparingDouble(index -> points.get(index).x));
                 break;
             case ORDER_RIGHT_TO_LEFT:
-                order.sort((a, b) -> Float.compare(points.get(b).x, points.get(a).x));
+                order.sort((first, second) -> Float.compare(
+                        points.get(second).x, points.get(first).x
+                ));
                 break;
             case ORDER_OUTWARD:
-                order.sort(Comparator.comparingDouble(i -> {
-                    PointF p = points.get(i);
-                    return Math.hypot(p.x - folderX, p.y - folderY);
+                order.sort(Comparator.comparingDouble(index -> {
+                    PointF point = points.get(index);
+                    return Math.hypot(point.x - folderX, point.y - folderY);
                 }));
                 break;
             case ORDER_CENTER_OUT:
-                order.sort(Comparator.comparingDouble(i -> {
-                    PointF p = points.get(i);
-                    double angle = Math.atan2(p.y - folderY, p.x - folderX) - baseAngle;
-                    return Math.abs(Math.atan2(Math.sin(angle), Math.cos(angle)));
+                order.sort(Comparator.comparingDouble(index -> {
+                    PointF point = points.get(index);
+                    double angle = Math.toDegrees(Math.atan2(
+                            point.y - folderY, point.x - folderX
+                    ));
+                    return Math.abs(angularDistanceDeg((float) angle, directionDeg));
                 }));
                 break;
             case ORDER_GEOMETRY:
@@ -286,5 +357,21 @@ public final class FolderChildPacking {
                 break;
         }
         return order;
+    }
+
+    private static double angularDistanceDeg(float firstDeg, float secondDeg) {
+        return Math.toDegrees(Math.abs(Math.atan2(
+                Math.sin(Math.toRadians(firstDeg - secondDeg)),
+                Math.cos(Math.toRadians(firstDeg - secondDeg))
+        )));
+    }
+
+    private static float normalizeDeg(float degrees) {
+        float normalized = degrees % 360f;
+        return normalized > 180f ? normalized - 360f : normalized;
+    }
+
+    private static float clamp(float value, float minimum, float maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
     }
 }

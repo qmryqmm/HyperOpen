@@ -222,7 +222,6 @@ fun HyperOpenApp(
     var predictiveBack by remember { mutableStateOf(initialConfig.predictiveBack) }
     var maxIconCount by remember { mutableStateOf(initialConfig.maxIconCount.toFloat()) }
     var layoutStyle by remember { mutableStateOf(initialConfig.layoutStyle) }
-    var stockSystemAnim by remember { mutableStateOf(initialConfig.stockSystemAnim) }
     var stockSystemRegion by remember { mutableStateOf(initialConfig.stockSystemRegion) }
     var ringSectorMode by remember { mutableStateOf(initialConfig.ringSectorMode) }
     var sectorLineColor by remember { mutableIntStateOf(initialConfig.sectorLineColor) }
@@ -248,10 +247,9 @@ fun HyperOpenApp(
     var defaultShowHintTitle by remember { mutableStateOf(initialConfig.defaultShowHintTitle) }
     var defaultShowHintSubtitle by remember { mutableStateOf(initialConfig.defaultShowHintSubtitle) }
     var folderHoverDelayMs by remember { mutableFloatStateOf(initialConfig.folderHoverDelayMs.toFloat()) }
-    var folderChildLayoutMode by remember { mutableIntStateOf(initialConfig.folderChildLayoutMode) }
-    var folderChildSpreadScale by remember { mutableFloatStateOf(initialConfig.folderChildSpreadScale) }
-    var folderChildArcSpanDeg by remember { mutableFloatStateOf(initialConfig.folderChildArcSpanDeg.toFloat()) }
+    var folderChildDisplayRangeScale by remember { mutableFloatStateOf(initialConfig.folderChildDisplayRangeScale) }
     var folderChildDirectionMode by remember { mutableIntStateOf(initialConfig.folderChildDirectionMode) }
+    var folderChildDirectionOffsetDeg by remember { mutableFloatStateOf(initialConfig.folderChildDirectionOffsetDeg) }
     var folderChildOrderMode by remember { mutableIntStateOf(initialConfig.folderChildOrderMode) }
     var folderChildMinGapDp by remember { mutableFloatStateOf(initialConfig.folderChildMinGapDp.toFloat()) }
     var folderChildSizeScale by remember { mutableFloatStateOf(initialConfig.folderChildSizeScale) }
@@ -437,7 +435,6 @@ fun HyperOpenApp(
         c.iconSize = iconSize.toInt()
         c.maxIconCount = maxIconCount.toInt()
         c.layoutStyle = layoutStyle
-        c.stockSystemAnim = stockSystemAnim
         c.stockSystemRegion = stockSystemRegion
         c.ringSectorMode = ringSectorMode
         c.sectorLineColor = sectorLineColor
@@ -463,10 +460,9 @@ fun HyperOpenApp(
         c.defaultShowHintTitle = defaultShowHintTitle
         c.defaultShowHintSubtitle = defaultShowHintSubtitle
         c.folderHoverDelayMs = folderHoverDelayMs.toInt()
-        c.folderChildLayoutMode = folderChildLayoutMode
-        c.folderChildSpreadScale = folderChildSpreadScale
-        c.folderChildArcSpanDeg = folderChildArcSpanDeg.toInt()
+        c.folderChildDisplayRangeScale = folderChildDisplayRangeScale
         c.folderChildDirectionMode = folderChildDirectionMode
+        c.folderChildDirectionOffsetDeg = folderChildDirectionOffsetDeg
         c.folderChildOrderMode = folderChildOrderMode
         c.folderChildMinGapDp = folderChildMinGapDp.toInt()
         c.folderChildSizeScale = folderChildSizeScale
@@ -568,7 +564,6 @@ fun HyperOpenApp(
         iconSize = defaults.iconSize.toFloat()
         maxIconCount = defaults.maxIconCount.toFloat()
         layoutStyle = defaults.layoutStyle
-        stockSystemAnim = defaults.stockSystemAnim
         stockSystemRegion = defaults.stockSystemRegion
         ringSectorMode = defaults.ringSectorMode
         sectorLineColor = defaults.sectorLineColor
@@ -594,10 +589,9 @@ fun HyperOpenApp(
         defaultShowHintTitle = defaults.defaultShowHintTitle
         defaultShowHintSubtitle = defaults.defaultShowHintSubtitle
         folderHoverDelayMs = defaults.folderHoverDelayMs.toFloat()
-        folderChildLayoutMode = defaults.folderChildLayoutMode
-        folderChildSpreadScale = defaults.folderChildSpreadScale
-        folderChildArcSpanDeg = defaults.folderChildArcSpanDeg.toFloat()
+        folderChildDisplayRangeScale = defaults.folderChildDisplayRangeScale
         folderChildDirectionMode = defaults.folderChildDirectionMode
+        folderChildDirectionOffsetDeg = defaults.folderChildDirectionOffsetDeg
         folderChildOrderMode = defaults.folderChildOrderMode
         folderChildMinGapDp = defaults.folderChildMinGapDp.toFloat()
         folderChildSizeScale = defaults.folderChildSizeScale
@@ -913,10 +907,9 @@ fun HyperOpenApp(
                             this.defaultShowHintTitle = defaultShowHintTitle
                             this.defaultShowHintSubtitle = defaultShowHintSubtitle
                             this.folderHoverDelayMs = folderHoverDelayMs.toInt()
-                            this.folderChildLayoutMode = folderChildLayoutMode
-                            this.folderChildSpreadScale = folderChildSpreadScale
-                            this.folderChildArcSpanDeg = folderChildArcSpanDeg.toInt()
+                            this.folderChildDisplayRangeScale = folderChildDisplayRangeScale
                             this.folderChildDirectionMode = folderChildDirectionMode
+                            this.folderChildDirectionOffsetDeg = folderChildDirectionOffsetDeg
                             this.folderChildOrderMode = folderChildOrderMode
                             this.folderChildMinGapDp = folderChildMinGapDp.toInt()
                             this.folderChildSizeScale = folderChildSizeScale
@@ -931,7 +924,6 @@ fun HyperOpenApp(
                             this.maxScale = maxScale
                             this.influenceRadius = influenceRadius.toInt()
                             this.layoutStyle = layoutStyle
-                            this.stockSystemAnim = stockSystemAnim
                             this.stockSystemRegion = stockSystemRegion
                             this.ringSectorMode = ringSectorMode
                             this.sectorLineColor = sectorLineColor
@@ -1156,16 +1148,12 @@ fun HyperOpenApp(
                                 onIconSize = { iconSize = it; clampIconCountToCapacity(); persist() },
                                 iconSpacingOffset = iconSpacingOffset,
                                 onIconSpacingOffset = { iconSpacingOffset = it; clampIconCountToCapacity(); persist() },
-                                layoutMode = folderChildLayoutMode,
-                                onLayoutMode = { folderChildLayoutMode = it; persist() },
-                                spreadScale = folderChildSpreadScale,
-                                onSpreadScale = { folderChildSpreadScale = it; persist() },
-                                arcSpanDeg = folderChildArcSpanDeg,
-                                onArcSpanDeg = { folderChildArcSpanDeg = it; persist() },
+                                displayRangeScale = folderChildDisplayRangeScale,
+                                onDisplayRangeScale = { folderChildDisplayRangeScale = it; persist() },
                                 directionMode = folderChildDirectionMode,
                                 onDirectionMode = { folderChildDirectionMode = it; persist() },
-                                orderMode = folderChildOrderMode,
-                                onOrderMode = { folderChildOrderMode = it; persist() },
+                                directionOffsetDeg = folderChildDirectionOffsetDeg,
+                                onDirectionOffsetDeg = { folderChildDirectionOffsetDeg = it; persist() },
                                 minGapDp = folderChildMinGapDp,
                                 onMinGapDp = { folderChildMinGapDp = it; persist() },
                                 sizeScale = folderChildSizeScale,
@@ -1186,6 +1174,8 @@ fun HyperOpenApp(
                                 onCollapseDurationMs = { folderChildCollapseDurationMs = it; persist() },
                                 collapseStaggerMs = folderChildCollapseStaggerMs,
                                 onCollapseStaggerMs = { folderChildCollapseStaggerMs = it; persist() },
+                                orderMode = folderChildOrderMode,
+                                onOrderMode = { folderChildOrderMode = it; persist() },
                                 startScale = folderChildStartScale,
                                 onStartScale = { folderChildStartScale = it; persist() },
                                 overshoot = folderChildOvershoot,
@@ -1252,8 +1242,6 @@ fun HyperOpenApp(
                                     enabledShortcutsCount = enabledShortcutsCount,
                                     layoutStyle = layoutStyle,
                                     onLayoutStyle = { layoutStyle = it; clampIconCountToCapacity(); persist() },
-                                    stockSystemAnim = stockSystemAnim,
-                                    onStockSystemAnim = { stockSystemAnim = it; persist() },
                                     stockSystemRegion = stockSystemRegion,
                                     onStockSystemRegion = { stockSystemRegion = it; persist() },
                                     ringSectorMode = ringSectorMode,

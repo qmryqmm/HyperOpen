@@ -61,9 +61,12 @@ public final class BlurRegionSession {
 
         Object currentVri = HyperOSBlurHelper.findViewRootImpl(host);
         Object boundVri = boundVriRef != null ? boundVriRef.get() : null;
+        if (blurDrawable != null && currentVri != null && currentVri != boundVri) {
+            release();
+        }
 
         // 仅当未创建或宿主 ViewRootImpl 发生变化时才重新创建（跨生命周期旧句柄失效自愈）
-        if (blurDrawable == null || (currentVri != null && currentVri != boundVri)) {
+        if (blurDrawable == null) {
             blurDrawable = HyperOSBlurHelper.createSystemBackdropBlurDrawable(host, cornerRadiusPx, blurRadiusPx, tintColor);
             boundVriRef = currentVri != null ? new WeakReference<>(currentVri) : null;
             lastCornerRadiusPx = cornerRadiusPx;
@@ -101,6 +104,8 @@ public final class BlurRegionSession {
         if (blurDrawable != null) {
             try {
                 HyperOSBlurHelper.updateBlurDrawable(blurDrawable, 0f, 0, 0);
+                blurDrawable.setBounds(0, 0, 0, 0);
+                blurDrawable.setCallback(null);
             } catch (Throwable ignored) {}
         }
         blurDrawable = null;
