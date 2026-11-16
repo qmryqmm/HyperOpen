@@ -63,8 +63,97 @@ private fun hapticModeNameOf(mode: Int): String = when (mode) {
     else -> "自定义时长"
 }
 
+private fun panelExpandAnimNameOf(type: Int): String = when (type) {
+    HyperOpenConfig.PANEL_EXPAND_STOCK_LINE -> "原生直线"
+    HyperOpenConfig.PANEL_EXPAND_BLOOM -> "弹性绽放"
+    HyperOpenConfig.PANEL_EXPAND_FADE_SCALE -> "淡入缩放"
+    else -> "自定义"
+}
+
+private fun panelCollapseAnimNameOf(type: Int): String = when (type) {
+    HyperOpenConfig.PANEL_COLLAPSE_CENTER -> "向心收拢"
+    HyperOpenConfig.PANEL_COLLAPSE_FADE_SCALE -> "淡出缩小"
+    HyperOpenConfig.PANEL_COLLAPSE_SELECTED_POP -> "选中回弹"
+    HyperOpenConfig.PANEL_COLLAPSE_STOCK_LINE -> "原生直线回收"
+    else -> "自定义"
+}
+
+private fun folderExpandAnimNameOf(type: Int): String = when (type) {
+    HyperOpenConfig.FOLDER_CHILD_EXPAND_FAN_SPRING -> "弹性扇形弹出"
+    HyperOpenConfig.FOLDER_CHILD_EXPAND_STOCK_LINE -> "原生直线飞出"
+    HyperOpenConfig.FOLDER_CHILD_EXPAND_FADE_SCALE -> "原地淡入放大"
+    HyperOpenConfig.FOLDER_CHILD_EXPAND_WAVE -> "波浪弹出"
+    else -> "自定义"
+}
+
+private fun folderCollapseAnimNameOf(type: Int): String = when (type) {
+    HyperOpenConfig.FOLDER_CHILD_COLLAPSE_CENTER -> "向中心收拢"
+    HyperOpenConfig.FOLDER_CHILD_COLLAPSE_FADE_SCALE -> "原地淡出缩小"
+    HyperOpenConfig.FOLDER_CHILD_COLLAPSE_REVERSE_WAVE -> "反向波浪收拢"
+    else -> "自定义"
+}
+
+data class PanelMotionSettings(
+    val animDurationMs: Float,
+    val onAnimDurationMs: (Float) -> Unit,
+    val expandAnimType: Int,
+    val onExpandAnimType: (Int) -> Unit,
+    val expandStaggerMs: Float,
+    val onExpandStaggerMs: (Float) -> Unit,
+    val dismissEnabled: Boolean,
+    val onDismissEnabled: (Boolean) -> Unit,
+    val collapseAnimType: Int,
+    val onCollapseAnimType: (Int) -> Unit,
+    val collapseDurationMs: Float,
+    val onCollapseDurationMs: (Float) -> Unit,
+    val collapseStaggerMs: Float,
+    val onCollapseStaggerMs: (Float) -> Unit,
+    val selectedPopScale: Float,
+    val onSelectedPopScale: (Float) -> Unit,
+)
+
+data class FolderLayoutSettings(
+    val iconSize: Float,
+    val onIconSize: (Float) -> Unit,
+    val iconSpacingOffset: Float,
+    val onIconSpacingOffset: (Float) -> Unit,
+    val displayRangeScale: Float,
+    val onDisplayRangeScale: (Float) -> Unit,
+    val directionMode: Int,
+    val onDirectionMode: (Int) -> Unit,
+    val directionOffsetDeg: Float,
+    val onDirectionOffsetDeg: (Float) -> Unit,
+    val minGapDp: Float,
+    val onMinGapDp: (Float) -> Unit,
+    val sizeScale: Float,
+    val onSizeScale: (Float) -> Unit,
+)
+
+data class FolderMotionSettings(
+    val hoverDelayMs: Float,
+    val onHoverDelayMs: (Float) -> Unit,
+    val expandAnimType: Int,
+    val onExpandAnimType: (Int) -> Unit,
+    val expandDurationMs: Float,
+    val onExpandDurationMs: (Float) -> Unit,
+    val expandStaggerMs: Float,
+    val onExpandStaggerMs: (Float) -> Unit,
+    val collapseAnimType: Int,
+    val onCollapseAnimType: (Int) -> Unit,
+    val collapseDurationMs: Float,
+    val onCollapseDurationMs: (Float) -> Unit,
+    val collapseStaggerMs: Float,
+    val onCollapseStaggerMs: (Float) -> Unit,
+    val orderMode: Int,
+    val onOrderMode: (Int) -> Unit,
+    val startScale: Float,
+    val onStartScale: (Float) -> Unit,
+    val overshoot: Float,
+    val onOvershoot: (Float) -> Unit,
+)
+
 /**
- * 参数配置页面（Tab 0），按 4 页 Tab 分页：布局 / 外观 / 图标 / 震动。
+ * 参数配置页面（Tab 0），按 5 页 Tab 分页：布局 / 动效 / 外观 / 图标 / 震动。
  * 集中管理指纹快捷方式的材质风格（液态玻璃 / 高斯模糊）、几何排布（蜂窝 / 空心圆环 / 扇区 / 系统扇形）、
  * 顶部胶囊提示位置字号、鱼眼缩放动力学曲线与线性马达触觉反馈。
  */
@@ -73,6 +162,9 @@ fun ParamsPage(
     contentPadding: PaddingValues,
     lazyListState: LazyListState,
     selectedTab: Int,
+    panelMotion: PanelMotionSettings,
+    folderLayout: FolderLayoutSettings,
+    folderMotion: FolderMotionSettings,
     materialStyle: Int, onMaterialStyle: (Int) -> Unit,
     onOpenSoftGlassPage: () -> Unit = {},
     offsetY: Float, onOffsetY: (Float) -> Unit,
@@ -85,13 +177,10 @@ fun ParamsPage(
     headerSubtitleSize: Float, onHeaderSubtitleSize: (Float) -> Unit,
     headerBlurRadius: Float, onHeaderBlurRadius: (Float) -> Unit,
     headerTextCentered: Boolean, onHeaderTextCentered: (Boolean) -> Unit,
-    iconSize: Float, onIconSize: (Float) -> Unit,
     maxIconCount: Float, onMaxIconCount: (Float) -> Unit,
     iconCapacity: Int, enabledShortcutsCount: Int,
     layoutStyle: Int, onLayoutStyle: (Int) -> Unit,
-    stockSystemAnim: Boolean, onStockSystemAnim: (Boolean) -> Unit,
     stockSystemRegion: Boolean, onStockSystemRegion: (Boolean) -> Unit,
-    ringCount: Float, onRingCount: (Float) -> Unit,
     ringSectorMode: Boolean, onRingSectorMode: (Boolean) -> Unit,
     sectorLineColor: Int, onSectorLineColor: (Int) -> Unit,
     sectorLineAlpha: Float, onSectorLineAlpha: (Float) -> Unit,
@@ -99,8 +188,6 @@ fun ParamsPage(
     sectorDashGap: Float, onSectorDashGap: (Float) -> Unit,
     sectorLineWidth: Float, onSectorLineWidth: (Float) -> Unit,
     sectorHighlightEnabled: Boolean, onSectorHighlightEnabled: (Boolean) -> Unit,
-    animDurationMs: Float, onAnimDurationMs: (Float) -> Unit,
-    dismissAnimEnabled: Boolean, onDismissAnimEnabled: (Boolean) -> Unit,
     globalHintColorMode: Int, onGlobalHintColorMode: (Int) -> Unit,
     globalHintCustomColor: Int, onGlobalHintCustomColor: (Int) -> Unit,
     defaultHintTextStroke: Float, onDefaultHintTextStroke: (Float) -> Unit,
@@ -109,7 +196,6 @@ fun ParamsPage(
     defaultHintTextLetterSpacing: Float, onDefaultHintTextLetterSpacing: (Float) -> Unit,
     defaultShowHintTitle: Boolean, onDefaultShowHintTitle: (Boolean) -> Unit,
     defaultShowHintSubtitle: Boolean, onDefaultShowHintSubtitle: (Boolean) -> Unit,
-    folderHoverDelayMs: Float, onFolderHoverDelayMs: (Float) -> Unit,
     maxScale: Float, onMaxScale: (Float) -> Unit,
     influenceRadius: Float, onInfluenceRadius: (Float) -> Unit,
     iconAlpha: Float, onIconAlpha: (Float) -> Unit,
@@ -139,7 +225,6 @@ fun ParamsPage(
     hapticSlideBrakePulse: Boolean, onHapticSlideBrakePulse: (Boolean) -> Unit,
     hapticSlideDoubleGapMs: Float, onHapticSlideDoubleGapMs: (Float) -> Unit,
     regionBlurRadius: Float, onRegionBlurRadius: (Float) -> Unit,
-    iconSpacingOffset: Float, onIconSpacingOffset: (Float) -> Unit,
     bubblePaddingPercent: Float, onBubblePaddingPercent: (Float) -> Unit,
     bubbleBlurRadius: Float, onBubbleBlurRadius: (Float) -> Unit,
     // ── 全局模糊材质 / 跟随全局开关 / per-component matteAlpha ──
@@ -153,6 +238,58 @@ fun ParamsPage(
 ) {
     val ctx = LocalContext.current
     val view = androidx.compose.ui.platform.LocalView.current
+    val animDurationMs = panelMotion.animDurationMs
+    val onAnimDurationMs: (Float) -> Unit = { panelMotion.onAnimDurationMs(it) }
+    val panelExpandAnimType = panelMotion.expandAnimType
+    val onPanelExpandAnimType: (Int) -> Unit = { panelMotion.onExpandAnimType(it) }
+    val panelExpandStaggerMs = panelMotion.expandStaggerMs
+    val onPanelExpandStaggerMs: (Float) -> Unit = { panelMotion.onExpandStaggerMs(it) }
+    val dismissAnimEnabled = panelMotion.dismissEnabled
+    val onDismissAnimEnabled: (Boolean) -> Unit = { panelMotion.onDismissEnabled(it) }
+    val panelCollapseAnimType = panelMotion.collapseAnimType
+    val onPanelCollapseAnimType: (Int) -> Unit = { panelMotion.onCollapseAnimType(it) }
+    val panelCollapseDurationMs = panelMotion.collapseDurationMs
+    val onPanelCollapseDurationMs: (Float) -> Unit = { panelMotion.onCollapseDurationMs(it) }
+    val panelCollapseStaggerMs = panelMotion.collapseStaggerMs
+    val onPanelCollapseStaggerMs: (Float) -> Unit = { panelMotion.onCollapseStaggerMs(it) }
+    val panelSelectedPopScale = panelMotion.selectedPopScale
+    val onPanelSelectedPopScale: (Float) -> Unit = { panelMotion.onSelectedPopScale(it) }
+
+    val iconSize = folderLayout.iconSize
+    val onIconSize: (Float) -> Unit = { folderLayout.onIconSize(it) }
+    val iconSpacingOffset = folderLayout.iconSpacingOffset
+    val onIconSpacingOffset: (Float) -> Unit = { folderLayout.onIconSpacingOffset(it) }
+    val folderChildDisplayRangeScale = folderLayout.displayRangeScale
+    val onFolderChildDisplayRangeScale: (Float) -> Unit = { folderLayout.onDisplayRangeScale(it) }
+    val folderChildDirectionMode = folderLayout.directionMode
+    val onFolderChildDirectionMode: (Int) -> Unit = { folderLayout.onDirectionMode(it) }
+    val folderChildDirectionOffsetDeg = folderLayout.directionOffsetDeg
+    val onFolderChildDirectionOffsetDeg: (Float) -> Unit = { folderLayout.onDirectionOffsetDeg(it) }
+    val folderChildMinGapDp = folderLayout.minGapDp
+    val onFolderChildMinGapDp: (Float) -> Unit = { folderLayout.onMinGapDp(it) }
+    val folderChildSizeScale = folderLayout.sizeScale
+    val onFolderChildSizeScale: (Float) -> Unit = { folderLayout.onSizeScale(it) }
+
+    val folderHoverDelayMs = folderMotion.hoverDelayMs
+    val onFolderHoverDelayMs: (Float) -> Unit = { folderMotion.onHoverDelayMs(it) }
+    val folderChildExpandAnimType = folderMotion.expandAnimType
+    val onFolderChildExpandAnimType: (Int) -> Unit = { folderMotion.onExpandAnimType(it) }
+    val folderChildExpandDurationMs = folderMotion.expandDurationMs
+    val onFolderChildExpandDurationMs: (Float) -> Unit = { folderMotion.onExpandDurationMs(it) }
+    val folderChildExpandStaggerMs = folderMotion.expandStaggerMs
+    val onFolderChildExpandStaggerMs: (Float) -> Unit = { folderMotion.onExpandStaggerMs(it) }
+    val folderChildCollapseAnimType = folderMotion.collapseAnimType
+    val onFolderChildCollapseAnimType: (Int) -> Unit = { folderMotion.onCollapseAnimType(it) }
+    val folderChildCollapseDurationMs = folderMotion.collapseDurationMs
+    val onFolderChildCollapseDurationMs: (Float) -> Unit = { folderMotion.onCollapseDurationMs(it) }
+    val folderChildCollapseStaggerMs = folderMotion.collapseStaggerMs
+    val onFolderChildCollapseStaggerMs: (Float) -> Unit = { folderMotion.onCollapseStaggerMs(it) }
+    val folderChildOrderMode = folderMotion.orderMode
+    val onFolderChildOrderMode: (Int) -> Unit = { folderMotion.onOrderMode(it) }
+    val folderChildStartScale = folderMotion.startScale
+    val onFolderChildStartScale: (Float) -> Unit = { folderMotion.onStartScale(it) }
+    val folderChildOvershoot = folderMotion.overshoot
+    val onFolderChildOvershoot: (Float) -> Unit = { folderMotion.onOvershoot(it) }
 
     // 各分区折叠状态（key → 是否已收起），通过 SharedPreferences 记忆持久化
     val uiPrefs = remember { ctx.getSharedPreferences("hyperopen_ui_state", android.content.Context.MODE_PRIVATE) }
@@ -161,7 +298,8 @@ fun ParamsPage(
             // 分区一览：默认只在「扇区分隔线样式」收起（精调项，一次调好后很少再动），
             // 其余保持展开，避免升级后用户找不到原来的开关
             listOf(
-                "layout", "sector", "material", "header_pill",
+                "layout", "folder_layout", "sector", "panel_motion", "folder_motion",
+                "material", "header_pill",
                 "icon", "bubble", "trigger", "haptic_expand", "haptic_slide",
             ).forEach { k ->
                 if (uiPrefs.getBoolean("section_collapsed_$k", k == "sector")) {
@@ -233,10 +371,10 @@ fun ParamsPage(
     ) {
         // ══ Tab 0：布局 ══
         if (selectedTab == 0) {
-            // ── 布局与几何 ──
+            // ── 面板布局与几何 ──
             item(key = "layout_title") {
                 CollapsibleSectionTitle(
-                    title = "布局与几何",
+                    title = "面板布局与几何",
                     expanded = isOpen("layout"),
                     onToggle = { toggle("layout") },
                     summary = "$layoutName · 图标 " +
@@ -257,8 +395,8 @@ fun ParamsPage(
                         onClick = { onLayoutStyle(HyperOpenConfig.LAYOUT_HONEYCOMB) },
                     )
                     RadioButtonPreference(
-                        title = "空心同心圆环布局",
-                        summary = "中心留空，图标排布在同心圆环上",
+                        title = "空心圆环布局",
+                        summary = "中心留空，所有图标沿单圈圆环均匀排布",
                         selected = layoutStyle == HyperOpenConfig.LAYOUT_RING,
                         onClick = { onLayoutStyle(HyperOpenConfig.LAYOUT_RING) },
                     )
@@ -289,12 +427,6 @@ fun ParamsPage(
                     )
                     if (layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
                         SwitchPreference(
-                            title = "复用系统直线发射动画",
-                            summary = "开启后使用系统 150ms 原生从指纹发射飞出动画；关闭则使用蜂窝弹性缩放动画",
-                            checked = stockSystemAnim,
-                            onCheckedChange = onStockSystemAnim,
-                        )
-                        SwitchPreference(
                             title = "复用系统几何扇区判定",
                             summary = "开启后使用系统原生 Path 差集多边形扇区判定当前选中项（无缝还原官方手感）",
                             checked = stockSystemRegion,
@@ -311,15 +443,6 @@ fun ParamsPage(
                             },
                             checked = ringSectorMode,
                             onCheckedChange = onRingSectorMode,
-                        )
-                        SliderPreference(
-                            title = "同心圆环圈数",
-                            summary = if (ringSectorMode && enabledShortcutsCount in 1..6)
-                                "扇区触发模式下图标固定排布在单圈圆周上，圈数暂不生效" else "中心留空，图标分布在 N 圈同心环上",
-                            valueText = "${ringCount.toInt()} 圈",
-                            value = ringCount,
-                            valueRange = 1f..4f,
-                            onValueChange = onRingCount,
                         )
                     }
                     SliderPreference(
@@ -338,6 +461,110 @@ fun ParamsPage(
                             value = regionDiameter,
                             valueRange = 150f..420f,
                             onValueChange = onRegionDiameter,
+                        )
+                    }
+                }
+            }
+
+            // ── 图标 / 文件夹布局与几何 ──
+            item(key = "folder_layout_title") {
+                CollapsibleSectionTitle(
+                    title = "图标 / 文件夹布局与几何",
+                    expanded = isOpen("folder_layout"),
+                    onToggle = { toggle("folder_layout") },
+                    summary = "固定圆环 · 显示范围 ${(folderChildDisplayRangeScale * 100).toInt()}% · 子项 ${(folderChildSizeScale * 100).toInt()}%",
+                )
+            }
+            if (isOpen("folder_layout")) item(key = "folder_layout_card") {
+                Card(
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .fillMaxWidth(),
+                ) {
+                    SliderPreference(
+                        title = "图标紧凑程度",
+                        summary = "面板布局与文件夹子项间距共用",
+                        valueText = when {
+                            iconSpacingOffset.toInt() < 0 -> "紧凑 (${iconSpacingOffset.toInt()} dp)"
+                            iconSpacingOffset.toInt() > 0 -> "松散 (+${iconSpacingOffset.toInt()} dp)"
+                            else -> "标准 (0 dp)"
+                        },
+                        value = iconSpacingOffset,
+                        valueRange = -10f..20f,
+                        onValueChange = onIconSpacingOffset,
+                    )
+                    SliderPreference(
+                        title = "子项显示范围",
+                        summary = "缩放固定圆环的显示范围，不改变子项图标尺寸",
+                        valueText = "${(folderChildDisplayRangeScale * 100).toInt()}%",
+                        value = folderChildDisplayRangeScale * 100f,
+                        valueRange = 60f..180f,
+                        onValueChange = { onFolderChildDisplayRangeScale(it / 100f) },
+                    )
+                    SliderPreference(
+                        title = "子项最小间距",
+                        valueText = "${folderChildMinGapDp.toInt()} dp",
+                        value = folderChildMinGapDp,
+                        valueRange = 0f..24f,
+                        onValueChange = onFolderChildMinGapDp,
+                    )
+                    SliderPreference(
+                        title = "子项尺寸比例",
+                        summary = "仅缩放文件夹二级子项，不影响一级图标",
+                        valueText = "${(folderChildSizeScale * 100).toInt()}%",
+                        value = folderChildSizeScale * 100f,
+                        valueRange = 70f..120f,
+                        onValueChange = { onFolderChildSizeScale(it / 100f) },
+                    )
+                    SmallTitle(text = "展开方向")
+                    RadioButtonPreference(
+                        title = "背离指纹",
+                        summary = "沿指纹中心到文件夹的延长线展开",
+                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_OUTWARD,
+                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_OUTWARD) },
+                    )
+                    RadioButtonPreference(
+                        title = "指向指纹",
+                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_INWARD,
+                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_INWARD) },
+                    )
+                    RadioButtonPreference(
+                        title = "向上",
+                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_UP,
+                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_UP) },
+                    )
+                    RadioButtonPreference(
+                        title = "向下",
+                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_DOWN,
+                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_DOWN) },
+                    )
+                    RadioButtonPreference(
+                        title = "向左",
+                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_LEFT,
+                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_LEFT) },
+                    )
+                    RadioButtonPreference(
+                        title = "向右",
+                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_RIGHT,
+                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_RIGHT) },
+                    )
+                    RadioButtonPreference(
+                        title = "自定义相对角度",
+                        summary = "以背离指纹方向为 0°，自由偏转子项展开方向",
+                        selected = folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_CUSTOM,
+                        onClick = { onFolderChildDirectionMode(HyperOpenConfig.FOLDER_CHILD_DIRECTION_CUSTOM) },
+                    )
+                    if (folderChildDirectionMode == HyperOpenConfig.FOLDER_CHILD_DIRECTION_CUSTOM) {
+                        SliderPreference(
+                            title = "自定义方向偏移",
+                            valueText = if (folderChildDirectionOffsetDeg > 0f) {
+                                "+${folderChildDirectionOffsetDeg.toInt()}°"
+                            } else {
+                                "${folderChildDirectionOffsetDeg.toInt()}°"
+                            },
+                            value = folderChildDirectionOffsetDeg,
+                            valueRange = -180f..180f,
+                            onValueChange = onFolderChildDirectionOffsetDeg,
                         )
                     }
                 }
@@ -556,21 +783,24 @@ fun ParamsPage(
                 }
             }
 
-            // ── 触发与进入 ──
-            item(key = "trigger_title") {
+        }
+
+        // ══ Tab 1：动效 ══
+        if (selectedTab == 1) {
+            // ── 面板动效 ──
+            item(key = "panel_motion_title") {
                 CollapsibleSectionTitle(
-                    title = "触发与进入",
-                    expanded = isOpen("trigger"),
-                    onToggle = { toggle("trigger") },
+                    title = "面板动效",
+                    expanded = isOpen("panel_motion"),
+                    onToggle = { toggle("panel_motion") },
                     summary = when {
                         showDelayMs.toInt() <= 0 -> "指纹解锁后立即弹出"
                         showDelayMs.toInt() == 500 -> "等待 500 ms（系统默认）"
                         else -> "等待 ${showDelayMs.toInt()} ms"
-                    } + (if (disableSystemEnterAnim) " · 已跳过系统进入动画" else "") +
-                        (if (faceUnlockQuickOpen) " · 人脸解锁可长按" else ""),
+                    } + " · ${panelExpandAnimNameOf(panelExpandAnimType)} · ${panelCollapseAnimNameOf(panelCollapseAnimType)}",
                 )
             }
-            if (isOpen("trigger")) item(key = "trigger_card") {
+            if (isOpen("panel_motion")) item(key = "panel_motion_card") {
                 Card(
                     modifier = Modifier
                         .padding(horizontal = 12.dp)
@@ -600,6 +830,22 @@ fun ParamsPage(
                         checked = faceUnlockQuickOpen,
                         onCheckedChange = onFaceUnlockQuickOpen,
                     )
+                    SmallTitle(text = "面板展开")
+                    RadioButtonPreference(
+                        title = "原生直线",
+                        selected = panelExpandAnimType == HyperOpenConfig.PANEL_EXPAND_STOCK_LINE,
+                        onClick = { onPanelExpandAnimType(HyperOpenConfig.PANEL_EXPAND_STOCK_LINE) },
+                    )
+                    RadioButtonPreference(
+                        title = "弹性绽放",
+                        selected = panelExpandAnimType == HyperOpenConfig.PANEL_EXPAND_BLOOM,
+                        onClick = { onPanelExpandAnimType(HyperOpenConfig.PANEL_EXPAND_BLOOM) },
+                    )
+                    RadioButtonPreference(
+                        title = "淡入缩放",
+                        selected = panelExpandAnimType == HyperOpenConfig.PANEL_EXPAND_FADE_SCALE,
+                        onClick = { onPanelExpandAnimType(HyperOpenConfig.PANEL_EXPAND_FADE_SCALE) },
+                    )
                     SliderPreference(
                         title = "面板展开动画时长",
                         summary = "快捷方式气泡展开的动画速度，0 ms 为无动画瞬显",
@@ -608,26 +854,203 @@ fun ParamsPage(
                         valueRange = 0f..500f,
                         onValueChange = onAnimDurationMs,
                     )
+                    SliderPreference(
+                        title = "面板展开错峰",
+                        summary = "相邻快捷方式依次弹出的延迟",
+                        valueText = "${panelExpandStaggerMs.toInt()} ms",
+                        value = panelExpandStaggerMs,
+                        valueRange = 0f..100f,
+                        onValueChange = onPanelExpandStaggerMs,
+                    )
+                    SmallTitle(text = "面板收起")
                     SwitchPreference(
-                        title = "松手向心收拢动效",
-                        summary = "松手触发或取消时，未选中气泡向圆心平滑收拢淡出，选中项微弹放大，避免生硬瞬消",
+                        title = "启用面板收起动画",
                         checked = dismissAnimEnabled,
                         onCheckedChange = onDismissAnimEnabled,
                     )
+                    if (dismissAnimEnabled) {
+                        RadioButtonPreference(
+                            title = "向心收拢",
+                            selected = panelCollapseAnimType == HyperOpenConfig.PANEL_COLLAPSE_CENTER,
+                            onClick = { onPanelCollapseAnimType(HyperOpenConfig.PANEL_COLLAPSE_CENTER) },
+                        )
+                        RadioButtonPreference(
+                            title = "淡出缩小",
+                            selected = panelCollapseAnimType == HyperOpenConfig.PANEL_COLLAPSE_FADE_SCALE,
+                            onClick = { onPanelCollapseAnimType(HyperOpenConfig.PANEL_COLLAPSE_FADE_SCALE) },
+                        )
+                        RadioButtonPreference(
+                            title = "选中回弹",
+                            selected = panelCollapseAnimType == HyperOpenConfig.PANEL_COLLAPSE_SELECTED_POP,
+                            onClick = { onPanelCollapseAnimType(HyperOpenConfig.PANEL_COLLAPSE_SELECTED_POP) },
+                        )
+                        RadioButtonPreference(
+                            title = "原生直线回收",
+                            selected = panelCollapseAnimType == HyperOpenConfig.PANEL_COLLAPSE_STOCK_LINE,
+                            onClick = { onPanelCollapseAnimType(HyperOpenConfig.PANEL_COLLAPSE_STOCK_LINE) },
+                        )
+                        SliderPreference(
+                            title = "面板收起动画时长",
+                            valueText = "${panelCollapseDurationMs.toInt()} ms",
+                            value = panelCollapseDurationMs,
+                            valueRange = 0f..400f,
+                            onValueChange = onPanelCollapseDurationMs,
+                        )
+                        SliderPreference(
+                            title = "面板收起错峰",
+                            valueText = "${panelCollapseStaggerMs.toInt()} ms",
+                            value = panelCollapseStaggerMs,
+                            valueRange = 0f..100f,
+                            onValueChange = onPanelCollapseStaggerMs,
+                        )
+                        if (panelCollapseAnimType == HyperOpenConfig.PANEL_COLLAPSE_SELECTED_POP) {
+                            SliderPreference(
+                                title = "选中项回弹倍率",
+                                valueText = "${"%.2f".format(panelSelectedPopScale)}x",
+                                value = panelSelectedPopScale,
+                                valueRange = 1.05f..1.60f,
+                                onValueChange = onPanelSelectedPopScale,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── 图标 / 文件夹动效 ──
+            item(key = "folder_motion_title") {
+                CollapsibleSectionTitle(
+                    title = "图标 / 文件夹动效",
+                    expanded = isOpen("folder_motion"),
+                    onToggle = { toggle("folder_motion") },
+                    summary = "${folderExpandAnimNameOf(folderChildExpandAnimType)} · ${folderChildExpandDurationMs.toInt()} ms · ${folderCollapseAnimNameOf(folderChildCollapseAnimType)}",
+                )
+            }
+            if (isOpen("folder_motion")) item(key = "folder_motion_card") {
+                Card(
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .fillMaxWidth(),
+                ) {
                     SliderPreference(
-                        title = "二级文件夹气泡悬停展开延迟",
-                        summary = "手指滑到文件夹气泡上悬停多久展开二级子菜单气泡",
+                        title = "文件夹悬停展开延迟",
+                        summary = "手指滑到文件夹气泡上悬停多久展开二级子菜单",
                         valueText = "${folderHoverDelayMs.toInt()} ms",
                         value = folderHoverDelayMs,
                         valueRange = 100f..600f,
                         onValueChange = onFolderHoverDelayMs,
                     )
+                    SmallTitle(text = "子项展开")
+                    RadioButtonPreference(
+                        title = "弹性扇形弹出",
+                        selected = folderChildExpandAnimType == HyperOpenConfig.FOLDER_CHILD_EXPAND_FAN_SPRING,
+                        onClick = { onFolderChildExpandAnimType(HyperOpenConfig.FOLDER_CHILD_EXPAND_FAN_SPRING) },
+                    )
+                    RadioButtonPreference(
+                        title = "原生直线飞出",
+                        selected = folderChildExpandAnimType == HyperOpenConfig.FOLDER_CHILD_EXPAND_STOCK_LINE,
+                        onClick = { onFolderChildExpandAnimType(HyperOpenConfig.FOLDER_CHILD_EXPAND_STOCK_LINE) },
+                    )
+                    RadioButtonPreference(
+                        title = "原地淡入放大",
+                        selected = folderChildExpandAnimType == HyperOpenConfig.FOLDER_CHILD_EXPAND_FADE_SCALE,
+                        onClick = { onFolderChildExpandAnimType(HyperOpenConfig.FOLDER_CHILD_EXPAND_FADE_SCALE) },
+                    )
+                    RadioButtonPreference(
+                        title = "波浪弹出",
+                        selected = folderChildExpandAnimType == HyperOpenConfig.FOLDER_CHILD_EXPAND_WAVE,
+                        onClick = { onFolderChildExpandAnimType(HyperOpenConfig.FOLDER_CHILD_EXPAND_WAVE) },
+                    )
+                    SliderPreference(
+                        title = "子项展开动画时长",
+                        valueText = "${folderChildExpandDurationMs.toInt()} ms",
+                        value = folderChildExpandDurationMs,
+                        valueRange = 0f..500f,
+                        onValueChange = onFolderChildExpandDurationMs,
+                    )
+                    SliderPreference(
+                        title = "子项展开错峰",
+                        valueText = "${folderChildExpandStaggerMs.toInt()} ms",
+                        value = folderChildExpandStaggerMs,
+                        valueRange = 0f..100f,
+                        onValueChange = onFolderChildExpandStaggerMs,
+                    )
+                    SmallTitle(text = "子项收起")
+                    RadioButtonPreference(
+                        title = "向中心收拢",
+                        selected = folderChildCollapseAnimType == HyperOpenConfig.FOLDER_CHILD_COLLAPSE_CENTER,
+                        onClick = { onFolderChildCollapseAnimType(HyperOpenConfig.FOLDER_CHILD_COLLAPSE_CENTER) },
+                    )
+                    RadioButtonPreference(
+                        title = "原地淡出缩小",
+                        selected = folderChildCollapseAnimType == HyperOpenConfig.FOLDER_CHILD_COLLAPSE_FADE_SCALE,
+                        onClick = { onFolderChildCollapseAnimType(HyperOpenConfig.FOLDER_CHILD_COLLAPSE_FADE_SCALE) },
+                    )
+                    RadioButtonPreference(
+                        title = "反向波浪收拢",
+                        selected = folderChildCollapseAnimType == HyperOpenConfig.FOLDER_CHILD_COLLAPSE_REVERSE_WAVE,
+                        onClick = { onFolderChildCollapseAnimType(HyperOpenConfig.FOLDER_CHILD_COLLAPSE_REVERSE_WAVE) },
+                    )
+                    SliderPreference(
+                        title = "子项收起动画时长",
+                        valueText = "${folderChildCollapseDurationMs.toInt()} ms",
+                        value = folderChildCollapseDurationMs,
+                        valueRange = 0f..400f,
+                        onValueChange = onFolderChildCollapseDurationMs,
+                    )
+                    SliderPreference(
+                        title = "子项收起错峰",
+                        valueText = "${folderChildCollapseStaggerMs.toInt()} ms",
+                        value = folderChildCollapseStaggerMs,
+                        valueRange = 0f..100f,
+                        onValueChange = onFolderChildCollapseStaggerMs,
+                    )
+                    SmallTitle(text = "展开顺序")
+                    RadioButtonPreference(
+                        title = "几何顺序",
+                        selected = folderChildOrderMode == 0,
+                        onClick = { onFolderChildOrderMode(0) },
+                    )
+                    RadioButtonPreference(
+                        title = "从左到右",
+                        selected = folderChildOrderMode == 1,
+                        onClick = { onFolderChildOrderMode(1) },
+                    )
+                    RadioButtonPreference(
+                        title = "从右到左",
+                        selected = folderChildOrderMode == 2,
+                        onClick = { onFolderChildOrderMode(2) },
+                    )
+                    RadioButtonPreference(
+                        title = "由内向外",
+                        selected = folderChildOrderMode == 3,
+                        onClick = { onFolderChildOrderMode(3) },
+                    )
+                    RadioButtonPreference(
+                        title = "中心波浪",
+                        selected = folderChildOrderMode == 4,
+                        onClick = { onFolderChildOrderMode(4) },
+                    )
+                    SmallTitle(text = "高级参数")
+                    SliderPreference(
+                        title = "子项起始缩放",
+                        valueText = "${(folderChildStartScale * 100).toInt()}%",
+                        value = folderChildStartScale * 100f,
+                        valueRange = 5f..80f,
+                        onValueChange = { onFolderChildStartScale(it / 100f) },
+                    )
+                    SliderPreference(
+                        title = "子项弹性强度",
+                        valueText = "${"%.2f".format(folderChildOvershoot)}",
+                        value = folderChildOvershoot,
+                        valueRange = 0f..2f,
+                        onValueChange = onFolderChildOvershoot,
+                    )
                 }
             }
         }
 
-        // ══ Tab 1：外观 ══
-        if (selectedTab == 1) {
+        // ══ Tab 2：外观 ══
+        if (selectedTab == 2) {
             // ── 材质与视觉 ──
             item(key = "material_title") {
                 CollapsibleSectionTitle(
@@ -640,6 +1063,9 @@ fun ParamsPage(
                 )
             }
             if (isOpen("material")) item(key = "material_card") {
+                val softGlassSupported = remember {
+                    io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory.isSoftGlassSupported()
+                }
                 Card(
                     modifier = Modifier
                         .padding(horizontal = 12.dp)
@@ -647,13 +1073,22 @@ fun ParamsPage(
                 ) {
                     ArrowPreference(
                         title = "柔光玻璃",
-                        summary = "Soft Light Glass · 系统级桌面与系统界面光学",
+                        summary = if (softGlassSupported) {
+                            "Soft Light Glass · 系统级桌面与系统界面光学"
+                        } else {
+                            "当前设备系统不支持原生柔光玻璃，已自动回退高斯模糊"
+                        },
+                        enabled = softGlassSupported,
                         endActions = {
-                            if (materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) {
+                            if (softGlassSupported && materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) {
                                 Text("✓", color = MiuixTheme.colorScheme.primary, fontSize = 16.sp)
                             }
                         },
-                        onClick = { onMaterialStyle(HyperOpenConfig.MATERIAL_SOFT_GLASS) },
+                        onClick = {
+                            if (softGlassSupported) {
+                                onMaterialStyle(HyperOpenConfig.MATERIAL_SOFT_GLASS)
+                            }
+                        },
                     )
                     ArrowPreference(
                         title = "高斯模糊",
@@ -914,8 +1349,8 @@ fun ParamsPage(
             }
         }
 
-        // ══ Tab 2：图标 ══
-        if (selectedTab == 2) {
+        // ══ Tab 3：图标 ══
+        if (selectedTab == 3) {
             // ── 图标与物理动力学 ──
             item(key = "icon_title") {
                 CollapsibleSectionTitle(
@@ -972,18 +1407,6 @@ fun ParamsPage(
                         value = fisheyeOtherAlpha * 100f,
                         valueRange = 0f..100f,
                         onValueChange = { onFisheyeOtherAlpha(it / 100f) },
-                    )
-                    SliderPreference(
-                        title = "图标紧凑程度",
-                        summary = "对蜂窝阵列、空心同心圆环与弧形扇面布局均生效",
-                        valueText = when {
-                            iconSpacingOffset.toInt() < 0 -> "紧凑 (${iconSpacingOffset.toInt()} dp)"
-                            iconSpacingOffset.toInt() > 0 -> "松散 (+${iconSpacingOffset.toInt()} dp)"
-                            else -> "标准 (0 dp)"
-                        },
-                        value = iconSpacingOffset,
-                        valueRange = -10f..20f,
-                        onValueChange = onIconSpacingOffset,
                     )
                     SliderPreference(
                         title = "鱼眼最大放大倍率",
@@ -1078,8 +1501,8 @@ fun ParamsPage(
             }
         }
 
-        // ══ Tab 3：震动 ══
-        if (selectedTab == 3) {
+        // ══ Tab 4：震动 ══
+        if (selectedTab == 4) {
             // ── 进入面板震动 ──
             item(key = "haptic_expand_title") {
                 CollapsibleSectionTitle(

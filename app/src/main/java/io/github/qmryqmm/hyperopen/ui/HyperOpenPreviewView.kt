@@ -20,6 +20,7 @@ import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
 import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory
 import io.github.qmryqmm.hyperopen.layout.ArcFanPacking
 import io.github.qmryqmm.hyperopen.layout.CircularHoneycombPacking
+import io.github.qmryqmm.hyperopen.layout.FolderChildPacking
 import io.github.qmryqmm.hyperopen.layout.HollowRingPacking
 import io.github.qmryqmm.hyperopen.layout.RingSectorPacking
 import io.github.qmryqmm.hyperopen.layout.StockFanPacking
@@ -27,12 +28,14 @@ import io.github.qmryqmm.hyperopen.model.ShortcutItem
 import io.github.qmryqmm.hyperopen.util.BubbleBlurSpec
 import io.github.qmryqmm.hyperopen.util.BubblePanelAnimator
 import io.github.qmryqmm.hyperopen.util.FisheyeScale
+import io.github.qmryqmm.hyperopen.util.FolderChildAnimator
 import io.github.qmryqmm.hyperopen.view.CircularBubbleView
 import io.github.qmryqmm.hyperopen.view.CircularRegionBackdropView
 import io.github.qmryqmm.hyperopen.view.SectorOverlayView
 import io.github.qmryqmm.hyperopen.view.CustomHyperOpenContainer
 import io.github.qmryqmm.hyperopen.view.HintTextStyler
 import io.github.qmryqmm.hyperopen.view.StrokeTextView
+import io.github.qmryqmm.hyperopen.view.ViewMaterialController
 
 /**
  * 整体指纹快捷面板高保真预览与长按拖拽交互视图。
@@ -51,6 +54,7 @@ class HyperOpenPreviewView(
     private val onPanelVisibleChanged: ((Boolean) -> Unit)? = null,
     /** 「始终显示面板」开关：true 时面板常驻，无需按住指纹按钮，可直接长按排版 / 滑动预览 */
     private var alwaysShowPanel: Boolean = false,
+    private val onHeaderTopMarginChanged: (Float) -> Unit = {},
 ) : FrameLayout(context) {
 
     private var resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(context, config.materialStyle)
@@ -63,6 +67,17 @@ class HyperOpenPreviewView(
     private lateinit var editBanner: TextView
     /** 顶部提示胶囊背景控制器（与真机 CustomHyperOpenContainer 同源：统一材质参数 + blur 生命周期） */
     private var headerPillBackdrop: io.github.qmryqmm.hyperopen.view.HeaderPillBackdrop? = null
+    private val previewMaterialControllers = java.util.WeakHashMap<View, ViewMaterialController>()
+    private val headerHeightLongPressRunnable = Runnable {
+        headerHeightDragging = true
+        editingHeaderHeight = true
+        enterEditMode()
+    }
+    private var headerHeightDragging = false
+    private var headerHeightGestureActive = false
+    private var editingHeaderHeight = false
+    private var headerDragStartRawY = 0f
+    private var headerDragStartTopMargin = 0f
 
     private lateinit var regionBackdrop: CircularRegionBackdropView
     /** 全屏扇区分隔虚线覆盖层（独立于圆形底衬，虚线可延伸到屏幕外） */
@@ -98,6 +113,21 @@ class HyperOpenPreviewView(
             showPanel(animated = true)
         }
     }
+    /**
+     * 面板入场动画门控：入场期间鱼眼缩放与入场缩放会互相覆盖，
+     * 因此动画期间只缓存手指最后坐标，动画结束后再补一次选中计算。
+     */
+    private var panelExpandAnimating: Boolean = false
+    private var pendingHoverX: Float = 0f
+    private var pendingHoverY: Float = 0f
+    private var hasPendingHover: Boolean = false
+    private val finishExpandGateRunnable = Runnable {
+        panelExpandAnimating = false
+        if (fingerprintHolding && panelVisible && hasPendingHover) {
+            hasPendingHover = false
+            handleFingerHover(pendingHoverX, pendingHoverY)
+        }
+    }
     /** 指纹按钮（位于 FOD 指纹中心，隐藏态时可见） */
     private var fingerprintButton: View? = null
     /** 退场动画期间的标记，避免重复触发 */
@@ -107,6 +137,8 @@ class HyperOpenPreviewView(
     private var pendingFolderBubble: CircularBubbleView? = null
     private var activeFolderBubble: CircularBubbleView? = null
     private val folderSubBubbles = mutableListOf<CircularBubbleView>()
+    /** 图标幻影层：气泡压盖时在玻璃内显示邻居磨砂虚影（除自身录制，与真机同源） */
+    private val ghostLayer = io.github.qmryqmm.hyperopen.view.IconGhostLayer(bubbleViews, folderSubBubbles, 1.5f)
     private var currentSelectedSubBubble: CircularBubbleView? = null
 
     private val folderHoverRunnable = Runnable {
@@ -146,6 +178,9 @@ class HyperOpenPreviewView(
         private set
     private var snapToggleButton: TextView? = null
     private var alwaysShowToggleButton: TextView? = null
+    /** 预览松手是否真正执行选中的快捷方式（默认关闭，避免调参时误启动） */
+    private var executeShortcutOnRelease: Boolean = false
+    private var executeToggleButton: TextView? = null
     private val freePlacedBubbles = mutableSetOf<CircularBubbleView>()
 
     // 会话布局快照：进入界面/保存后捕获，用于返回键退出时判断是否存在未保存的排版修改
@@ -157,6 +192,7 @@ class HyperOpenPreviewView(
     init {
         snapEnabled = loadSnapEnabled()
         alwaysShowPanel = loadAlwaysShowPanel()
+        executeShortcutOnRelease = loadExecuteShortcutOnRelease()
         initVibrator()
         initViews()
     }
@@ -194,6 +230,25 @@ class HyperOpenPreviewView(
             context.getSharedPreferences("hyperopen_ui_state", Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean("always_show_panel", alwaysShowPanel)
+                .apply()
+        } catch (_: Throwable) {}
+    }
+
+    /** 「松手执行」开关跨会话记忆：默认关闭，避免在预览调参时意外启动应用 */
+    private fun loadExecuteShortcutOnRelease(): Boolean {
+        return try {
+            context.getSharedPreferences("hyperopen_ui_state", Context.MODE_PRIVATE)
+                .getBoolean("execute_shortcut_on_release", false)
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun persistExecuteShortcutOnRelease() {
+        try {
+            context.getSharedPreferences("hyperopen_ui_state", Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("execute_shortcut_on_release", executeShortcutOnRelease)
                 .apply()
         } catch (_: Throwable) {}
     }
@@ -255,8 +310,12 @@ class HyperOpenPreviewView(
         // 4.2 右上角「面板常驻」开关（吸附开关正下方，常显）
         buildAlwaysShowToggleButton()
 
-        // 4.3 指纹按钮：位于 FOD 指纹中心，按住 showDelayMs 后展开面板，松手播放退场动画
+        // 4.3 右上角「松手执行」开关（面板常驻开关正下方，常显）
+        buildExecuteToggleButton()
+
+        // 4.4 指纹按钮：位于 FOD 指纹中心，按住 showDelayMs 后展开面板，松手播放退场动画
         buildFingerprintButton()
+        refreshFloatingBackButtonBackground()
 
         // 5. 在首次测量前提前建立蜂窝气泡视图树
         setupLayout()
@@ -271,9 +330,6 @@ class HyperOpenPreviewView(
     private fun buildFloatingBackButton() {
         val btnSize = dpToPx(40f).toInt()
         val backBtn = FrameLayout(context).apply {
-            background = HyperOSMaterialFactory.createCircularBubbleDrawable(
-                resolvedStyle, 0xFFFFFFFF.toInt(), false, config.glassParamsFor(HyperOpenConfig.COMPONENT_BUBBLE)
-            )
             isClickable = true
             isFocusable = true
             setOnClickListener {
@@ -309,6 +365,9 @@ class HyperOpenPreviewView(
     private fun alwaysShowToggleText(): String =
         if (alwaysShowPanel) "面板常驻：开" else "面板常驻：关"
 
+    private fun executeToggleText(): String =
+        if (executeShortcutOnRelease) "松手执行：开" else "松手执行：关"
+
     private fun buildSnapToggleButton() {
         val btn = TextView(context).apply {
             text = snapToggleText()
@@ -318,11 +377,6 @@ class HyperOpenPreviewView(
             gravity = Gravity.CENTER
             val padH = dpToPx(14f).toInt()
             setPadding(padH, 0, padH, 0)
-            background = HyperOSMaterialFactory.createHeaderPillDrawable(
-                resolvedStyle,
-                config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_HEADER),
-                config.glassParamsFor(HyperOpenConfig.COMPONENT_HEADER)
-            )
             outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: android.graphics.Outline) {
                     if (view.width <= 0 || view.height <= 0) return
@@ -373,11 +427,6 @@ class HyperOpenPreviewView(
             gravity = Gravity.CENTER
             val padH = dpToPx(14f).toInt()
             setPadding(padH, 0, padH, 0)
-            background = HyperOSMaterialFactory.createHeaderPillDrawable(
-                resolvedStyle,
-                config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_HEADER),
-                config.glassParamsFor(HyperOpenConfig.COMPONENT_HEADER)
-            )
             outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: android.graphics.Outline) {
                     if (view.width <= 0 || view.height <= 0) return
@@ -404,6 +453,55 @@ class HyperOpenPreviewView(
     }
 
     /**
+     * 「松手执行」开关：默认关闭，只在预览页滑到图标松手时进行选中/退场反馈；
+     * 开启后松手会真正执行选中的快捷方式，与真机指纹面板行为一致。
+     */
+    private fun buildExecuteToggleButton() {
+        val btn = TextView(context).apply {
+            text = executeToggleText()
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextColor(Color.WHITE)
+            paint.isFakeBoldText = true
+            gravity = Gravity.CENTER
+            val padH = dpToPx(14f).toInt()
+            setPadding(padH, 0, padH, 0)
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) {
+                    if (view.width <= 0 || view.height <= 0) return
+                    outline.setRoundRect(0, 0, view.width, view.height, Math.min(view.width, view.height) / 2f)
+                    outline.alpha = 0f
+                }
+            }
+            clipToOutline = true
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                executeShortcutOnRelease = !executeShortcutOnRelease
+                persistExecuteShortcutOnRelease()
+                text = executeToggleText()
+                triggerHaptic()
+                android.widget.Toast.makeText(
+                    context,
+                    if (executeShortcutOnRelease) {
+                        "松手执行已开启：滑动选中后松手将直接启动应用"
+                    } else {
+                        "松手执行已关闭：只预览选中效果，不启动应用"
+                    },
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+        // 位于「面板常驻」开关正下方（面板常驻 94dp 顶距 + 40dp 高 + 8dp 间距）
+        val lp = LayoutParams(LayoutParams.WRAP_CONTENT, dpToPx(40f).toInt()).apply {
+            gravity = Gravity.TOP or Gravity.END
+            rightMargin = dpToPx(18f).toInt()
+            topMargin = dpToPx(142f).toInt()
+        }
+        addView(btn, lp)
+        executeToggleButton = btn
+    }
+
+    /**
      * 指纹传感器按钮：面板隐藏态时显示在 FOD 指纹中心。
      * - 按下：启动 showDelayMs 等待（与真实「解锁后按住传感器多久进入面板」同源）；
      * - 等待结束：播放与真实 SystemUI 完全同源的入场展开动画；
@@ -413,9 +511,6 @@ class HyperOpenPreviewView(
     private fun buildFingerprintButton() {
         val size = dpToPx(72f).toInt()
         val btn = FrameLayout(context).apply {
-            background = HyperOSMaterialFactory.createCircularBubbleDrawable(
-                resolvedStyle, 0xFFFFFFFF.toInt(), false, config.glassParamsFor(HyperOpenConfig.COMPONENT_BUBBLE)
-            )
             isClickable = true
             isFocusable = true
             alpha = 0.92f
@@ -436,34 +531,6 @@ class HyperOpenPreviewView(
         }
         addView(btn, lp)
         fingerprintButton = btn
-
-        btn.setOnTouchListener { _, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    if (!alwaysShowPanel && !isEditMode) {
-                        fingerprintHolding = true
-                        removeCallbacks(expandRunnable)
-                        // showDelayMs == 500 为系统默认：真实侧该值不干预原生 500ms 延迟，
-                        // 预览侧直接用配置值（0 = 立即），保证「能感觉」的等待时长对齐
-                        val delay = Math.max(0, config.showDelayMs).toLong()
-                        postDelayed(expandRunnable, delay)
-                        triggerHaptic()
-                    }
-                    true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (fingerprintHolding) {
-                        fingerprintHolding = false
-                        removeCallbacks(expandRunnable)
-                        if (panelVisible && !alwaysShowPanel) {
-                            hidePanel(animated = true)
-                        }
-                    }
-                    true
-                }
-                else -> true
-            }
-        }
     }
 
     /** 首次测量 / FOD 坐标变化时把指纹按钮摆到与真实一致的指纹中心。 */
@@ -508,8 +575,15 @@ class HyperOpenPreviewView(
         panelVisible = true
         updateFingerprintButtonState()
         setPanelChromeVisible(true)
+        removeCallbacks(finishExpandGateRunnable)
         if (animated) {
+            val expandMs = Math.max(0, config.animDurationMs)
+            panelExpandAnimating = expandMs > 0
+            hasPendingHover = false
             BubblePanelAnimator.playExpand(bubbleViews, lastFodX, lastFodY, config)
+            if (panelExpandAnimating) {
+                postDelayed(finishExpandGateRunnable, expandMs.toLong() + 100L)
+            }
             // 动画期间逐帧同步模糊斑点（缩放/位移/透明度）
             val dur = Math.max(0, config.animDurationMs).toLong() + 120L
             post(object : Runnable {
@@ -523,13 +597,18 @@ class HyperOpenPreviewView(
                 }
             })
         } else {
+            panelExpandAnimating = false
+            hasPendingHover = false
             BubblePanelAnimator.applyShownState(bubbleViews)
         }
     }
 
     /** 收起面板：播放与真实同源的退场动画，播完回到隐藏态并重新显示指纹按钮。 */
-    private fun hidePanel(animated: Boolean) {
+    private fun hidePanel(animated: Boolean, onDismissFinished: (() -> Unit)? = null) {
         if (isDismissing) return
+        removeCallbacks(finishExpandGateRunnable)
+        panelExpandAnimating = false
+        hasPendingHover = false
         // 排版模式下先退出，避免退场动画与拖拽状态冲突
         if (isEditMode) exitEditMode()
         resetHoverSelection()
@@ -544,6 +623,7 @@ class HyperOpenPreviewView(
                 updateFingerprintButtonState()
                 setPanelChromeVisible(false)
                 BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
+                onDismissFinished?.invoke()
             }
             val dur = 200L
             post(object : Runnable {
@@ -561,6 +641,7 @@ class HyperOpenPreviewView(
             updateFingerprintButtonState()
             setPanelChromeVisible(false)
             BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
+            onDismissFinished?.invoke()
         }
     }
 
@@ -592,7 +673,11 @@ class HyperOpenPreviewView(
         persistAlwaysShowPanel()
         if (!changed && panelVisible == enabled) return
         removeCallbacks(expandRunnable)
+        removeCallbacks(finishExpandGateRunnable)
         fingerprintHolding = false
+        panelExpandAnimating = false
+        hasPendingHover = false
+        isTouching = false
         if (enabled) {
             // 常驻：直接显示终态，可继续长按排版 / 滑动预览
             showPanel(animated = false)
@@ -654,31 +739,35 @@ class HyperOpenPreviewView(
      * 与图标气泡同一套 GlassParams 光学参数，材质热更新后即时跟随。
      */
     private fun refreshFloatingBackButtonBackground() {
-        val bubbleParams = config.glassParamsFor(HyperOpenConfig.COMPONENT_BUBBLE)
-        val pillParams = config.glassParamsFor(HyperOpenConfig.COMPONENT_HEADER)
-        val pillDim = config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_HEADER)
         floatingBackButton?.let { btn ->
-            btn.background = HyperOSMaterialFactory.createCircularBubbleDrawable(
-                resolvedStyle, 0xFFFFFFFF.toInt(), false, bubbleParams
-            )
-            btn.invalidate()
+            applyPreviewMaterial(btn, HyperOSMaterialFactory.SHAPE_CIRCLE, HyperOpenConfig.COMPONENT_BUBBLE)
         }
         fingerprintButton?.let { btn ->
             (btn as? android.widget.FrameLayout)?.let { fb ->
-                fb.background = HyperOSMaterialFactory.createCircularBubbleDrawable(
-                    resolvedStyle, 0xFFFFFFFF.toInt(), false, bubbleParams
-                )
-                fb.invalidate()
+                applyPreviewMaterial(fb, HyperOSMaterialFactory.SHAPE_CIRCLE, HyperOpenConfig.COMPONENT_BUBBLE)
             }
         }
         snapToggleButton?.let { btn ->
-            btn.background = HyperOSMaterialFactory.createHeaderPillDrawable(resolvedStyle, pillDim, pillParams)
-            btn.invalidate()
+            applyPreviewMaterial(btn, HyperOSMaterialFactory.SHAPE_CAPSULE, HyperOpenConfig.COMPONENT_HEADER)
         }
         alwaysShowToggleButton?.let { btn ->
-            btn.background = HyperOSMaterialFactory.createHeaderPillDrawable(resolvedStyle, pillDim, pillParams)
-            btn.invalidate()
+            applyPreviewMaterial(btn, HyperOSMaterialFactory.SHAPE_CAPSULE, HyperOpenConfig.COMPONENT_HEADER)
         }
+        executeToggleButton?.let { btn ->
+            applyPreviewMaterial(btn, HyperOSMaterialFactory.SHAPE_CAPSULE, HyperOpenConfig.COMPONENT_HEADER)
+        }
+    }
+
+    private fun applyPreviewMaterial(view: View, shape: Int, component: Int) {
+        val params = config.glassParamsFor(component)
+        val blurPx = dpToPx(config.effectiveBlurRadiusDp(component).toFloat()).toInt()
+        val dim = config.effectiveDimAlpha(component)
+        val controller = previewMaterialControllers.getOrPut(view) {
+            ViewMaterialController(shape, resolvedStyle, params, blurPx, dim, 50)
+        }
+        controller.attach(view)
+        controller.update(resolvedStyle, params, blurPx, dim, true)
+        view.invalidate()
     }
 
     private fun buildHeader() {
@@ -766,7 +855,7 @@ class HyperOpenPreviewView(
         val titleSp = config.headerTitleSize.coerceIn(12, 26).toFloat()
         val subtitleSp = config.headerSubtitleSize.coerceIn(9, 18).toFloat()
         val centered = config.headerTextCentered
-        val topMarginDp = config.headerTopMargin.coerceIn(20, 420).toFloat()
+        val topMarginDp = config.headerTopMargin.coerceIn(24, 360).toFloat()
 
         headerTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSp)
         headerTitle.gravity = if (centered) Gravity.CENTER else Gravity.START
@@ -801,8 +890,8 @@ class HyperOpenPreviewView(
         if (!::headerPill.isInitialized) return
         val show = config.showHeaderPill && config.showHeaderPillBg
         if (show) {
-            val blurDp = config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_HEADER)
-            val blurPx = if (blurDp > 0) dpToPx(blurDp.toFloat()).toInt() else 0
+            val blurDp = stackedBlurDp(HyperOpenConfig.COMPONENT_HEADER)
+            val blurPx = if (blurDp > 0) dpToPx(blurDp).toInt() else 0
             val params = config.glassParamsFor(HyperOpenConfig.COMPONENT_HEADER)
             val dim = config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_HEADER)
             val backdrop = headerPillBackdrop ?: io.github.qmryqmm.hyperopen.view.HeaderPillBackdrop(
@@ -829,8 +918,15 @@ class HyperOpenPreviewView(
 
     override fun onDetachedFromWindow() {
         removeCallbacks(longPressRunnable)
+        removeCallbacks(headerHeightLongPressRunnable)
         removeCallbacks(expandRunnable)
+        removeCallbacks(finishExpandGateRunnable)
+        previewMaterialControllers.values.forEach { it.release() }
+        previewMaterialControllers.clear()
+        headerPillBackdrop?.release()
         fingerprintHolding = false
+        panelExpandAnimating = false
+        hasPendingHover = false
         // 注意：detach 时不再自动提交排版（旧实现裸提交未结算的动画中间值，导致返回键退出后图标错位）；
         // 是否保存由 MainActivity 的返回确认弹窗决定：commitLayoutChanges() / discardLayoutChanges()
         super.onDetachedFromWindow()
@@ -930,7 +1026,12 @@ class HyperOpenPreviewView(
             old.maxIconCount != newConfig.maxIconCount ||
             old.layoutStyle != newConfig.layoutStyle ||
             old.ringSectorMode != newConfig.ringSectorMode ||
-            old.ringCount != newConfig.ringCount ||
+            old.folderChildDisplayRangeScale != newConfig.folderChildDisplayRangeScale ||
+            old.folderChildDirectionMode != newConfig.folderChildDirectionMode ||
+            old.folderChildDirectionOffsetDeg != newConfig.folderChildDirectionOffsetDeg ||
+            old.folderChildOrderMode != newConfig.folderChildOrderMode ||
+            old.folderChildMinGapDp != newConfig.folderChildMinGapDp ||
+            old.folderChildSizeScale != newConfig.folderChildSizeScale ||
             old.glyphPadEnabled != newConfig.glyphPadEnabled ||
             old.glyphPadColor != newConfig.glyphPadColor ||
             old.glyphPadMode != newConfig.glyphPadMode ||
@@ -948,7 +1049,7 @@ class HyperOpenPreviewView(
         if (::regionBackdrop.isInitialized) {
             regionBackdrop.setStyle(resolvedStyle)
             regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION))
-            regionBackdrop.setBlurRadius(if (config.showRegionBg) config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION).toFloat() else 0f)
+            regionBackdrop.setBlurRadius(if (config.showRegionBg) stackedBlurDp(HyperOpenConfig.COMPONENT_REGION) else 0f)
             regionBackdrop.setDimAlpha(if (config.showRegionBg) config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION) else 0f)
             // 扇区分隔线样式（颜色/透明度/虚线规格）热生效
             val liveSpec = ringSectorSpec
@@ -974,19 +1075,29 @@ class HyperOpenPreviewView(
         refreshFloatingBackButtonBackground()
         for (b in bubbleViews) {
             // 与真实侧 setupBubbles 复用分支的 setter 全集保持一致（含材质/模糊/留白/玻璃刷新）
+            b.setGhostLayer(ghostLayer)
             b.updateConfig(config)
             b.setMaterialStyle(resolvedStyle)
-            b.setBlurRadius(config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE).toFloat())
+            b.setBlurRadius(stackedBlurDp(HyperOpenConfig.COMPONENT_BUBBLE))
             b.setBubblePaddingPercent(config.bubblePaddingPercent)
             b.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE))
             b.setCornerRadiusPercent(config.iconCornerRadius)
             b.setIconAlpha(config.iconAlpha)
             b.ensureBlurAndRefreshBackground()
         }
+        // 幻影层模糊半径 / 最大倍率热生效（与真机 refreshGhostLayerParams 同源）
+        refreshGhostLayerParams()
         if (needRebuild || bubbleViews.isEmpty()) {
             setupLayout()
         } else {
         }
+    }
+
+    /** 同步幻影层的模糊半径与最大倍率（配置热更新 / 布局重建时调用，与真机同源） */
+    private fun refreshGhostLayerParams() {
+        ghostLayer.setMaxScale(maxOf(1f, config.maxScale))
+        val blurDp = config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE)
+        ghostLayer.setBlurRadiusPx(if (blurDp > 0) dpToPx(blurDp.toFloat()) else 0f)
     }
 
     /**
@@ -1059,7 +1170,7 @@ class HyperOpenPreviewView(
         regionBackdrop.setSystemBlurEnabled(true)
         regionBackdrop.setStyle(resolvedStyle)
         regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION))
-        regionBackdrop.setBlurRadius(if (config.showRegionBg) config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION).toFloat() else 0f)
+        regionBackdrop.setBlurRadius(if (config.showRegionBg) stackedBlurDp(HyperOpenConfig.COMPONENT_REGION) else 0f)
         regionBackdrop.setDimAlpha(if (config.showRegionBg) config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION) else 0f)
         regionBackdrop.updateGeometry(regionRadiusPx)
         val rLp = LayoutParams(regionDiameterPx.toInt(), regionDiameterPx.toInt()).apply {
@@ -1103,7 +1214,7 @@ class HyperOpenPreviewView(
                 ringSectorSpec = spec
                 spec?.points ?: emptyList()
             } else {
-                // 空心同心圆环：中心留空，图标排布在 ringCount 圈同心环上
+                // 单圈空心圆环：中心留空，图标沿一圈均匀排布
                 ringSectorSpec = null
                 HollowRingPacking.calculatePoints(
                     activeShortcuts.size,
@@ -1111,8 +1222,7 @@ class HyperOpenPreviewView(
                     regionCenterY,
                     regionRadiusPx,
                     iconSizePx,
-                    spacingOffsetPx,
-                    config.ringCount
+                    spacingOffsetPx
                 )
             }
         } else if (config.layoutStyle == HyperOpenConfig.LAYOUT_ARC) {
@@ -1173,7 +1283,9 @@ class HyperOpenPreviewView(
             val bubble = CircularBubbleView(
                 context, item, resolvedStyle, iconSizePx.toInt(), context.classLoader, config
             )
+            bubble.setGhostLayer(ghostLayer)
             bubble.setSystemBlurEnabled(true)
+            bubble.setBlurRadius(stackedBlurDp(HyperOpenConfig.COMPONENT_BUBBLE))
             bubble.setIconAlpha(config.iconAlpha)
             bubble.targetX = finalX
             bubble.targetY = finalY
@@ -1237,6 +1349,36 @@ class HyperOpenPreviewView(
         updateFingerprintButtonState()
     }
 
+    private fun isInFingerprintRegion(x: Float, y: Float): Boolean {
+        val btn = fingerprintButton ?: return false
+        if (btn.visibility != View.VISIBLE) return false
+        val slop = dpToPx(12f)
+        return x >= btn.left - slop && x <= btn.right + slop &&
+            y >= btn.top - slop && y <= btn.bottom + slop
+    }
+
+    /** 当前手指实际选中的快捷方式（文件夹子项优先；仅选中文件夹容器本身时不执行） */
+    private fun resolveSelectedShortcut(): ShortcutItem? {
+        currentSelectedSubBubble?.item?.let { return it }
+        val main = currentSelectedBubble?.item ?: return null
+        if (ShortcutItem.ACTION_FOLDER == main.actionType) return null
+        return main
+    }
+
+    /**
+     * 面板展开动画期间只缓存最后一次手指坐标，动画结束后再应用一次鱼眼；
+     * 否则 [BubblePanelAnimator.playExpand] 的缩放动画会与鱼眼缩放互相覆盖。
+     */
+    private fun handleLiveHover(x: Float, y: Float) {
+        if (panelExpandAnimating) {
+            pendingHoverX = x
+            pendingHoverY = y
+            hasPendingHover = true
+            return
+        }
+        handleFingerHover(x, y)
+    }
+
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
         // 如果点击发生在左上角悬浮返回按钮区域，放行给子 View 处理点击
         floatingBackButton?.let { btn ->
@@ -1273,42 +1415,148 @@ class HyperOpenPreviewView(
                 }
             }
         }
-        // 指纹按钮（面板隐藏态可见）：放行触摸，交给它自己的 OnTouchListener 处理按住/松手
-        fingerprintButton?.let { btn ->
+        // 右上角「松手执行」开关（常显）：放行触摸给按钮自身处理点击
+        executeToggleButton?.let { btn ->
             if (btn.visibility == View.VISIBLE) {
-                val slop = dpToPx(12f)
+                val slop = dpToPx(6f)
                 if (ev.x >= btn.left - slop && ev.x <= btn.right + slop &&
                     ev.y >= btn.top - slop && ev.y <= btn.bottom + slop) {
                     return false
                 }
             }
         }
-        // 按住指纹按钮期间（面板展开动画进行中）：绝不拦截，保证手势序列完整回到按钮、
-        // 能正常收到 ACTION_UP 触发退场；否则展开瞬间被抢占 → CANCEL → 立即退场
-        if (fingerprintHolding) return false
+        // 指纹按钮（面板隐藏态可见）：由预览容器从 DOWN 开始接管整段按压手势，
+        // 这样面板展开后同一根手指的 MOVE 仍能继续驱动鱼眼选中，而不是被子 View 吃掉。
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN &&
+            !alwaysShowPanel && !panelVisible && !isEditMode &&
+            isInFingerprintRegion(ev.x, ev.y)
+        ) {
+            return true
+        }
         // 面板隐藏态：除上述按钮外一律不拦截，避免手指误触到隐藏的气泡
         if (!panelVisible) return false
         // 其余区域拦截触摸事件以便处理全局滑动动力学与拖拽
         return true
     }
 
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (::headerPill.isInitialized && headerPill.isShown) {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                headerHeightGestureActive = isHeaderHeightTouch(event.x, event.y)
+            }
+            if (headerHeightGestureActive) {
+                return handleHeaderHeightTouch(event)
+            }
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
+    private fun isHeaderHeightTouch(x: Float, y: Float): Boolean {
+        if (!::topHeaderContainer.isInitialized || !::headerPill.isInitialized) return false
+        val horizontalInset = dpToPx(16f)
+        val verticalInset = dpToPx(28f)
+        val left = topHeaderContainer.left + headerPill.left - horizontalInset
+        val top = topHeaderContainer.top + headerPill.top - verticalInset
+        val right = left + headerPill.width + horizontalInset * 2f
+        val bottom = top + headerPill.height + verticalInset * 2f
+        return x >= left && x <= right && y >= top && y <= bottom
+    }
+
+    private fun handleHeaderHeightTouch(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                headerDragStartRawY = event.rawY
+                headerDragStartTopMargin = config.headerTopMargin.toFloat()
+                removeCallbacks(headerHeightLongPressRunnable)
+                if (isEditMode) {
+                    headerHeightDragging = true
+                    editingHeaderHeight = true
+                    headerSubtitle.text = "拖动提示文字调整高度，点击空白完成"
+                } else {
+                    headerHeightDragging = false
+                    postDelayed(headerHeightLongPressRunnable, 450L)
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (headerHeightDragging) {
+                    val deltaDp = (event.rawY - headerDragStartRawY) / resources.displayMetrics.density
+                    val next = (headerDragStartTopMargin + deltaDp).toInt().coerceIn(24, 360)
+                    if (next != config.headerTopMargin) {
+                        config.headerTopMargin = next
+                        applyHeaderPillStyleAndLayout()
+                    }
+                } else if (Math.abs(event.rawY - headerDragStartRawY) > dpToPx(10f)) {
+                    removeCallbacks(headerHeightLongPressRunnable)
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(headerHeightLongPressRunnable)
+                if (headerHeightDragging) {
+                    onHeaderTopMarginChanged(config.headerTopMargin.toFloat())
+                    triggerHaptic()
+                }
+                headerHeightDragging = false
+                headerHeightGestureActive = false
+                performClick()
+            }
+        }
+        return true
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        // 指纹按钮在展开后被隐藏（GONE），后续 ACTION_UP 会回落到父 View；
-        // 这里兜底处理「按住 → 松手」的退场，避免按钮收不到 UP 导致面板卡在展开态
+        val x = event.x
+        val y = event.y
+        // 按在指纹按钮上的整段手势由预览容器接管：展开后 MOVE 继续驱动鱼眼，松手统一收场
         if (fingerprintHolding &&
             (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL)
         ) {
+            val selected = if (event.actionMasked == MotionEvent.ACTION_UP &&
+                executeShortcutOnRelease && !isEditMode
+            ) {
+                resolveSelectedShortcut()
+            } else null
             fingerprintHolding = false
             removeCallbacks(expandRunnable)
+            removeCallbacks(finishExpandGateRunnable)
+            panelExpandAnimating = false
+            hasPendingHover = false
+            isTouching = false
             if (panelVisible && !alwaysShowPanel) {
-                hidePanel(animated = true)
+                // 与真机一致：退场动画结束后再执行动作
+                hidePanel(animated = true) {
+                    if (selected != null) {
+                        triggerHaptic()
+                        selected.executeAsync(context)
+                    }
+                }
+            } else if (selected != null) {
+                triggerHaptic()
+                selected.executeAsync(context)
             }
             return true
         }
-        // 面板隐藏态（按住触发模式下未展开）：除指纹按钮外不消费任何触摸
-        if (!panelVisible) return false
-        val x = event.x
-        val y = event.y
+        // 面板隐藏态：只处理「按在指纹按钮上开始长按」，其余触摸不消费
+        if (!panelVisible) {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN &&
+                !alwaysShowPanel && !isEditMode && isInFingerprintRegion(x, y)
+            ) {
+                fingerprintHolding = true
+                isTouching = true
+                dragTouchStartX = x
+                dragTouchStartY = y
+                pendingPressBubble = null
+                panelExpandAnimating = false
+                hasPendingHover = false
+                removeCallbacks(expandRunnable)
+                removeCallbacks(finishExpandGateRunnable)
+                // showDelayMs == 500 为系统默认：真实侧该值不干预原生 500ms 延迟，
+                // 预览侧直接用配置值（0 = 立即），保证「能感觉」的等待时长对齐
+                postDelayed(expandRunnable, Math.max(0, config.showDelayMs).toLong())
+                triggerHaptic()
+                return true
+            }
+            return fingerprintHolding
+        }
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -1355,12 +1603,17 @@ class HyperOpenPreviewView(
                     checkDragReorder(x, y)
                 } else if (!isEditMode) {
                     // 普通模拟指纹滑动模式：物理鱼眼动力学（手指停住时保持当前放大状态，绝不失效）
-                    handleFingerHover(x, y)
+                    handleLiveHover(x, y)
                 }
                 return true
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val selected = if (event.actionMasked == MotionEvent.ACTION_UP &&
+                    executeShortcutOnRelease && !isEditMode && !isDraggingActive
+                ) {
+                    resolveSelectedShortcut()
+                } else null
                 isTouching = false
                 removeCallbacks(longPressRunnable)
                 removeCallbacks(folderHoverRunnable)
@@ -1376,6 +1629,10 @@ class HyperOpenPreviewView(
                     exitEditMode()
                 }
                 pendingPressBubble = null
+                if (selected != null) {
+                    triggerHaptic()
+                    selected.executeAsync(context)
+                }
                 return true
             }
         }
@@ -1434,7 +1691,11 @@ class HyperOpenPreviewView(
         HintTextStyler.reset(headerSubtitle, false, config)
         headerTitle.text = "自定义排版模式"
         headerTitle.setTextColor(0xFFFF9933.toInt())
-        headerSubtitle.text = "长按并拖动图标交换位置，点击空白完成"
+        headerSubtitle.text = if (editingHeaderHeight) {
+            "拖动提示文字调整高度，点击空白完成"
+        } else {
+            "长按并拖动图标交换位置，点击空白完成"
+        }
 
         // 所有气泡进入统一排版微放状态，清除单点悬停缩放
         for (b in bubbleViews) {
@@ -1456,6 +1717,7 @@ class HyperOpenPreviewView(
         pendingFolderBubble = null
         dismissFolderSubBubbles()
         isEditMode = false
+        editingHeaderHeight = false
         triggerHaptic()
 
         editBanner.animate().alpha(0f).setDuration(150).withEndAction {
@@ -1930,7 +2192,10 @@ class HyperOpenPreviewView(
             .scaleY(config.maxScale)
             .setDuration(120)
             .setInterpolator(android.view.animation.DecelerateInterpolator())
-            .setUpdateListener { folderBubble.syncBlurCornerRadiusWithViewScale() }
+            .setUpdateListener {
+                folderBubble.syncBlurCornerRadiusWithViewScale()
+                folderBubble.syncGhost()
+            }
             .withEndAction {
                 // 松手 / 状态被复位后不再展开（防竞态：放大动画期间用户抬手）
                 if (!isTouching || activeFolderBubble != null) return@withEndAction
@@ -1964,57 +2229,62 @@ class HyperOpenPreviewView(
         }
 
         val count = children.size
-        val iconSizePx = dpToPx(config.iconSize.toFloat())
-        val iconSizeInt = iconSizePx.toInt()
-        val subRadius = iconSizePx * 1.35f
-
-        val baseAngle = Math.atan2((folderBubble.targetY - lastFodY).toDouble(), (folderBubble.targetX - lastFodX).toDouble())
-        val angleStep = if (count > 1) (Math.PI * 0.85 / (count - 1)) else 0.0
-        val startAngle = if (count > 1) (baseAngle - Math.PI * 0.425) else baseAngle
+        val childIconSizePx = dpToPx(config.iconSize.toFloat() * config.folderChildSizeScale)
+        val iconSizeInt = childIconSizePx.toInt().coerceAtLeast(1)
+        val safeBounds = folderSafeBounds()
+        val pack = FolderChildPacking.calculate(
+            count,
+            folderBubble.targetX,
+            folderBubble.targetY,
+            lastFodX,
+            lastFodY,
+            safeBounds[0],
+            safeBounds[1],
+            safeBounds[2],
+            safeBounds[3],
+            childIconSizePx,
+            dpToPx(config.folderChildMinGapDp.toFloat()),
+            config.folderChildDisplayRangeScale,
+            config.folderChildDirectionMode,
+            config.folderChildDirectionOffsetDeg,
+            config.folderChildOrderMode
+        )
+        val createdSubs = ArrayList<CircularBubbleView>(count)
 
         for (i in 0 until count) {
             val childItem = children[i]
-            val angle = if (count == 1) baseAngle else (startAngle + i * angleStep)
-            val targetX = (folderBubble.targetX + subRadius * Math.cos(angle)).toFloat()
-            val targetY = (folderBubble.targetY + subRadius * Math.sin(angle)).toFloat()
+            val target = pack.points[i]
+            val targetX = target.x
+            val targetY = target.y
 
             val sub = CircularBubbleView(
                 context, childItem, resolvedStyle, iconSizeInt, context.classLoader, config
             ).apply {
+                setIsSubBubble(true)
+                setGhostLayer(ghostLayer)
                 setSystemBlurEnabled(true)
+                setBlurRadius(stackedBlurDp(HyperOpenConfig.COMPONENT_BUBBLE))
                 this.targetX = targetX
                 this.targetY = targetY
             }
 
             val lp = LayoutParams(iconSizeInt, iconSizeInt).apply {
-                leftMargin = (targetX - iconSizePx / 2f).toInt()
-                topMargin = (targetY - iconSizePx / 2f).toInt()
+                leftMargin = (targetX - childIconSizePx / 2f).toInt()
+                topMargin = (targetY - childIconSizePx / 2f).toInt()
             }
             sub.layoutParams = lp
             sub.translationX = folderBubble.targetX - targetX
             sub.translationY = folderBubble.targetY - targetY
-            sub.scaleX = 0.1f
-            sub.scaleY = 0.1f
+            sub.scaleX = config.folderChildStartScale.coerceAtLeast(0.05f)
+            sub.scaleY = config.folderChildStartScale.coerceAtLeast(0.05f)
             sub.alpha = 0f
 
             bubblesContainer.addView(sub)
             folderSubBubbles.add(sub)
+            createdSubs.add(sub)
             sub.ensureBlurAndRefreshBackground()
-
-            sub.animate()
-                .translationX(0f)
-                .translationY(0f)
-                .scaleX(1.0f)
-                .scaleY(1.0f)
-                .alpha(1.0f)
-                .setInterpolator(android.view.animation.OvershootInterpolator(1.2f))
-                .setDuration(180)
-                .setStartDelay(i * 15L)
-                .setUpdateListener {
-                    sub.syncBlurCornerRadiusWithViewScale()
-                }
-                .start()
         }
+        FolderChildAnimator.playExpand(createdSubs, folderBubble, config, pack.animationOrder)
     }
 
     /**
@@ -2088,27 +2358,17 @@ class HyperOpenPreviewView(
         if (!animated) {
             for (sub in subs) {
                 sub.animate().cancel()
+                sub.resetBlur()
                 bubblesContainer.removeView(sub)
             }
         } else {
-            // 子气泡向文件夹中心收拢 + 缩小 + 淡出，播完后从容器移除
-            for (sub in subs) {
-                sub.animate().cancel()
-                val toX = (folder?.targetX ?: sub.targetX) - sub.targetX
-                val toY = (folder?.targetY ?: sub.targetY) - sub.targetY
-                sub.animate()
-                    .translationX(toX)
-                    .translationY(toY)
-                    .scaleX(0.2f)
-                    .scaleY(0.2f)
-                    .alpha(0f)
-                    .setDuration(140)
-                    .setInterpolator(android.view.animation.AccelerateInterpolator())
-                    .setUpdateListener {
-                        sub.syncBlurCornerRadiusWithViewScale()
-                    }
-                    .withEndAction { bubblesContainer.removeView(sub) }
-                    .start()
+            val collapseTarget = folder ?: subs.first()
+            FolderChildAnimator.playCollapse(subs, collapseTarget, config) {
+                for (sub in subs) {
+                    sub.animate().cancel()
+                    sub.resetBlur()
+                    bubblesContainer.removeView(sub)
+                }
             }
         }
 
@@ -2120,16 +2380,22 @@ class HyperOpenPreviewView(
                 b.animate()
                     .scaleX(1.0f)
                     .scaleY(1.0f)
-                    .setDuration(140)
+                    .setDuration(config.folderChildCollapseDurationMs.coerceAtLeast(0).toLong())
                     .setInterpolator(android.view.animation.LinearInterpolator())
                     .setUpdateListener {
                         b.syncBlurCornerRadiusWithViewScale()
+                        b.clearGhost()
                     }
-                    .withEndAction { b.applyScale(1.0f); b.ensureBlurAndRefreshBackground() }
+                    .withEndAction {
+                        b.applyScale(1.0f)
+                        b.ensureBlurAndRefreshBackground()
+                        b.clearGhost()
+                    }
                     .start()
             } else {
                 b.applyScale(1.0f)
                 b.ensureBlurAndRefreshBackground()
+                b.clearGhost()
             }
             b.setIconAlpha(config.iconAlpha)
         }
@@ -2137,5 +2403,39 @@ class HyperOpenPreviewView(
 
     private fun dpToPx(dp: Float): Float {
         return dp * context.resources.displayMetrics.density
+    }
+
+    private fun folderSafeBounds(): FloatArray {
+        val margin = dpToPx(8f)
+        var left = margin
+        var top = margin
+        var right = width - margin
+        var bottom = height - margin
+        val insets = rootWindowInsets
+        if (insets != null) {
+            @Suppress("DEPRECATION")
+            val systemInsets = insets.systemWindowInsets
+            left = maxOf(left, systemInsets.left.toFloat())
+            top = maxOf(top, systemInsets.top.toFloat())
+            right = minOf(right, width - systemInsets.right.toFloat())
+            bottom = minOf(bottom, height - systemInsets.bottom.toFloat())
+            val cutout = insets.displayCutout
+            if (cutout != null) {
+                left = maxOf(left, cutout.safeInsetLeft.toFloat())
+                top = maxOf(top, cutout.safeInsetTop.toFloat())
+                right = minOf(right, width - cutout.safeInsetRight.toFloat())
+                bottom = minOf(bottom, height - cutout.safeInsetBottom.toFloat())
+            }
+        }
+        return floatArrayOf(left, top, right, bottom)
+    }
+
+    /** 组件模糊 + 全屏模糊的高斯近似叠加，与 SystemUI 真机侧同源。 */
+    private fun stackedBlurDp(component: Int): Float {
+        return config.stackedBlurRadiusDp(
+            component,
+            context.resources.displayMetrics.density,
+            config.approximateFullscreenBlurRadiusPx()
+        )
     }
 }

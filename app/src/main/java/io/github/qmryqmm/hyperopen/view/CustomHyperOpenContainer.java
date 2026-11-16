@@ -12,7 +12,6 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -21,12 +20,14 @@ import io.github.qmryqmm.hyperopen.config.HyperOpenConfig;
 import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory;
 import io.github.qmryqmm.hyperopen.layout.CircularHoneycombPacking;
 import io.github.qmryqmm.hyperopen.layout.ArcFanPacking;
+import io.github.qmryqmm.hyperopen.layout.FolderChildPacking;
 import io.github.qmryqmm.hyperopen.layout.HollowRingPacking;
 import io.github.qmryqmm.hyperopen.layout.RingSectorPacking;
 import io.github.qmryqmm.hyperopen.layout.StockFanPacking;
 import io.github.qmryqmm.hyperopen.model.ShortcutItem;
 import io.github.qmryqmm.hyperopen.util.BubblePanelAnimator;
 import io.github.qmryqmm.hyperopen.util.FisheyeScale;
+import io.github.qmryqmm.hyperopen.util.FolderChildAnimator;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -35,12 +36,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class CustomHyperOpenContainer extends FrameLayout {
 
-    private static final OvershootInterpolator EXPAND_INTERPOLATOR = new OvershootInterpolator(1.2f);
-
     private HyperOpenConfig config;
     private final ClassLoader systemuiClassLoader;
     private int resolvedStyle;
     private int lastBuiltIconSizePx = -1;
+    /**
+     * 当前窗口级全屏模糊半径（px）。由 SystemUI Hook 在展开前用真实
+     * {@code BlurUtils#blurRadiusOfRatio} 算好后传入；-1 表示未知，退回本地近似值。
+     */
+    private float fullscreenBlurRadiusPx = -1f;
 
     private float fodCenterX = 540f;
     private float fodCenterY = 1920f;
@@ -56,6 +60,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
     private SectorOverlayView sectorOverlay;
     private FrameLayout bubblesContainer;
     private final List<CircularBubbleView> bubbles = new ArrayList<>();
+    /** 图标幻影层：气泡互相压盖时在玻璃内显示邻居的磨砂虚影（除自身录制，见 IconGhostLayer） */
+    private IconGhostLayer ghostLayer;
     private final List<StockFanPacking.StockItemSpec> stockSpecs = new ArrayList<>();
     /** 空心圆环扇区触发模式的几何规格（非扇区模式时为 null） */
     private RingSectorPacking.Result ringSectorSpec = null;
@@ -107,7 +113,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
         regionBackdrop.setStyle(resolvedStyle);
         if (config != null) {
             regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION));
-            regionBackdrop.setBlurRadius(config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION));
+            regionBackdrop.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION));
             regionBackdrop.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION));
         }
         addView(regionBackdrop);
@@ -123,6 +129,57 @@ public class CustomHyperOpenContainer extends FrameLayout {
         setClipChildren(false);
         setClipToPadding(false);
         addView(bubblesContainer, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+
+        // 图标幻影层（持有 bubbles / folderSubBubbles 活引用，内容变化自动可见）
+        ghostLayer = new IconGhostLayer(bubbles, folderSubBubbles,
+                config != null ? Math.max(1f, config.maxScale) : 1.5f);
+        refreshGhostLayerParams();
+    }
+
+    /** 同步幻影层的模糊半径与最大倍率（配置热更新时调用） */
+    private void refreshGhostLayerParams() {
+        if (ghostLayer == null || config == null) return;
+        ghostLayer.setMaxScale(Math.max(1f, config.maxScale));
+        int blurDp = config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE);
+        ghostLayer.setBlurRadiusPx(blurDp > 0 ? dpToPx(blurDp) : 0);
+    }
+
+    /**
+     * 由 SystemUI Hook 在每次展开前注入真实全屏模糊半径（px）。
+     *
+     * <p>组件的 BackgroundBlurDrawable 不会与窗口级全屏模糊做物理两级采样，
+     * 而是用自己的半径覆盖该区域；半径小于全屏时就会出现“透桌面的洞”。
+     * 这里把全屏半径与组件半径按 {@code sqrt(fs² + component²)} 组合后统一下发，
+     * 让气泡/底衬/胶囊始终不比全屏更清晰。</p>
+     */
+    public void setFullscreenBlurRadiusPx(float radiusPx) {
+        float next = Math.max(-1f, radiusPx);
+        if (Math.abs(this.fullscreenBlurRadiusPx - next) < 0.01f) return;
+        this.fullscreenBlurRadiusPx = next;
+        applyStackedBlurRadii();
+    }
+
+    /** 组件组合模糊半径 (dp)：组件自身模糊 + 当前全屏模糊的高斯近似叠加。 */
+    private float componentBlurRadiusDp(int component) {
+        if (config == null) return 0f;
+        float density = getResources().getDisplayMetrics().density;
+        return config.stackedBlurRadiusDp(component, density, fullscreenBlurRadiusPx);
+    }
+
+    /** 全量刷新所有组件的组合模糊半径（窗口级模糊变化 / 配置热更新时调用）。 */
+    private void applyStackedBlurRadii() {
+        if (config == null) return;
+        if (regionBackdrop != null) {
+            regionBackdrop.setBlurRadius(config.showRegionBg
+                ? componentBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION) : 0f);
+        }
+        for (CircularBubbleView b : bubbles) {
+            b.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
+        }
+        for (CircularBubbleView sub : folderSubBubbles) {
+            sub.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
+        }
+        applyHeaderPillStyleAndLayout();
     }
 
     public void updateConfig(HyperOpenConfig newConfig) {
@@ -138,7 +195,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
             if (regionBackdrop != null) {
                 regionBackdrop.setStyle(resolvedStyle);
                 regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION));
-                regionBackdrop.setBlurRadius(config.showRegionBg ? config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION) : 0);
+                regionBackdrop.setBlurRadius(config.showRegionBg
+                    ? componentBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION) : 0);
                 regionBackdrop.setDimAlpha(config.showRegionBg ? config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION) : 0f);
                 // 扇区分隔线样式（颜色/透明度/虚线规格）热生效
                 if (ringSectorSpec != null) {
@@ -158,12 +216,14 @@ public class CustomHyperOpenContainer extends FrameLayout {
             for (CircularBubbleView b : bubbles) {
                 b.updateConfig(config);
                 b.setMaterialStyle(resolvedStyle);
-                b.setBlurRadius(config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
+                b.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
                 b.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE));
                 b.setBubblePaddingPercent(config.bubblePaddingPercent);
                 b.setCornerRadiusPercent(config.iconCornerRadius);
                 b.setIconAlpha(config.iconAlpha);
             }
+            // 幻影层模糊半径 / 最大倍率热生效
+            refreshGhostLayerParams();
         }
     }
 
@@ -457,7 +517,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
         boolean show = config == null || config.showHeaderPillBg;
         if (show) {
             if (config != null) {
-                int blurDp = config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_HEADER);
+                int blurDp = Math.round(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_HEADER));
                 int blurPx = blurDp > 0 ? dpToPx(blurDp) : 0;
                 HyperOSMaterialFactory.GlassParams params = config.glassParamsFor(HyperOpenConfig.COMPONENT_HEADER);
                 float dim = config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_HEADER);
@@ -580,10 +640,12 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 && activeItems.size() < RingSectorPacking.MAX_SECTOR_COUNT_EXCLUSIVE;
 
         // 更新底衬大小与位置：完全跟随「显示圆形区域底衬」开关（分隔虚线由全屏覆盖层独立绘制）
+        regionBackdrop.prepareForUse();
         regionBackdrop.setVisibility(config.showRegionBg ? View.VISIBLE : View.GONE);
         regionBackdrop.setStyle(resolvedStyle);
         regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION));
-        regionBackdrop.setBlurRadius(config.showRegionBg ? config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION) : 0);
+        regionBackdrop.setBlurRadius(config.showRegionBg
+            ? componentBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION) : 0);
         regionBackdrop.setDimAlpha(config.showRegionBg ? config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION) : 0f);
         regionBackdrop.updateGeometry(regionRadiusPx);
 
@@ -633,7 +695,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 );
                 points = ringSectorSpec != null ? ringSectorSpec.points : new ArrayList<PointF>();
             } else {
-                // 空心同心圆环布局：中心留空，图标排布在 ringCount 圈同心环上
+                // 单圈空心圆环布局：中心留空，图标沿一圈均匀排布
                 ringSectorSpec = null;
                 points = HollowRingPacking.calculatePoints(
                     activeItems.size(),
@@ -641,8 +703,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                     regionCenterY,
                     regionRadiusPx,
                     iconSizePx,
-                    spacingOffsetPx,
-                    config.ringCount
+                    spacingOffsetPx
                 );
             }
         } else if (config.layoutStyle == HyperOpenConfig.LAYOUT_ARC) {
@@ -697,9 +758,10 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 float finalY = pt.y + dpToPx(item.customOffsetY);
                 bubble.targetX = finalX;
                 bubble.targetY = finalY;
+                bubble.setGhostLayer(ghostLayer);
                 bubble.updateConfig(config);
                 bubble.setMaterialStyle(resolvedStyle);
-                bubble.setBlurRadius(config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
+                bubble.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
                 bubble.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE));
                 bubble.setBubblePaddingPercent(config.bubblePaddingPercent);
                 bubble.setCornerRadiusPercent(config.iconCornerRadius);
@@ -732,6 +794,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 CircularBubbleView bubble = new CircularBubbleView(
                     getContext(), item, resolvedStyle, iconSizeInt, systemuiClassLoader, config
                 );
+                bubble.setGhostLayer(ghostLayer);
+                bubble.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
                 bubble.targetX = finalX;
                 bubble.targetY = finalY;
 
@@ -1058,7 +1122,10 @@ public class CustomHyperOpenContainer extends FrameLayout {
             .scaleY(config != null ? config.maxScale : 1.5f)
             .setDuration(120)
             .setInterpolator(new android.view.animation.DecelerateInterpolator())
-            .setUpdateListener(anim -> folderBubble.syncBlurCornerRadiusWithViewScale())
+            .setUpdateListener(anim -> {
+                folderBubble.syncBlurCornerRadiusWithViewScale();
+                folderBubble.syncGhost();
+            })
             .withEndAction(() -> {
                 // 松手 / 选中已复位后不再展开（防竞态：放大动画期间用户抬手）
                 if (currentSelectedBubble != folderBubble || activeFolderBubble != null) return;
@@ -1092,54 +1159,62 @@ public class CustomHyperOpenContainer extends FrameLayout {
         }
 
         int count = children.size();
-        float iconSizePx = dpToPx(config != null ? config.iconSize : 60);
-        int iconSizeInt = (int) iconSizePx;
-        float subRadius = iconSizePx * 1.35f;
-
-        // 计算扩散弧度范围：朝指纹中心外侧弧形展开，或均分圆周
-        double baseAngle = Math.atan2(folderBubble.targetY - fodCenterY, folderBubble.targetX - fodCenterX);
-        double angleStep = (count > 1) ? (Math.PI * 0.85 / (count - 1)) : 0;
-        double startAngle = (count > 1) ? (baseAngle - Math.PI * 0.425) : baseAngle;
+        float childIconSizePx = dpToPx((config != null ? config.iconSize : 60) *
+                (config != null ? config.folderChildSizeScale : 1f));
+        int iconSizeInt = Math.max(1, (int) childIconSizePx);
+        HyperOpenConfig cfg = config != null ? config : new HyperOpenConfig();
+        float[] safeBounds = folderSafeBounds();
+        FolderChildPacking.Result pack = FolderChildPacking.calculate(
+            count,
+            folderBubble.targetX,
+            folderBubble.targetY,
+            fodCenterX,
+            fodCenterY,
+            safeBounds[0],
+            safeBounds[1],
+            safeBounds[2],
+            safeBounds[3],
+            childIconSizePx,
+            dpToPx(cfg.folderChildMinGapDp),
+            cfg.folderChildDisplayRangeScale,
+            cfg.folderChildDirectionMode,
+            cfg.folderChildDirectionOffsetDeg,
+            cfg.folderChildOrderMode
+        );
+        List<CircularBubbleView> createdSubs = new ArrayList<>(count);
 
         for (int i = 0; i < count; i++) {
             ShortcutItem childItem = children.get(i);
-            double angle = (count == 1) ? baseAngle : (startAngle + i * angleStep);
-            float targetX = (float) (folderBubble.targetX + subRadius * Math.cos(angle));
-            float targetY = (float) (folderBubble.targetY + subRadius * Math.sin(angle));
+            PointF target = pack.points.get(i);
+            float targetX = target.x;
+            float targetY = target.y;
 
             CircularBubbleView sub = new CircularBubbleView(
                 getContext(), childItem, resolvedStyle, iconSizeInt, systemuiClassLoader, config
             );
+            sub.setIsSubBubble(true);
+            sub.setGhostLayer(ghostLayer);
+            sub.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
             sub.targetX = targetX;
             sub.targetY = targetY;
 
             LayoutParams lp = new LayoutParams(iconSizeInt, iconSizeInt);
-            lp.leftMargin = (int) (targetX - iconSizePx / 2f);
-            lp.topMargin = (int) (targetY - iconSizePx / 2f);
+            lp.leftMargin = (int) (targetX - childIconSizePx / 2f);
+            lp.topMargin = (int) (targetY - childIconSizePx / 2f);
             sub.setLayoutParams(lp);
 
             sub.setTranslationX(folderBubble.targetX - targetX);
             sub.setTranslationY(folderBubble.targetY - targetY);
-            sub.setScaleX(0.1f);
-            sub.setScaleY(0.1f);
+            sub.setScaleX(Math.max(0.05f, cfg.folderChildStartScale));
+            sub.setScaleY(Math.max(0.05f, cfg.folderChildStartScale));
             sub.setAlpha(0f);
 
             bubblesContainer.addView(sub);
             folderSubBubbles.add(sub);
+            createdSubs.add(sub);
             sub.ensureBlurAndRefreshBackground();
-
-            sub.animate()
-                .translationX(0f)
-                .translationY(0f)
-                .scaleX(1.0f)
-                .scaleY(1.0f)
-                .alpha(1.0f)
-                .setInterpolator(EXPAND_INTERPOLATOR)
-                .setDuration(180)
-                .setStartDelay(i * 15L)
-                .setUpdateListener(anim -> sub.syncBlurCornerRadiusWithViewScale())
-                .start();
         }
+        FolderChildAnimator.playExpand(createdSubs, folderBubble, cfg, pack.animationOrder);
     }
 
     /**
@@ -1215,26 +1290,18 @@ public class CustomHyperOpenContainer extends FrameLayout {
         if (!animated) {
             for (CircularBubbleView sub : subs) {
                 sub.animate().cancel();
+                sub.resetBlur();
                 bubblesContainer.removeView(sub);
             }
         } else {
-            // 子气泡向文件夹中心收拢 + 缩小 + 淡出，播完后从容器移除
-            for (CircularBubbleView sub : subs) {
-                sub.animate().cancel();
-                float toX = (folder != null ? folder.targetX : sub.targetX) - sub.targetX;
-                float toY = (folder != null ? folder.targetY : sub.targetY) - sub.targetY;
-                sub.animate()
-                    .translationX(toX)
-                    .translationY(toY)
-                    .scaleX(0.2f)
-                    .scaleY(0.2f)
-                    .alpha(0f)
-                    .setDuration(140)
-                    .setInterpolator(new android.view.animation.AccelerateInterpolator())
-                    .setUpdateListener(anim -> sub.syncBlurCornerRadiusWithViewScale())
-                    .withEndAction(() -> bubblesContainer.removeView(sub))
-                    .start();
-            }
+            CircularBubbleView collapseTarget = folder != null ? folder : subs.get(0);
+            FolderChildAnimator.playCollapse(subs, collapseTarget, config, () -> {
+                for (CircularBubbleView sub : subs) {
+                    sub.animate().cancel();
+                    sub.resetBlur();
+                    bubblesContainer.removeView(sub);
+                }
+            });
         }
 
         // 恢复一级气泡大小与透明度（含文件夹图标）：
@@ -1246,14 +1313,22 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 b.animate()
                     .scaleX(1.0f)
                     .scaleY(1.0f)
-                    .setDuration(140)
+                    .setDuration(Math.max(0, config != null ? config.folderChildCollapseDurationMs : 140))
                     .setInterpolator(new android.view.animation.LinearInterpolator())
-                    .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
-                    .withEndAction(() -> { b.applyScale(1.0f); b.ensureBlurAndRefreshBackground(); })
+                    .setUpdateListener(anim -> {
+                        b.syncBlurCornerRadiusWithViewScale();
+                        b.clearGhost();
+                    })
+                    .withEndAction(() -> {
+                        b.applyScale(1.0f);
+                        b.ensureBlurAndRefreshBackground();
+                        b.clearGhost();
+                    })
                     .start();
             } else {
                 b.applyScale(1.0f);
                 b.ensureBlurAndRefreshBackground();
+                b.clearGhost();
             }
             b.setIconAlpha(targetAlpha);
         }
@@ -1263,6 +1338,30 @@ public class CustomHyperOpenContainer extends FrameLayout {
         return (int) TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP, dp, getResources().getDisplayMetrics()
         );
+    }
+
+    private float[] folderSafeBounds() {
+        float margin = dpToPx(8);
+        float left = margin;
+        float top = margin;
+        float right = getWidth() - margin;
+        float bottom = getHeight() - margin;
+        android.view.WindowInsets insets = getRootWindowInsets();
+        if (insets != null) {
+            android.graphics.Insets systemInsets = insets.getSystemWindowInsets();
+            left = Math.max(left, systemInsets.left);
+            top = Math.max(top, systemInsets.top);
+            right = Math.min(right, getWidth() - systemInsets.right);
+            bottom = Math.min(bottom, getHeight() - systemInsets.bottom);
+            android.view.DisplayCutout cutout = insets.getDisplayCutout();
+            if (cutout != null) {
+                left = Math.max(left, cutout.getSafeInsetLeft());
+                top = Math.max(top, cutout.getSafeInsetTop());
+                right = Math.min(right, getWidth() - cutout.getSafeInsetRight());
+                bottom = Math.min(bottom, getHeight() - cutout.getSafeInsetBottom());
+            }
+        }
+        return new float[]{left, top, right, bottom};
     }
 
     private float dpToPx(float dp) {

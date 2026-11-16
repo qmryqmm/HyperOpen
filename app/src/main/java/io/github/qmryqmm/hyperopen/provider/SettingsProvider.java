@@ -190,9 +190,7 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putInt("icon_size", sp.getInt("icon_size", 60));
                 bundle.putInt("max_icon_count", sp.getInt("max_icon_count", 0));
                 bundle.putInt("layout_style", sp.getInt("layout_style", HyperOpenConfig.LAYOUT_HONEYCOMB));
-                bundle.putBoolean("stock_system_anim", sp.getBoolean("stock_system_anim", true));
                 bundle.putBoolean("stock_system_region", sp.getBoolean("stock_system_region", true));
-                bundle.putInt("ring_count", sp.getInt("ring_count", 2));
                 bundle.putBoolean("ring_sector_mode", sp.getBoolean("ring_sector_mode", true));
                 bundle.putInt("sector_line_color", sp.getInt("sector_line_color", 0xFFBFBFBF));
                 bundle.putFloat("sector_line_alpha", sp.getFloat("sector_line_alpha", 0.4f));
@@ -201,7 +199,17 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putFloat("sector_line_width", sp.getFloat("sector_line_width", 1.2f));
                 bundle.putBoolean("sector_highlight_enabled", sp.getBoolean("sector_highlight_enabled", true));
                 bundle.putInt("anim_duration_ms", sp.getInt("anim_duration_ms", 320));
+                bundle.putInt("panel_expand_anim_type", HyperOpenConfig.normalizePanelExpandAnimType(
+                        sp.getInt("panel_expand_anim_type", HyperOpenConfig.PANEL_EXPAND_BLOOM),
+                        sp.getInt("layout_style", HyperOpenConfig.LAYOUT_HONEYCOMB),
+                        sp.getBoolean("stock_system_anim", true)
+                ));
+                bundle.putInt("panel_expand_stagger_ms", sp.getInt("panel_expand_stagger_ms", 12));
                 bundle.putBoolean("dismiss_anim_enabled", sp.getBoolean("dismiss_anim_enabled", true));
+                bundle.putInt("panel_collapse_anim_type", sp.getInt("panel_collapse_anim_type", HyperOpenConfig.PANEL_COLLAPSE_SELECTED_POP));
+                bundle.putInt("panel_collapse_duration_ms", sp.getInt("panel_collapse_duration_ms", 120));
+                bundle.putInt("panel_collapse_stagger_ms", sp.getInt("panel_collapse_stagger_ms", 0));
+                bundle.putFloat("panel_selected_pop_scale", sp.getFloat("panel_selected_pop_scale", 1.30f));
                 bundle.putInt("global_hint_color_mode", sp.getInt("global_hint_color_mode", HyperOpenConfig.HINT_COLOR_MODE_AUTO));
                 bundle.putInt("global_hint_custom_color", sp.getInt("global_hint_custom_color", 0xFFFFFFFF));
                 bundle.putInt("default_hint_text_stroke", sp.getInt("default_hint_text_stroke", 0));
@@ -211,6 +219,22 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putBoolean("default_show_hint_title", sp.getBoolean("default_show_hint_title", true));
                 bundle.putBoolean("default_show_hint_subtitle", sp.getBoolean("default_show_hint_subtitle", true));
                 bundle.putInt("folder_hover_delay_ms", sp.getInt("folder_hover_delay_ms", 250));
+                bundle.putFloat("folder_child_display_range_scale", sp.getFloat("folder_child_display_range_scale", 1f));
+                bundle.putInt("folder_child_direction_mode", HyperOpenConfig.normalizeFolderChildDirectionMode(
+                        sp.getInt("folder_child_direction_mode", HyperOpenConfig.FOLDER_CHILD_DIRECTION_OUTWARD)
+                ));
+                bundle.putFloat("folder_child_direction_offset_deg", sp.getFloat("folder_child_direction_offset_deg", 0f));
+                bundle.putInt("folder_child_order_mode", sp.getInt("folder_child_order_mode", 0));
+                bundle.putInt("folder_child_min_gap_dp", sp.getInt("folder_child_min_gap_dp", 8));
+                bundle.putFloat("folder_child_size_scale", sp.getFloat("folder_child_size_scale", 1f));
+                bundle.putInt("folder_child_expand_anim_type", sp.getInt("folder_child_expand_anim_type", HyperOpenConfig.FOLDER_CHILD_EXPAND_FAN_SPRING));
+                bundle.putInt("folder_child_expand_duration_ms", sp.getInt("folder_child_expand_duration_ms", 180));
+                bundle.putInt("folder_child_expand_stagger_ms", sp.getInt("folder_child_expand_stagger_ms", 15));
+                bundle.putInt("folder_child_collapse_anim_type", sp.getInt("folder_child_collapse_anim_type", HyperOpenConfig.FOLDER_CHILD_COLLAPSE_CENTER));
+                bundle.putInt("folder_child_collapse_duration_ms", sp.getInt("folder_child_collapse_duration_ms", 140));
+                bundle.putInt("folder_child_collapse_stagger_ms", sp.getInt("folder_child_collapse_stagger_ms", 0));
+                bundle.putFloat("folder_child_start_scale", sp.getFloat("folder_child_start_scale", 0.1f));
+                bundle.putFloat("folder_child_overshoot", sp.getFloat("folder_child_overshoot", 1.2f));
                 bundle.putFloat("max_scale", sp.getFloat("max_scale", 1.60f));
                 bundle.putInt("influence_radius", sp.getInt("influence_radius", 70));
                 bundle.putFloat("icon_alpha", sp.getFloat("icon_alpha", 1.0f));

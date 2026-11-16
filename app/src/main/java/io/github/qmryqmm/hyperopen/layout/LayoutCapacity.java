@@ -27,11 +27,10 @@ public class LayoutCapacity {
      * @param regionRadiusPx   圆形视界半径 px（与排布调用点的 regionRadiusPx 同源）
      * @param iconSizePx       图标直径 px
      * @param spacingOffsetPx  紧凑程度偏移 px
-     * @param ringCount        圆环圈数（仅 LAYOUT_RING 生效）
      * @return 当前几何下最多可容纳的图标数（1 ~ MAX_VISIBLE）
      */
     public static int maxFeasibleCount(int layoutStyle, float regionRadiusPx, float iconSizePx,
-                                       float spacingOffsetPx, int ringCount) {
+                                       float spacingOffsetPx) {
         // 弧形扇面与系统扇形布局无蜂窝拥挤几何上限（系统扇形经典支持 3~5 项，向上兼容至多项），按滑块设计上限处理
         if (layoutStyle == HyperOpenConfig.LAYOUT_ARC || layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
             return MAX_VISIBLE;
@@ -40,7 +39,7 @@ public class LayoutCapacity {
         List<PointF> pts;
         if (layoutStyle == HyperOpenConfig.LAYOUT_RING) {
             pts = HollowRingPacking.calculatePoints(PROBE_COUNT, 0f, 0f,
-                    regionRadiusPx, iconSizePx, spacingOffsetPx, ringCount);
+                    regionRadiusPx, iconSizePx, spacingOffsetPx);
         } else {
             pts = CircularHoneycombPacking.calculatePoints(PROBE_COUNT, 0f, 0f,
                     regionRadiusPx, iconSizePx, spacingOffsetPx);

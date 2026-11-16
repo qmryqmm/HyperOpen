@@ -158,9 +158,7 @@ public final class SafetyGuard {
             // 否则一旦 Hook 在安装过程中就崩掉，这次崩溃就归不了因。
             call(ctx, M_PROVIDER_MARK, null);
             scheduleHeartbeat();
-            // 不再启用死循环式的 10s 运行期巡检 (startRuntimeWatch)：
-            // 避免在用户长时间不用手机、模块 App 进程被系统深度冻结/杀死后，因跨进程 IPC 异常引发误停用。
-            // 外部安全状态变更统一通过广播按需驱动刷新。
+            // 外部安全状态变更通过广播按需驱动刷新。
         }
 
         return allowed;
@@ -392,46 +390,6 @@ public final class SafetyGuard {
     // ──────────────────────────────────────────────────────────────
     // 存活确认
     // ──────────────────────────────────────────────────────────────
-
-    /** 运行期巡检间隔：用户可能在模块界面手动进入/退出安全模式，需要及时跟随 */
-    private static final long WATCH_INTERVAL_MS = 10 * 1000L;
-    private static boolean watching = false;
-
-    /**
-     * 启动运行期巡检。
-     *
-     * Hook 已经装好之后，安全模式仍可能被外部激活（用户在模块界面点「进入安全模式」、
-     * 关闭 Hook 总开关、或崩溃哨兵在别的路径上报成功）。巡检定期查询状态，
-     * 一旦发现不允许，立刻执行即时停用。查询失败时不做任何动作，避免误停。
-     */
-    private static synchronized void startRuntimeWatch() {
-        if (watching) {
-            return;
-        }
-        watching = true;
-        // 巡检在后台 IPC 线程执行：Provider 所在的模块进程可能被冻结，
-        // 绝不能在 SystemUI 主线程上每 10 秒做一次同步跨进程调用
-        IpcExecutor.runAsyncDelayed(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    if (deactivated.get()) {
-                        watching = false; // 已停用，无需继续巡检
-                        return;
-                    }
-                    refresh();
-                } catch (Throwable t) {
-                    Log.w(TAG, "安全模式巡检异常", t);
-                }
-                if (!deactivated.get()) {
-                    IpcExecutor.runAsyncDelayed(this, WATCH_INTERVAL_MS);
-                } else {
-                    watching = false;
-                }
-            }
-        }, WATCH_INTERVAL_MS);
-        Log.i(TAG, "安全模式运行期巡检已启动（间隔 " + (WATCH_INTERVAL_MS / 1000L) + " 秒）");
-    }
 
     private static void scheduleHeartbeat() {
         try {

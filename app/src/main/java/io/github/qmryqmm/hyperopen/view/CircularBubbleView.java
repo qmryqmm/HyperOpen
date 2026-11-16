@@ -1,9 +1,15 @@
 package io.github.qmryqmm.hyperopen.view;
 
 import android.content.Context;
+import android.graphics.Canvas;
 import android.graphics.Outline;
+import android.graphics.Path;
 import android.graphics.Rect;
+import android.graphics.RenderEffect;
+import android.graphics.RenderNode;
+import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -41,14 +47,27 @@ public class CircularBubbleView extends FrameLayout {
     /** 上次应用的配置签名（updateConfig 变更检测） */
     private long lastConfigSignature;
     private final ImageView iconView;
-    /** 光学层承载 View（背景 = CircularBubbleDrawable）：blur drawable 必须独占本 View 的背景槽 */
+    /** 高斯模糊专用底层承载 View（方案一：逆缩放 1.0 物理坐标系绘制 BackgroundBlurDrawable，彻底消除圆角刺角与正圆畸变） */
+    private final BlurCarrierView blurCarrierView;
+    /** 光学层承载 View（背景 = CircularBubbleDrawable；柔光玻璃模式下同时承载系统原生硬件 setMiGlass） */
     private final View opticView;
+    /** 幻影视图：玻璃层内采样「除自身外」邻居气泡的磨砂虚影（见 {@link IconGhostLayer}） */
+    private final GhostView ghostView;
+    /** 以下三字段由 {@link IconGhostLayer} 录制时读写（同包） */
+    IconGhostLayer ghostLayer;
+    RenderNode ghostNode;
+    float ghostSizePx;
+    private final Path ghostClipPath = new Path();
+    /** 是否为文件夹展开后的二级子气泡（子气泡基准 Z 轴高于一级文件夹，避免被父级遮挡） */
+    private boolean isSubBubble = false;
 
     @NonNull
     private final HyperOSMaterialFactory.CircularBubbleDrawable opticDrawable;
     /** 系统级背景模糊统一会话（与圆形视界底衬 / 顶部提示胶囊共用同一生命周期实现） */
     @NonNull
     private final BlurRegionSession blurSession = new BlurRegionSession();
+    /** 上次同步到 blur region 的缩放；平移动画不重复重绘模糊载体 */
+    private float lastBlurGeometryScale = -1f;
     private boolean systemBlurEnabled = true;
 
     public CircularBubbleView(@NonNull Context context, ShortcutItem item, int style, int sizePx, ClassLoader classLoader, HyperOpenConfig config) {
@@ -71,26 +90,44 @@ public class CircularBubbleView extends FrameLayout {
         this.opticDrawable.setCornerRadiusPercent(this.cornerRadiusPercent);
 
         setLayoutParams(new LayoutParams(sizePx, sizePx));
-        setOutlineProvider(new ViewOutlineProvider() {
+        setClipToOutline(false);
+        setClipChildren(false);
+        setClipToPadding(false);
+
+        // 0. 高斯模糊底层承载视图（仅在高斯模糊模式下启用，柔光玻璃模式下隐藏）
+        blurCarrierView = new BlurCarrierView(context);
+        LayoutParams blurLp = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
+        blurLp.gravity = Gravity.CENTER;
+        addView(blurCarrierView, blurLp);
+
+        // 1. 幻影视图：采样邻居气泡的磨砂虚影，层序 = 背景模糊 → 幻影 → 光学层(或原生柔光玻璃) → 图标
+        ghostView = new GhostView(context);
+        ghostView.setOutlineProvider(new ViewOutlineProvider() {
             @Override
             public void getOutline(View view, Outline outline) {
                 int w = view.getWidth() > 0 ? view.getWidth() : sizePx;
                 int h = view.getHeight() > 0 ? view.getHeight() : sizePx;
-                float maxR = Math.min(w, h) / 2f;
-                if (maxR <= 0f) return;
-                // 圆角比例公式与 BubbleBlurSpec / 光学层 / 图标裁切严格同一实现
                 float corner = BubbleBlurSpec.cornerRadiusPx(Math.min(w, h), cornerRadiusPercent);
                 outline.setRoundRect(0, 0, w, h, corner);
             }
         });
-        setClipToOutline(true);
-        setClipChildren(false);
-        setClipToPadding(false);
+        ghostView.setClipToOutline(true);
+        LayoutParams ghostLp = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
+        ghostLp.gravity = Gravity.CENTER;
+        addView(ghostView, ghostLp);
 
-        // 光学层承载 View：背景挂 CircularBubbleDrawable（与圆形视界底衬同一光学实现）。
-        // blur drawable 需要独占本 View 的背景槽——系统界面 BackgroundBlurDrawable 的
-        // 注册链路由 view.setBackground 驱动（见 BlurRegionSession 契约注释）
+        // 2. 光学层承载 View：背景挂 CircularBubbleDrawable，并设置圆角 Outline 供系统原生柔光玻璃 SDF 读取
         opticView = new View(context);
+        opticView.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                int w = view.getWidth() > 0 ? view.getWidth() : sizePx;
+                int h = view.getHeight() > 0 ? view.getHeight() : sizePx;
+                float corner = BubbleBlurSpec.cornerRadiusPx(Math.min(w, h), cornerRadiusPercent);
+                outline.setRoundRect(0, 0, w, h, corner);
+            }
+        });
+        opticView.setClipToOutline(true);
         opticView.setBackground(opticDrawable);
         LayoutParams opticLp = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
         opticLp.gravity = Gravity.CENTER;
@@ -202,6 +239,18 @@ public class CircularBubbleView extends FrameLayout {
     }
 
     @Override
+    protected void onDetachedFromWindow() {
+        if (opticView != null) {
+            HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(opticView);
+        }
+        blurSession.release();
+        if (blurCarrierView != null) {
+            blurCarrierView.setVisibility(GONE);
+        }
+        super.onDetachedFromWindow();
+    }
+
+    @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
         if (w > 0 && h > 0 && systemBlurEnabled && (w != oldw || h != oldh)) {
@@ -222,28 +271,6 @@ public class CircularBubbleView extends FrameLayout {
         return HyperOSMaterialFactory.GlassParams.fromConfig(null);
     }
 
-    /**
-     * blur region 圆角 = 本地几何圆角（<b>不乘缩放</b>）。
-     * <p>
-     * background 挂载契约下，blur region 的注册锚点携带视图 RenderNode 变换
-     * （setScaleX/Y 的鱼眼缩放），缩放由锚点天然携带；若再乘 scale 预补偿，
-     * 缩放会被应用两次（区域按倍率²增长），表现为放大时气泡外鼓出一圈
-     * 半透明磨砂底衬。历史上的「本地圆角 × scale」补偿只适用于旧的
-     * 字段持有注册锚点（不含视图变换），background 契约下必须去掉。
-     */
-    private float getBlurCornerRadiusPx() {
-        int w = getWidth() > 0 ? getWidth() : sizePx;
-        int h = getHeight() > 0 ? getHeight() : sizePx;
-        return BubbleBlurSpec.cornerRadiusPx(Math.min(w, h), cornerRadiusPercent);
-    }
-
-    /** blur region bounds = 视图本地 bounds（缩放由注册锚点携带，严禁再预缩放） */
-    private Rect blurBounds() {
-        int w = getWidth() > 0 ? getWidth() : sizePx;
-        int h = getHeight() > 0 ? getHeight() : sizePx;
-        return new Rect(0, 0, w, h);
-    }
-
     private int getBlurRadiusPx() {
         // 留白 0% = 气泡整体关闭，气泡模糊跟随停用（开关规格统一由 BubbleBlurSpec 提供）
         if (!systemBlurEnabled || !BubbleBlurSpec.isEnabled(blurRadiusDp, paddingPercent)) return 0;
@@ -261,6 +288,8 @@ public class CircularBubbleView extends FrameLayout {
     }
 
     private void refreshBackground() {
+        int resolved = HyperOSMaterialFactory.resolveActiveStyle(getContext(), activeStyle);
+        this.activeStyle = resolved;
         HyperOSMaterialFactory.GlassParams glassParams = glassParams();
         opticDrawable.setStyle(activeStyle);
         opticDrawable.setGlassParams(glassParams);
@@ -268,42 +297,108 @@ public class CircularBubbleView extends FrameLayout {
         opticDrawable.setCornerRadiusPercent(cornerRadiusPercent);
         applyEffectiveDim();
 
+        if (getBackground() != null) {
+            setBackground(null);
+        }
+
         if (paddingPercent <= 0) {
             // 留白 0% = 气泡整体关闭：不绘制气泡底衬，模糊与压暗一并停用，仅保留图标
             blurSession.release();
-            if (getBackground() != null) {
-                setBackground(null);
+            if (blurCarrierView != null) {
+                blurCarrierView.setVisibility(GONE);
             }
             if (opticView != null) {
+                HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(opticView);
+                opticDrawable.setNativeGlassActive(false);
                 opticView.setVisibility(GONE);
             }
             return;
         }
         if (opticView != null) {
             opticView.setVisibility(VISIBLE);
+            opticView.invalidateOutline();
         }
 
         int blurPx = getBlurRadiusPx();
-        Drawable blur = null;
-        if (blurPx > 0) {
+        int w = getWidth() > 0 ? getWidth() : sizePx;
+        int h = getHeight() > 0 ? getHeight() : sizePx;
+
+        // 模式 A：柔光玻璃（且设备支持系统原生硬件柔光玻璃）
+        if (activeStyle == HyperOSMaterialFactory.STYLE_SOFT_GLASS
+                && HyperOSMaterialFactory.isSoftGlassSupported()
+                && opticView != null) {
+            blurSession.release();
+            if (blurCarrierView != null) {
+                blurCarrierView.setVisibility(GONE);
+            }
+            boolean applied = false;
+            if (systemBlurEnabled) {
+                applied = HyperOSMaterialFactory.SystemNativeGlassAdapter.applyGlass(
+                    opticView, glassParams, Math.max(15, blurPx), w, h
+                );
+            } else {
+                HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(opticView);
+            }
+            opticDrawable.setNativeGlassActive(applied);
+            if (applied) {
+                if (opticView.getBackground() != null) {
+                    opticView.setBackground(null);
+                }
+                if (opticView.getForeground() != opticDrawable) {
+                    opticView.setForeground(opticDrawable);
+                }
+            } else {
+                restoreOpticDrawableLayer();
+            }
+            opticView.invalidate();
+            return;
+        }
+
+        // 模式 B：高斯模糊（或不支持原生柔光玻璃的回退模式）——启用方案一逆缩放 1.0 物理坐标系 BlurCarrierView
+        if (opticView != null) {
+            HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(opticView);
+            restoreOpticDrawableLayer();
+        }
+        opticDrawable.setNativeGlassActive(false);
+
+        if (blurPx > 0 && blurCarrierView != null) {
             int tint = HyperOSMaterialFactory.getUnifiedBlurTint(activeStyle, glassParams);
-            blur = blurSession.ensureFor(this, blurBounds(), getBlurCornerRadiusPx(), blurPx, tint);
+            float s = Math.max(0.01f, getScaleX());
+            int halfW = Math.round(w * s / 2f);
+            int halfH = Math.round(h * s / 2f);
+            Rect initBounds = new Rect(-halfW, -halfH, halfW, halfH);
+            float initCorner = BubbleBlurSpec.scaledCornerRadiusPx(Math.min(w, h), cornerRadiusPercent, s);
+            Drawable blur = blurSession.ensureFor(blurCarrierView, initBounds, initCorner, blurPx, tint);
+            if (blur != null) {
+                blur.setCallback(blurCarrierView);
+                blurCarrierView.setVisibility(VISIBLE);
+                blurCarrierView.invalidate();
+            } else {
+                blurCarrierView.setVisibility(GONE);
+            }
         } else {
             blurSession.release();
+            if (blurCarrierView != null) {
+                blurCarrierView.setVisibility(GONE);
+            }
         }
-        // 系统界面契约：blur drawable 必须挂背景槽完成 blur region 注册
-        if (getBackground() != blur) {
-            setBackground(blur);
+    }
+
+    private void restoreOpticDrawableLayer() {
+        if (opticView == null) return;
+        if (opticView.getForeground() != null) {
+            opticView.setForeground(null);
         }
-        if (blur != null) {
-            syncBlurCornerRadiusWithViewScale();
+        if (opticView.getBackground() != opticDrawable) {
+            opticView.setBackground(opticDrawable);
         }
     }
 
     public void setMaterialStyle(int style) {
-        if (this.activeStyle != style) {
-            this.activeStyle = style;
-            opticDrawable.setStyle(style);
+        int resolved = HyperOSMaterialFactory.resolveActiveStyle(getContext(), style);
+        if (this.activeStyle != resolved) {
+            this.activeStyle = resolved;
+            opticDrawable.setStyle(resolved);
             ensureBlurAndRefreshBackground();
         }
     }
@@ -343,6 +438,12 @@ public class CircularBubbleView extends FrameLayout {
             this.cornerRadiusPercent = clamped;
             opticDrawable.setCornerRadiusPercent(clamped);
             invalidateOutline();
+            if (opticView != null) {
+                opticView.invalidateOutline();
+            }
+            if (ghostView != null) {
+                ghostView.invalidateOutline();
+            }
             loadItemIcon();
             ensureBlurAndRefreshBackground();
         }
@@ -359,9 +460,20 @@ public class CircularBubbleView extends FrameLayout {
         this.currentScale = 1.0f;
         setScaleX(1.0f);
         setScaleY(1.0f);
+        setTranslationZ(isSubBubble ? 100f : 0f);
         opticDrawable.setSelected(false);
         blurSession.release();
-        refreshBackground();
+        if (blurCarrierView != null) {
+            blurCarrierView.setVisibility(GONE);
+        }
+        if (opticView != null) {
+            HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(opticView);
+            opticDrawable.setNativeGlassActive(false);
+        }
+        if (ghostView != null) {
+            ghostView.clearBlurEffect();
+            ghostView.invalidate();
+        }
     }
 
     public void setIconAlpha(float alpha) {
@@ -400,24 +512,36 @@ public class CircularBubbleView extends FrameLayout {
             this.currentScale = fisheyeScale;
             setScaleX(fisheyeScale);
             setScaleY(fisheyeScale);
+            // 鱼眼缩放提升 Z 轴：子气泡基准 100f，一级气泡基准 0f；放大越大的气泡 Z 轴越高
+            float baseZ = isSubBubble ? 100f : 0f;
+            setTranslationZ(baseZ + Math.max(0f, (fisheyeScale - 1.0f) * 50f));
             // 鱼眼/动画逐帧同步背景模糊圆角：blur region 的 bounds 走变换后窗口坐标，
             // 圆角必须乘 scale 才能严格贴合放大后的图标区域（否则模糊呈圆角方形溢出）
             syncBlurCornerRadiusWithViewScale();
+            // 仅在需要绘制虚影或需要清除旧虚影时失效，避免常态鱼眼微调触发昂贵的逐气泡模糊。
+            if (ghostView != null && (isSubBubble
+                    || fisheyeScale > 1.005f
+                    || ghostView.hasBlurEffect())) {
+                ghostView.invalidate();
+            }
         }
     }
 
     /**
      * 同步 blur region 几何。
      * <p>
-     * 缩放已由注册锚点（视图 RenderNode 变换）携带，本地几何（bounds / 圆角）
-     * 不随缩放改变——保留此入口用于尺寸 / 圆角变化后的兜底同步；
-     * 鱼眼逐帧调用时内部几何未变即短路，零反射开销。
-     * （历史注释中「getLocationInWindow 不随 setScaleX/Y 变化需手动预缩放」的
-     * 结论只适用于旧字段持有锚点；background 契约下再预缩放会双重放大，
-     * 表现为放大时气泡外鼓出一圈半透明底衬。）
+     * BlurCarrierView 在 onDraw 中按当前缩放同步窗口坐标 bounds 与圆角，
+     * 本入口仅在缩放变化时失效承载视图，使其重新执行几何同步；
+     * 平移或其他不改变缩放的动画不会触发重新绘制。
      */
     public void syncBlurCornerRadiusWithViewScale() {
-        blurSession.syncGeometry(blurBounds(), getBlurCornerRadiusPx());
+        float scale = Math.max(0.01f, getScaleX());
+        if (blurCarrierView != null
+                && blurCarrierView.getVisibility() == VISIBLE
+                && blurSession.isActive()
+                && Math.abs(scale - lastBlurGeometryScale) > 0.002f) {
+            blurCarrierView.invalidate();
+        }
     }
 
     public void loadItemIcon() {
@@ -431,5 +555,184 @@ public class CircularBubbleView extends FrameLayout {
         iconView.requestLayout();
         iconView.invalidate();
         invalidate();
+    }
+
+    /** 注入幻影层（容器持有、三载体玻璃层共用）；列表卡片等无重叠场景传 null 即可 */
+    public void setGhostLayer(@Nullable IconGhostLayer layer) {
+        if (this.ghostLayer == layer) return;
+        this.ghostLayer = layer;
+        if (ghostView != null) {
+            ghostView.invalidate();
+        }
+    }
+
+    /** 标记是否为文件夹展开后的子气泡（置于父级文件夹图标上方） */
+    public void setIsSubBubble(boolean isSub) {
+        this.isSubBubble = isSub;
+        setTranslationZ(isSub ? 100f : 0f);
+    }
+
+    /** 显式清空幻影视图的硬件模糊滤镜与画面内容，消除残影 */
+    public void clearGhost() {
+        if (ghostView != null) {
+            ghostView.clearBlurEffect();
+            ghostView.invalidate();
+        }
+    }
+
+    /** 驱动幻影视图同步重绘（动画展开/缩放过程逐帧调用） */
+    public void syncGhost() {
+        if (ghostView != null) {
+            ghostView.invalidate();
+        }
+    }
+
+    /**
+     * 供 {@link IconGhostLayer} 录制的「完整视觉」：光学层（雾面+描边）+ 图标。
+     * <b>刻意不含幻影视图与背景模糊</b>——前者避免幻影节点互相嵌套引用（递归），
+     * 后者避免窗口级模糊被录进幻影（幻影只应承载图标内容）。
+     */
+    void drawVisualForGhost(@NonNull Canvas canvas) {
+        int w = getWidth();
+        int h = getHeight();
+        if (w <= 0 || h <= 0) return;
+
+        canvas.save();
+        float corner = BubbleBlurSpec.cornerRadiusPx(Math.min(w, h), cornerRadiusPercent);
+        ghostClipPath.reset();
+        ghostClipPath.addRoundRect(0f, 0f, (float) w, (float) h, corner, corner, Path.Direction.CW);
+        canvas.clipPath(ghostClipPath);
+
+        // 1. 光学层（底衬 + 磨砂 + 边框）：直接绘制 opticDrawable，规避硬件加速 View 跨树 draw 的约束
+        if (paddingPercent > 0 && opticDrawable != null) {
+            opticDrawable.setBounds(0, 0, w, h);
+            opticDrawable.drawForGhost(canvas);
+        }
+        // 2. 图标层：直接调用 iconView.draw(canvas)，由 ImageView 自行处理 FIT_CENTER Matrix 与 padding，
+        // 严禁直接篡改 iconView.getDrawable().setBounds()，否则会污染宿主 ImageView 自身的居中矩阵导致真实图标错位
+        if (iconView != null && iconView.getVisibility() == VISIBLE) {
+            float alpha = iconView.getAlpha();
+            int alphaInt = Math.round(alpha * 255f);
+            if (alphaInt > 0) {
+                if (alphaInt < 255) {
+                    canvas.saveLayerAlpha(0, 0, w, h, alphaInt);
+                    iconView.draw(canvas);
+                    canvas.restore();
+                } else {
+                    iconView.draw(canvas);
+                }
+            }
+        }
+        canvas.restore();
+    }
+
+    /**
+     * 方案一：高斯模糊专用逆缩放 1.0 物理坐标系承载视图。
+     * 通过在 onDraw 中绕中心逆缩放 1f/s，抵消父级 CircularBubbleView 的鱼眼缩放 s，
+     * 使 BackgroundBlurDrawable 的本地挖孔路径 mRectPath 与提交给 SurfaceFlinger 的
+     * 窗口物理坐标 BlurRegion 在 1.0 物理像素坐标系下 100% 全等，彻底消除刺角与变正圆悖论。
+     */
+    private class BlurCarrierView extends View {
+        private final Rect carrierBounds = new Rect();
+
+        BlurCarrierView(Context context) {
+            super(context);
+            setWillNotDraw(false);
+        }
+
+        @Override
+        protected boolean verifyDrawable(@NonNull Drawable who) {
+            return who == blurSession.drawable() || super.verifyDrawable(who);
+        }
+
+        @Override
+        protected void onDraw(@NonNull Canvas canvas) {
+            super.onDraw(canvas);
+            Drawable bd = blurSession.drawable();
+            int w = getWidth();
+            int h = getHeight();
+            if (bd == null || paddingPercent <= 0 || w <= 0 || h <= 0) {
+                return;
+            }
+            float s = Math.max(0.01f, CircularBubbleView.this.getScaleX());
+            lastBlurGeometryScale = s;
+            int halfW = Math.round(w * s / 2f);
+            int halfH = Math.round(h * s / 2f);
+            carrierBounds.set(-halfW, -halfH, halfW, halfH);
+            float scaledCorner = BubbleBlurSpec.scaledCornerRadiusPx(Math.min(w, h), cornerRadiusPercent, s);
+            blurSession.syncGeometry(carrierBounds, scaledCorner);
+
+            canvas.save();
+            canvas.translate(w / 2f, h / 2f);
+            canvas.scale(1f / s, 1f / s);
+            bd.draw(canvas);
+            canvas.restore();
+        }
+    }
+
+    /**
+     * 幻影视图：绘制时反鱼眼变换后采样幻影节点——
+     * 邻居虚影以容器真实坐标 / 真实大小呈现（放大中不会跟着放大，符合物理直觉）。
+     */
+    private class GhostView extends View {
+        private float lastBlurPx = -1f;
+
+        GhostView(Context context) {
+            super(context);
+            setWillNotDraw(false);
+            setAlpha(0.65f);
+        }
+
+        private void updateBlurEffect(float blurPx) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
+            float b = Math.max(20f, blurPx);
+            if (Math.abs(lastBlurPx - b) > 0.5f) {
+                lastBlurPx = b;
+                setRenderEffect(RenderEffect.createBlurEffect(b, b, Shader.TileMode.CLAMP));
+            }
+        }
+
+        private void clearBlurEffect() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
+            if (lastBlurPx >= 0f) {
+                lastBlurPx = -1f;
+                setRenderEffect(null);
+            }
+        }
+
+        private boolean hasBlurEffect() {
+            return lastBlurPx >= 0f;
+        }
+
+        @Override
+        protected void onDraw(@NonNull Canvas canvas) {
+            super.onDraw(canvas);
+            if (ghostLayer == null || paddingPercent <= 0 || getWidth() <= 0 || getHeight() <= 0) {
+                clearBlurEffect();
+                return;
+            }
+            // 本视图随气泡父级被缩放；GhostView 自身的 getScaleX() 恒为 1，
+            // 必须读取父级 CircularBubbleView 的鱼眼倍率做反向缩放，幻影才保持真实大小。
+            float s = CircularBubbleView.this.getScaleX();
+            // 面板入场/退场的瞬时 View 动画缩放不生成邻居虚影；
+            // 只有真实鱼眼状态或文件夹二级子项才承担高成本的逐气泡幻影模糊。
+            boolean shouldDraw = isSubBubble
+                    || (CircularBubbleView.this.fisheyeScale > 1.005f && s > 1.005f);
+            if (!shouldDraw) {
+                // 常态未放大且非子气泡，彻底移除硬件模糊滤镜，不绘制任何内容（录制空 DisplayList 消除残影）
+                clearBlurEffect();
+                return;
+            }
+            if (ghostLayer.getBlurRadiusPx() <= 0f) {
+                clearBlurEffect();
+                return;
+            }
+            updateBlurEffect(ghostLayer.getBlurRadiusPx());
+            canvas.save();
+            canvas.translate(getWidth() / 2f, getHeight() / 2f);
+            canvas.scale(1f / s, 1f / s);
+            ghostLayer.drawDirect(canvas, CircularBubbleView.this, s);
+            canvas.restore();
+        }
     }
 }

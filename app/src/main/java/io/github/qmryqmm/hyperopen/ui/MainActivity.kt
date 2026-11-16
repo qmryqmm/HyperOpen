@@ -42,4 +42,5 @@ class MainActivity : ComponentActivity() {
             HyperOpenApp(activity = this, initialConfig = config)
         }
     }
+
 }
