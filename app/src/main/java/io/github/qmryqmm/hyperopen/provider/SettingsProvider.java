@@ -283,6 +283,15 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putFloat("glass_matte_alpha", sp.getFloat("glass_matte_alpha", 0.15f));
                 bundle.putFloat("glass_border_light", sp.getFloat("glass_border_light", 0.35f));
                 bundle.putBoolean("glass_use_native", sp.getBoolean("glass_use_native", true));
+                bundle.putInt("global_blur_radius", sp.getInt("global_blur_radius", 25));
+                bundle.putFloat("global_dim_alpha", sp.getFloat("global_dim_alpha", 0f));
+                bundle.putBoolean("bubble_material_follow_global", sp.getBoolean("bubble_material_follow_global", true));
+                bundle.putBoolean("region_material_follow_global", sp.getBoolean("region_material_follow_global", true));
+                bundle.putBoolean("header_material_follow_global", sp.getBoolean("header_material_follow_global", true));
+                bundle.putFloat("bubble_glass_matte_alpha", sp.getFloat("bubble_glass_matte_alpha", 0.12f));
+                bundle.putFloat("region_glass_matte_alpha", sp.getFloat("region_glass_matte_alpha", 0.12f));
+                bundle.putFloat("header_glass_matte_alpha", sp.getFloat("header_glass_matte_alpha", 0.12f));
+                bundle.putBoolean("blur_baseline_healed", sp.getBoolean("blur_baseline_healed", false));
                 bundle.putString("shortcuts_json", sp.getString("shortcuts_json", null));
                 Log.d(TAG, "成功响应 SystemUI 配置查询: offsetY=" + bundle.getInt("offset_y"));
                 return bundle;

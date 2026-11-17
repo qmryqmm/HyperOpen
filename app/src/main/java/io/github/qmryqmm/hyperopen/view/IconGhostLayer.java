@@ -115,13 +115,13 @@ public final class IconGhostLayer {
         }
 
         recordExcluding(node, size, target);
-        float effectiveBlur = Math.max(20f, blurRadiusPx);
+        float effectiveBlur = blurRadiusPx;
         if (blurEffect == null || Math.abs(effectiveBlur - effectRadiusPx) > 0.5f) {
             effectRadiusPx = effectiveBlur;
             blurEffect = RenderEffect.createBlurEffect(effectiveBlur, effectiveBlur, Shader.TileMode.CLAMP);
         }
         node.setRenderEffect(blurEffect);
-        node.setAlpha(0.65f);
+        node.setAlpha(1f);
         canvas.save();
         canvas.translate(-size / 2f, -size / 2f);
         canvas.drawRenderNode(node);

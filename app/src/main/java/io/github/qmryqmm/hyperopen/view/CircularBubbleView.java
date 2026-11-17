@@ -707,7 +707,7 @@ public class CircularBubbleView extends FrameLayout {
         }
 
         private void updateBlurEffect(float blurPx) {
-            float b = Math.max(20f, blurPx);
+            float b = blurPx;
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
             if (Math.abs(lastBlurPx - b) > 0.5f) {
                 lastBlurPx = b;
