@@ -215,6 +215,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
             // 气泡材质、模糊半径、留白比例、圆角比例与透明度热生效
             for (CircularBubbleView b : bubbles) {
                 b.updateConfig(config);
+                b.setGhostLayer(ghostLayer);
                 b.setMaterialStyle(resolvedStyle);
                 b.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
                 b.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE));
@@ -806,6 +807,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
 
                 bubblesContainer.addView(bubble);
                 bubbles.add(bubble);
+                bubble.ensureBlurAndRefreshBackground();
             }
         }
 
@@ -1140,6 +1142,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
     private void performFolderExpansion(CircularBubbleView folderBubble, List<ShortcutItem> children) {
         dismissFolderSubBubbles(false);
         activeFolderBubble = folderBubble;
+        ghostLayer.setExcludedSource(folderBubble);
         triggerSlideHaptic();
 
         // 其余一级气泡：线性恢复原本大小（鱼眼放大收回 1.0），仅保留变暗弱化
@@ -1286,6 +1289,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
         folderSubBubbles.clear();
         currentSelectedSubBubble = null;
         activeFolderBubble = null;
+        ghostLayer.setExcludedSource(null);
 
         if (!animated) {
             for (CircularBubbleView sub : subs) {

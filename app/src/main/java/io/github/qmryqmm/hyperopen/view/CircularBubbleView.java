@@ -53,11 +53,11 @@ public class CircularBubbleView extends FrameLayout {
     private final View opticView;
     /** 幻影视图：玻璃层内采样「除自身外」邻居气泡的磨砂虚影（见 {@link IconGhostLayer}） */
     private final GhostView ghostView;
-    /** 以下三字段由 {@link IconGhostLayer} 录制时读写（同包） */
     IconGhostLayer ghostLayer;
     RenderNode ghostNode;
     float ghostSizePx;
     private final Path ghostClipPath = new Path();
+    private final Rect ghostDrawableBounds = new Rect();
     /** 是否为文件夹展开后的二级子气泡（子气泡基准 Z 轴高于一级文件夹，避免被父级遮挡） */
     private boolean isSubBubble = false;
 
@@ -90,7 +90,16 @@ public class CircularBubbleView extends FrameLayout {
         this.opticDrawable.setCornerRadiusPercent(this.cornerRadiusPercent);
 
         setLayoutParams(new LayoutParams(sizePx, sizePx));
-        setClipToOutline(false);
+        setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                int w = view.getWidth() > 0 ? view.getWidth() : sizePx;
+                int h = view.getHeight() > 0 ? view.getHeight() : sizePx;
+                float corner = BubbleBlurSpec.cornerRadiusPx(Math.min(w, h), cornerRadiusPercent);
+                outline.setRoundRect(0, 0, w, h, corner);
+            }
+        });
+        setClipToOutline(true);
         setClipChildren(false);
         setClipToPadding(false);
 
@@ -100,7 +109,7 @@ public class CircularBubbleView extends FrameLayout {
         blurLp.gravity = Gravity.CENTER;
         addView(blurCarrierView, blurLp);
 
-        // 1. 幻影视图：采样邻居气泡的磨砂虚影，层序 = 背景模糊 → 幻影 → 光学层(或原生柔光玻璃) → 图标
+        // 1. 幻影视图：采样邻居气泡的磨砂虚影，最终输出由根层圆角 Outline 裁切
         ghostView = new GhostView(context);
         ghostView.setOutlineProvider(new ViewOutlineProvider() {
             @Override
@@ -361,7 +370,12 @@ public class CircularBubbleView extends FrameLayout {
         }
         opticDrawable.setNativeGlassActive(false);
 
-        if (blurPx > 0 && blurCarrierView != null) {
+        if (!isAttachedToWindow() || !isShown()) {
+            blurSession.release();
+            if (blurCarrierView != null) {
+                blurCarrierView.setVisibility(GONE);
+            }
+        } else if (blurPx > 0 && blurCarrierView != null) {
             int tint = HyperOSMaterialFactory.getUnifiedBlurTint(activeStyle, glassParams);
             float s = Math.max(0.01f, getScaleX());
             int halfW = Math.round(w * s / 2f);
@@ -605,8 +619,13 @@ public class CircularBubbleView extends FrameLayout {
 
         // 1. 光学层（底衬 + 磨砂 + 边框）：直接绘制 opticDrawable，规避硬件加速 View 跨树 draw 的约束
         if (paddingPercent > 0 && opticDrawable != null) {
-            opticDrawable.setBounds(0, 0, w, h);
-            opticDrawable.drawForGhost(canvas);
+            ghostDrawableBounds.set(opticDrawable.getBounds());
+            try {
+                opticDrawable.setBounds(0, 0, w, h);
+                opticDrawable.drawForGhost(canvas);
+            } finally {
+                opticDrawable.setBounds(ghostDrawableBounds);
+            }
         }
         // 2. 图标层：直接调用 iconView.draw(canvas)，由 ImageView 自行处理 FIT_CENTER Matrix 与 padding，
         // 严禁直接篡改 iconView.getDrawable().setBounds()，否则会污染宿主 ImageView 自身的居中矩阵导致真实图标错位
@@ -624,6 +643,10 @@ public class CircularBubbleView extends FrameLayout {
             }
         }
         canvas.restore();
+    }
+
+    boolean isSubBubbleView() {
+        return isSubBubble;
     }
 
     /**
@@ -684,8 +707,8 @@ public class CircularBubbleView extends FrameLayout {
         }
 
         private void updateBlurEffect(float blurPx) {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
             float b = Math.max(20f, blurPx);
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
             if (Math.abs(lastBlurPx - b) > 0.5f) {
                 lastBlurPx = b;
                 setRenderEffect(RenderEffect.createBlurEffect(b, b, Shader.TileMode.CLAMP));
@@ -693,7 +716,6 @@ public class CircularBubbleView extends FrameLayout {
         }
 
         private void clearBlurEffect() {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
             if (lastBlurPx >= 0f) {
                 lastBlurPx = -1f;
                 setRenderEffect(null);
@@ -731,7 +753,11 @@ public class CircularBubbleView extends FrameLayout {
             canvas.save();
             canvas.translate(getWidth() / 2f, getHeight() / 2f);
             canvas.scale(1f / s, 1f / s);
-            ghostLayer.drawDirect(canvas, CircularBubbleView.this, s);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ghostLayer.drawGhost(canvas, CircularBubbleView.this);
+            } else {
+                ghostLayer.drawDirect(canvas, CircularBubbleView.this, s);
+            }
             canvas.restore();
         }
     }
