@@ -1041,6 +1041,15 @@ class HyperOpenPreviewView(
             old.glassSpecular != newConfig.glassSpecular ||
             old.glassMatteAlpha != newConfig.glassMatteAlpha ||
             old.glassBorderLight != newConfig.glassBorderLight ||
+            old.glassBackgroundSaturation != newConfig.glassBackgroundSaturation ||
+            old.glassBackgroundBrightness != newConfig.glassBackgroundBrightness ||
+            old.glassBackgroundBurn != newConfig.glassBackgroundBurn ||
+            old.glassMatteWhiteMix != newConfig.glassMatteWhiteMix ||
+            old.glassMatteColorMix != newConfig.glassMatteColorMix ||
+            old.glassMatteColorPower != newConfig.glassMatteColorPower ||
+            old.glassEdgeRange != newConfig.glassEdgeRange ||
+            old.glassEdgePower != newConfig.glassEdgePower ||
+            old.glassReflectOffset != newConfig.glassReflectOffset ||
             old.shortcuts.size != newConfig.shortcuts.size
 
         this.config = newConfig

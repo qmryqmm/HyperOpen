@@ -52,6 +52,15 @@ public class HyperOSMaterialFactory {
         public float specular = 0.6f;
         public float matteAlpha = 0.15f;
         public float borderLight = 0.35f;
+        public float backgroundSaturation = 1.5f;
+        public float backgroundBrightness = 0f;
+        public float backgroundBurn = 0f;
+        public float matteWhiteMix = 0f;
+        public float matteColorMix = 0.4f;
+        public float matteColorPower = 1.5f;
+        public float edgeRange = 50f;
+        public float edgePower = 4f;
+        public float reflectOffset = 600f;
 
         public GlassParams() {}
 
@@ -72,12 +81,30 @@ public class HyperOSMaterialFactory {
                 p.specular = 0.8f;
                 p.matteAlpha = 0.12f;
                 p.borderLight = 0.45f;
+                p.backgroundSaturation = 1.5f;
+                p.backgroundBrightness = 0f;
+                p.backgroundBurn = 0f;
+                p.matteWhiteMix = 0f;
+                p.matteColorMix = 0.4f;
+                p.matteColorPower = 1.5f;
+                p.edgeRange = 50f;
+                p.edgePower = 4f;
+                p.reflectOffset = 600f;
             } else {
                 p.ior = config.glassRefractIor;
                 p.thickness = config.glassThickness;
                 p.specular = config.glassSpecular;
                 p.matteAlpha = config.glassMatteAlpha;
                 p.borderLight = config.glassBorderLight;
+                p.backgroundSaturation = config.glassBackgroundSaturation;
+                p.backgroundBrightness = config.glassBackgroundBrightness;
+                p.backgroundBurn = config.glassBackgroundBurn;
+                p.matteWhiteMix = config.glassMatteWhiteMix;
+                p.matteColorMix = config.glassMatteColorMix;
+                p.matteColorPower = config.glassMatteColorPower;
+                p.edgeRange = config.glassEdgeRange;
+                p.edgePower = config.glassEdgePower;
+                p.reflectOffset = config.glassReflectOffset;
             }
             return p;
         }
@@ -88,12 +115,30 @@ public class HyperOSMaterialFactory {
                 && Math.abs(thickness - other.thickness) < 0.001f
                 && Math.abs(specular - other.specular) < 0.001f
                 && Math.abs(matteAlpha - other.matteAlpha) < 0.001f
-                && Math.abs(borderLight - other.borderLight) < 0.001f;
+                && Math.abs(borderLight - other.borderLight) < 0.001f
+                && Math.abs(backgroundSaturation - other.backgroundSaturation) < 0.001f
+                && Math.abs(backgroundBrightness - other.backgroundBrightness) < 0.001f
+                && Math.abs(backgroundBurn - other.backgroundBurn) < 0.001f
+                && Math.abs(matteWhiteMix - other.matteWhiteMix) < 0.001f
+                && Math.abs(matteColorMix - other.matteColorMix) < 0.001f
+                && Math.abs(matteColorPower - other.matteColorPower) < 0.001f
+                && Math.abs(edgeRange - other.edgeRange) < 0.001f
+                && Math.abs(edgePower - other.edgePower) < 0.001f
+                && Math.abs(reflectOffset - other.reflectOffset) < 0.001f;
         }
 
         /** 生成仅磨砂浓度不同的副本（组件级「柔光磨砂浓度」独立参数用），其余光学参数保持一致 */
         public GlassParams withMatteAlpha(float matteAlpha) {
             GlassParams p = new GlassParams(ior, thickness, specular, matteAlpha, borderLight);
+            p.backgroundSaturation = backgroundSaturation;
+            p.backgroundBrightness = backgroundBrightness;
+            p.backgroundBurn = backgroundBurn;
+            p.matteWhiteMix = matteWhiteMix;
+            p.matteColorMix = matteColorMix;
+            p.matteColorPower = matteColorPower;
+            p.edgeRange = edgeRange;
+            p.edgePower = edgePower;
+            p.reflectOffset = reflectOffset;
             return p;
         }
     }
@@ -305,6 +350,7 @@ public class HyperOSMaterialFactory {
         private static volatile Method sSetMiGlassSdfMaxSizeMethod;
         private static volatile Method sSetMiBackgroundBlurModeMethod;
         private static volatile Method sSetMiBackgroundBlurRadiusMethod;
+        private static volatile Method sSetMiBackgroundBlurScaleRatioMethod;
         private static volatile Method sSetMiViewBlurModeMethod;
         private static volatile Method sGetViewRootImplMethod;
         private static volatile Method sRenderNodeSetPassWindowBlurEnabledMethod;
@@ -357,6 +403,7 @@ public class HyperOSMaterialFactory {
                 sSetMiGlassSdfMaxSizeMethod = findMethod(viewClass, "setMiGlassSdfMaxSize", float.class, float.class);
                 sSetMiBackgroundBlurModeMethod = findMethod(viewClass, "setMiBackgroundBlurMode", int.class);
                 sSetMiBackgroundBlurRadiusMethod = findMethod(viewClass, "setMiBackgroundBlurRadius", int.class);
+                sSetMiBackgroundBlurScaleRatioMethod = findMethod(viewClass, "setMiBackgroundBlurScaleRatio", float.class);
                 sSetMiViewBlurModeMethod = findMethod(viewClass, "setMiViewBlurMode", int.class);
                 sGetViewRootImplMethod = findMethod(viewClass, "getViewRootImpl");
                 sLateSetPassBlurEnabledField = findField(viewClass, "mLateSetPassBlurEnabled");
@@ -477,17 +524,22 @@ public class HyperOSMaterialFactory {
                 glass[10] = 0.05f;
                 glass[11] = 1f; glass[12] = 1f; glass[13] = 1f;
                 glass[14] = clampMatte(params.matteAlpha);
-                glass[15] = 0f; glass[16] = 0.4f; glass[17] = 1.5f;
+                glass[15] = params.matteWhiteMix;
+                glass[16] = params.matteColorMix;
+                glass[17] = params.matteColorPower;
                 glass[18] = 1f;
-                glass[19] = 50f; glass[20] = 4f;
+                glass[19] = params.edgeRange;
+                glass[20] = params.edgePower;
                 glass[21] = 60f * (params.thickness / 1.5f);
-                glass[22] = 600f;
+                glass[22] = params.reflectOffset;
                 glass[23] = 2f * (params.specular / 0.8f);
                 glass[24] = 0.6f * (params.borderLight / 0.45f);
                 glass[25] = -0.4f; glass[26] = 0.6f; glass[27] = -0.8f;
                 glass[28] = 1.4f; glass[29] = 0.8f; glass[30] = 1.4f; glass[31] = 1f;
                 glass[32] = params.ior;
-                glass[33] = 1.5f;
+                glass[33] = params.backgroundSaturation;
+                glass[34] = params.backgroundBrightness;
+                glass[35] = params.backgroundBurn;
 
                 if (!forcePassWindowBlur(view, true)) {
                     return false;

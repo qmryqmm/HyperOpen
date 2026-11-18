@@ -317,8 +317,24 @@ public class HyperOpenConfig {
     public float glassMatteAlpha = 0.12f;
     /** 边缘微光描边亮度 (0.10 ~ 1.00，系统默认 0.45f) */
     public float glassBorderLight = 0.45f;
-    /** 在系统界面 (SystemUI) 内部是否优先调用硬件原生 MiGlass 材质引擎 */
-    public boolean glassUseNative = true;
+    /** 玻璃内背景采样饱和度 (0 ~ 3，系统默认 1.5) */
+    public float glassBackgroundSaturation = 1.5f;
+    /** 玻璃内背景采样亮度 (-1 ~ 1，系统默认 0) */
+    public float glassBackgroundBrightness = 0f;
+    /** 玻璃内背景暗部烧灼强度 (0 ~ 1，系统默认 0) */
+    public float glassBackgroundBurn = 0f;
+    /** 雾面白色混合量 (0 ~ 1，系统默认 0) */
+    public float glassMatteWhiteMix = 0f;
+    /** 雾面颜色混合量 (0 ~ 1，系统默认 0.4) */
+    public float glassMatteColorMix = 0.4f;
+    /** 雾面颜色幂曲线 (0.25 ~ 4，系统默认 1.5) */
+    public float glassMatteColorPower = 1.5f;
+    /** 边缘光作用范围 (0 ~ 100，系统默认 50) */
+    public float glassEdgeRange = 50f;
+    /** 边缘光幂曲线 (1 ~ 10，系统默认 4) */
+    public float glassEdgePower = 4f;
+    /** 表面反射纹理偏移 (0 ~ 1200，系统默认 600) */
+    public float glassReflectOffset = 600f;
 
     // ── 全局模糊材质（BlurMaterialSettingsPage）──
     /** 统一模糊半径 (0 ~ 50 dp)，跟随全局时三组件共用 */
@@ -774,7 +790,15 @@ public class HyperOpenConfig {
                     config.glassSpecular = bundle.getFloat("glass_specular", 0.8f);
                     config.glassMatteAlpha = bundle.getFloat("glass_matte_alpha", 0.12f);
                     config.glassBorderLight = bundle.getFloat("glass_border_light", 0.45f);
-                    config.glassUseNative = bundle.getBoolean("glass_use_native", true);
+                    config.glassBackgroundSaturation = bundle.getFloat("glass_background_saturation", 1.5f);
+                    config.glassBackgroundBrightness = bundle.getFloat("glass_background_brightness", 0f);
+                    config.glassBackgroundBurn = bundle.getFloat("glass_background_burn", 0f);
+                    config.glassMatteWhiteMix = bundle.getFloat("glass_matte_white_mix", 0f);
+                    config.glassMatteColorMix = bundle.getFloat("glass_matte_color_mix", 0.4f);
+                    config.glassMatteColorPower = bundle.getFloat("glass_matte_color_power", 1.5f);
+                    config.glassEdgeRange = bundle.getFloat("glass_edge_range", 50f);
+                    config.glassEdgePower = bundle.getFloat("glass_edge_power", 4f);
+                    config.glassReflectOffset = bundle.getFloat("glass_reflect_offset", 600f);
                     config.globalBlurRadius = bundle.getInt("global_blur_radius", 25);
                     config.globalDimAlpha = bundle.getFloat("global_dim_alpha", 0f);
                     config.bubbleMaterialFollowGlobal = bundle.getBoolean("bubble_material_follow_global", true);
@@ -930,7 +954,15 @@ public class HyperOpenConfig {
         config.glassSpecular = xPrefs.getFloat("glass_specular", 0.8f);
         config.glassMatteAlpha = xPrefs.getFloat("glass_matte_alpha", 0.12f);
         config.glassBorderLight = xPrefs.getFloat("glass_border_light", 0.45f);
-        config.glassUseNative = xPrefs.getBoolean("glass_use_native", true);
+        config.glassBackgroundSaturation = xPrefs.getFloat("glass_background_saturation", 1.5f);
+        config.glassBackgroundBrightness = xPrefs.getFloat("glass_background_brightness", 0f);
+        config.glassBackgroundBurn = xPrefs.getFloat("glass_background_burn", 0f);
+        config.glassMatteWhiteMix = xPrefs.getFloat("glass_matte_white_mix", 0f);
+        config.glassMatteColorMix = xPrefs.getFloat("glass_matte_color_mix", 0.4f);
+        config.glassMatteColorPower = xPrefs.getFloat("glass_matte_color_power", 1.5f);
+        config.glassEdgeRange = xPrefs.getFloat("glass_edge_range", 50f);
+        config.glassEdgePower = xPrefs.getFloat("glass_edge_power", 4f);
+        config.glassReflectOffset = xPrefs.getFloat("glass_reflect_offset", 600f);
         config.globalBlurRadius = xPrefs.getInt("global_blur_radius", 25);
         config.globalDimAlpha = xPrefs.getFloat("global_dim_alpha", 0f);
         config.bubbleMaterialFollowGlobal = xPrefs.getBoolean("bubble_material_follow_global", true);
@@ -1077,7 +1109,15 @@ public class HyperOpenConfig {
         config.glassSpecular = sp.getFloat("glass_specular", 0.8f);
         config.glassMatteAlpha = sp.getFloat("glass_matte_alpha", 0.12f);
         config.glassBorderLight = sp.getFloat("glass_border_light", 0.45f);
-        config.glassUseNative = sp.getBoolean("glass_use_native", true);
+        config.glassBackgroundSaturation = sp.getFloat("glass_background_saturation", 1.5f);
+        config.glassBackgroundBrightness = sp.getFloat("glass_background_brightness", 0f);
+        config.glassBackgroundBurn = sp.getFloat("glass_background_burn", 0f);
+        config.glassMatteWhiteMix = sp.getFloat("glass_matte_white_mix", 0f);
+        config.glassMatteColorMix = sp.getFloat("glass_matte_color_mix", 0.4f);
+        config.glassMatteColorPower = sp.getFloat("glass_matte_color_power", 1.5f);
+        config.glassEdgeRange = sp.getFloat("glass_edge_range", 50f);
+        config.glassEdgePower = sp.getFloat("glass_edge_power", 4f);
+        config.glassReflectOffset = sp.getFloat("glass_reflect_offset", 600f);
         config.globalBlurRadius = sp.getInt("global_blur_radius", 25);
         config.globalDimAlpha = sp.getFloat("global_dim_alpha", 0f);
         config.bubbleMaterialFollowGlobal = sp.getBoolean("bubble_material_follow_global", true);
@@ -1254,7 +1294,15 @@ public class HyperOpenConfig {
             .putFloat("glass_specular", glassSpecular)
             .putFloat("glass_matte_alpha", glassMatteAlpha)
             .putFloat("glass_border_light", glassBorderLight)
-            .putBoolean("glass_use_native", glassUseNative)
+            .putFloat("glass_background_saturation", glassBackgroundSaturation)
+            .putFloat("glass_background_brightness", glassBackgroundBrightness)
+            .putFloat("glass_background_burn", glassBackgroundBurn)
+            .putFloat("glass_matte_white_mix", glassMatteWhiteMix)
+            .putFloat("glass_matte_color_mix", glassMatteColorMix)
+            .putFloat("glass_matte_color_power", glassMatteColorPower)
+            .putFloat("glass_edge_range", glassEdgeRange)
+            .putFloat("glass_edge_power", glassEdgePower)
+            .putFloat("glass_reflect_offset", glassReflectOffset)
             .putInt("global_blur_radius", globalBlurRadius)
             .putBoolean("blur_baseline_healed", blurBaselineHealed)
             .putFloat("global_dim_alpha", globalDimAlpha)

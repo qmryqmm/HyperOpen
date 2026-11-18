@@ -282,7 +282,15 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putFloat("glass_specular", sp.getFloat("glass_specular", 0.6f));
                 bundle.putFloat("glass_matte_alpha", sp.getFloat("glass_matte_alpha", 0.15f));
                 bundle.putFloat("glass_border_light", sp.getFloat("glass_border_light", 0.35f));
-                bundle.putBoolean("glass_use_native", sp.getBoolean("glass_use_native", true));
+                bundle.putFloat("glass_background_saturation", sp.getFloat("glass_background_saturation", 1.5f));
+                bundle.putFloat("glass_background_brightness", sp.getFloat("glass_background_brightness", 0f));
+                bundle.putFloat("glass_background_burn", sp.getFloat("glass_background_burn", 0f));
+                bundle.putFloat("glass_matte_white_mix", sp.getFloat("glass_matte_white_mix", 0f));
+                bundle.putFloat("glass_matte_color_mix", sp.getFloat("glass_matte_color_mix", 0.4f));
+                bundle.putFloat("glass_matte_color_power", sp.getFloat("glass_matte_color_power", 1.5f));
+                bundle.putFloat("glass_edge_range", sp.getFloat("glass_edge_range", 50f));
+                bundle.putFloat("glass_edge_power", sp.getFloat("glass_edge_power", 4f));
+                bundle.putFloat("glass_reflect_offset", sp.getFloat("glass_reflect_offset", 600f));
                 bundle.putInt("global_blur_radius", sp.getInt("global_blur_radius", 25));
                 bundle.putFloat("global_dim_alpha", sp.getFloat("global_dim_alpha", 0f));
                 bundle.putBoolean("bubble_material_follow_global", sp.getBoolean("bubble_material_follow_global", true));

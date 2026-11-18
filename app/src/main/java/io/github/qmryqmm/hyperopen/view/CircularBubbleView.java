@@ -47,7 +47,7 @@ public class CircularBubbleView extends FrameLayout {
     /** 上次应用的配置签名（updateConfig 变更检测） */
     private long lastConfigSignature;
     private final ImageView iconView;
-    /** 高斯模糊专用底层承载 View（方案一：逆缩放 1.0 物理坐标系绘制 BackgroundBlurDrawable，彻底消除圆角刺角与正圆畸变） */
+    /** 玻璃背景专用底层承载 View（高斯回退绘制 BackgroundBlurDrawable，柔光模式承载原生 MiGlass） */
     private final BlurCarrierView blurCarrierView;
     /** 光学层承载 View（背景 = CircularBubbleDrawable；柔光玻璃模式下同时承载系统原生硬件 setMiGlass） */
     private final View opticView;
@@ -103,7 +103,7 @@ public class CircularBubbleView extends FrameLayout {
         setClipChildren(false);
         setClipToPadding(false);
 
-        // 0. 高斯模糊底层承载视图（仅在高斯模糊模式下启用，柔光玻璃模式下隐藏）
+        // 0. 玻璃背景底层承载视图（仅高斯回退使用；原生 MiGlass 仍挂在 opticView）
         blurCarrierView = new BlurCarrierView(context);
         LayoutParams blurLp = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
         blurLp.gravity = Gravity.CENTER;
@@ -214,6 +214,15 @@ public class CircularBubbleView extends FrameLayout {
         h = h * 31 + Float.floatToIntBits(c.glassSpecular);
         h = h * 31 + Float.floatToIntBits(c.glassMatteAlpha);
         h = h * 31 + Float.floatToIntBits(c.glassBorderLight);
+        h = h * 31 + Float.floatToIntBits(c.glassBackgroundSaturation);
+        h = h * 31 + Float.floatToIntBits(c.glassBackgroundBrightness);
+        h = h * 31 + Float.floatToIntBits(c.glassBackgroundBurn);
+        h = h * 31 + Float.floatToIntBits(c.glassMatteWhiteMix);
+        h = h * 31 + Float.floatToIntBits(c.glassMatteColorMix);
+        h = h * 31 + Float.floatToIntBits(c.glassMatteColorPower);
+        h = h * 31 + Float.floatToIntBits(c.glassEdgeRange);
+        h = h * 31 + Float.floatToIntBits(c.glassEdgePower);
+        h = h * 31 + Float.floatToIntBits(c.glassReflectOffset);
         h = h * 31 + c.bubblePaddingPercent;
         h = h * 31 + c.iconCornerRadius;
         h = h * 31 + Float.floatToIntBits(c.iconAlpha);
@@ -251,6 +260,9 @@ public class CircularBubbleView extends FrameLayout {
     protected void onDetachedFromWindow() {
         if (opticView != null) {
             HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(opticView);
+        }
+        if (blurCarrierView != null) {
+            HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(blurCarrierView);
         }
         blurSession.release();
         if (blurCarrierView != null) {
@@ -314,6 +326,7 @@ public class CircularBubbleView extends FrameLayout {
             // 留白 0% = 气泡整体关闭：不绘制气泡底衬，模糊与压暗一并停用，仅保留图标
             blurSession.release();
             if (blurCarrierView != null) {
+                HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(blurCarrierView);
                 blurCarrierView.setVisibility(GONE);
             }
             if (opticView != null) {
@@ -335,20 +348,17 @@ public class CircularBubbleView extends FrameLayout {
         // 模式 A：柔光玻璃（且设备支持系统原生硬件柔光玻璃）
         if (activeStyle == HyperOSMaterialFactory.STYLE_SOFT_GLASS
                 && HyperOSMaterialFactory.isSoftGlassSupported()
-                && opticView != null) {
+                && opticView != null && blurCarrierView != null) {
             blurSession.release();
-            if (blurCarrierView != null) {
-                blurCarrierView.setVisibility(GONE);
-            }
             boolean applied = false;
             if (systemBlurEnabled) {
                 applied = HyperOSMaterialFactory.SystemNativeGlassAdapter.applyGlass(
                     opticView, glassParams, Math.max(15, blurPx), w, h
                 );
-            } else {
-                HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(opticView);
             }
+            HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(blurCarrierView);
             opticDrawable.setNativeGlassActive(applied);
+            blurCarrierView.setVisibility(GONE);
             if (applied) {
                 if (opticView.getBackground() != null) {
                     opticView.setBackground(null);
@@ -367,6 +377,9 @@ public class CircularBubbleView extends FrameLayout {
         if (opticView != null) {
             HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(opticView);
             restoreOpticDrawableLayer();
+        }
+        if (blurCarrierView != null) {
+            HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(blurCarrierView);
         }
         opticDrawable.setNativeGlassActive(false);
 
@@ -478,6 +491,7 @@ public class CircularBubbleView extends FrameLayout {
         opticDrawable.setSelected(false);
         blurSession.release();
         if (blurCarrierView != null) {
+            HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(blurCarrierView);
             blurCarrierView.setVisibility(GONE);
         }
         if (opticView != null) {

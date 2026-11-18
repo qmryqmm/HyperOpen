@@ -26,7 +26,6 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SliderPreference
-import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
@@ -46,7 +45,15 @@ fun SoftGlassSettingsPage(
     glassSpecular: Float, onGlassSpecular: (Float) -> Unit,
     glassMatteAlpha: Float, onGlassMatteAlpha: (Float) -> Unit,
     glassBorderLight: Float, onGlassBorderLight: (Float) -> Unit,
-    glassUseNative: Boolean, onGlassUseNative: (Boolean) -> Unit,
+    glassBackgroundSaturation: Float, onGlassBackgroundSaturation: (Float) -> Unit,
+    glassBackgroundBrightness: Float, onGlassBackgroundBrightness: (Float) -> Unit,
+    glassBackgroundBurn: Float, onGlassBackgroundBurn: (Float) -> Unit,
+    glassMatteWhiteMix: Float, onGlassMatteWhiteMix: (Float) -> Unit,
+    glassMatteColorMix: Float, onGlassMatteColorMix: (Float) -> Unit,
+    glassMatteColorPower: Float, onGlassMatteColorPower: (Float) -> Unit,
+    glassEdgeRange: Float, onGlassEdgeRange: (Float) -> Unit,
+    glassEdgePower: Float, onGlassEdgePower: (Float) -> Unit,
+    glassReflectOffset: Float, onGlassReflectOffset: (Float) -> Unit,
     onResetToDefaultPreset: () -> Unit,
 ) {
     LazyColumn(
@@ -85,23 +92,6 @@ fun SoftGlassSettingsPage(
                         }
                     },
                     onClick = { onGlassPreset(HyperOpenConfig.GLASS_PRESET_CUSTOM) },
-                )
-            }
-        }
-
-        // ── 硬件加速与原生引擎 ──
-        item(key = "native_engine_title") { SmallTitle("渲染引擎") }
-        item(key = "native_engine_card") {
-            Card(
-                modifier = Modifier
-                    .padding(horizontal = 12.dp)
-                    .fillMaxWidth(),
-            ) {
-                SwitchPreference(
-                    title = "优先调用系统硬件原生玻璃 (MiGlass)",
-                    summary = "在 SystemUI 内部直接调用系统 GPU 原生着色器渲染，未支持时无缝回退拟真光栅",
-                    checked = glassUseNative,
-                    onCheckedChange = onGlassUseNative,
                 )
             }
         }
@@ -166,6 +156,78 @@ fun SoftGlassSettingsPage(
                         value = glassBorderLight * 100f,
                         valueRange = 10f..100f,
                         onValueChange = { onGlassBorderLight(it / 100f) },
+                    )
+                    SliderPreference(
+                        title = "背景采样饱和度 (Background Saturation)",
+                        summary = "调整透过玻璃看到的底部图标与背景色彩浓度，不改变模糊半径",
+                        valueText = "%.2f".format(glassBackgroundSaturation),
+                        value = glassBackgroundSaturation,
+                        valueRange = 0f..3f,
+                        onValueChange = onGlassBackgroundSaturation,
+                    )
+                    SliderPreference(
+                        title = "背景采样亮度 (Background Brightness)",
+                        summary = "压暗或提亮玻璃后的背景采样画面，正值提亮、负值压暗",
+                        valueText = "%.2f".format(glassBackgroundBrightness),
+                        value = glassBackgroundBrightness,
+                        valueRange = -1f..1f,
+                        onValueChange = onGlassBackgroundBrightness,
+                    )
+                    SliderPreference(
+                        title = "背景暗部烧灼 (Background Burn)",
+                        summary = "增强背景暗部沉淀感；数值越高，阴影区域越深",
+                        valueText = "${(glassBackgroundBurn * 100).toInt()}%",
+                        value = glassBackgroundBurn * 100f,
+                        valueRange = 0f..100f,
+                        onValueChange = { onGlassBackgroundBurn(it / 100f) },
+                    )
+                    SliderPreference(
+                        title = "雾面白色混合 (Matte White Mix)",
+                        summary = "向玻璃雾面底色混入白色，控制奶白感与通透度",
+                        valueText = "${(glassMatteWhiteMix * 100).toInt()}%",
+                        value = glassMatteWhiteMix * 100f,
+                        valueRange = 0f..100f,
+                        onValueChange = { onGlassMatteWhiteMix(it / 100f) },
+                    )
+                    SliderPreference(
+                        title = "雾面颜色混合 (Matte Color Mix)",
+                        summary = "控制雾面底色参与材质合成的比例",
+                        valueText = "${(glassMatteColorMix * 100).toInt()}%",
+                        value = glassMatteColorMix * 100f,
+                        valueRange = 0f..100f,
+                        onValueChange = { onGlassMatteColorMix(it / 100f) },
+                    )
+                    SliderPreference(
+                        title = "雾面颜色曲线 (Matte Color Power)",
+                        summary = "调整雾面颜色的明暗过渡曲线，数值越高过渡越集中",
+                        valueText = "%.2f".format(glassMatteColorPower),
+                        value = glassMatteColorPower,
+                        valueRange = 0.25f..4f,
+                        onValueChange = onGlassMatteColorPower,
+                    )
+                    SliderPreference(
+                        title = "边缘光作用范围 (Edge Range)",
+                        summary = "控制菲涅尔边缘光由外圈向内部延伸的宽度",
+                        valueText = "${glassEdgeRange.toInt()}",
+                        value = glassEdgeRange,
+                        valueRange = 0f..100f,
+                        onValueChange = onGlassEdgeRange,
+                    )
+                    SliderPreference(
+                        title = "边缘光过渡曲线 (Edge Power)",
+                        summary = "调整边缘光衰减速度，数值越高光圈越集中于最外侧",
+                        valueText = "%.2f".format(glassEdgePower),
+                        value = glassEdgePower,
+                        valueRange = 1f..10f,
+                        onValueChange = onGlassEdgePower,
+                    )
+                    SliderPreference(
+                        title = "表面反射偏移 (Reflect Offset)",
+                        summary = "移动玻璃表面环境反射纹理，改变高光与折射反光位置",
+                        valueText = "${glassReflectOffset.toInt()}",
+                        value = glassReflectOffset,
+                        valueRange = 0f..1200f,
+                        onValueChange = onGlassReflectOffset,
                     )
                 }
             }

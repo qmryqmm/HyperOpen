@@ -205,7 +205,15 @@ fun HyperOpenApp(
     var glassSpecular by remember { mutableFloatStateOf(initialConfig.glassSpecular) }
     var glassMatteAlpha by remember { mutableFloatStateOf(initialConfig.glassMatteAlpha) }
     var glassBorderLight by remember { mutableFloatStateOf(initialConfig.glassBorderLight) }
-    var glassUseNative by remember { mutableStateOf(initialConfig.glassUseNative) }
+    var glassBackgroundSaturation by remember { mutableFloatStateOf(initialConfig.glassBackgroundSaturation) }
+    var glassBackgroundBrightness by remember { mutableFloatStateOf(initialConfig.glassBackgroundBrightness) }
+    var glassBackgroundBurn by remember { mutableFloatStateOf(initialConfig.glassBackgroundBurn) }
+    var glassMatteWhiteMix by remember { mutableFloatStateOf(initialConfig.glassMatteWhiteMix) }
+    var glassMatteColorMix by remember { mutableFloatStateOf(initialConfig.glassMatteColorMix) }
+    var glassMatteColorPower by remember { mutableFloatStateOf(initialConfig.glassMatteColorPower) }
+    var glassEdgeRange by remember { mutableFloatStateOf(initialConfig.glassEdgeRange) }
+    var glassEdgePower by remember { mutableFloatStateOf(initialConfig.glassEdgePower) }
+    var glassReflectOffset by remember { mutableFloatStateOf(initialConfig.glassReflectOffset) }
     // 全局模糊材质 / 跟随全局开关 / per-component matteAlpha
     var globalBlurRadius by remember { mutableFloatStateOf(initialConfig.globalBlurRadius.toFloat()) }
     var globalDimAlpha by remember { mutableFloatStateOf(initialConfig.globalDimAlpha) }
@@ -515,7 +523,15 @@ fun HyperOpenApp(
         c.glassSpecular = glassSpecular
         c.glassMatteAlpha = glassMatteAlpha
         c.glassBorderLight = glassBorderLight
-        c.glassUseNative = glassUseNative
+        c.glassBackgroundSaturation = glassBackgroundSaturation
+        c.glassBackgroundBrightness = glassBackgroundBrightness
+        c.glassBackgroundBurn = glassBackgroundBurn
+        c.glassMatteWhiteMix = glassMatteWhiteMix
+        c.glassMatteColorMix = glassMatteColorMix
+        c.glassMatteColorPower = glassMatteColorPower
+        c.glassEdgeRange = glassEdgeRange
+        c.glassEdgePower = glassEdgePower
+        c.glassReflectOffset = glassReflectOffset
         c.globalBlurRadius = globalBlurRadius.toInt()
         c.globalDimAlpha = globalDimAlpha
         c.bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal
@@ -644,7 +660,15 @@ fun HyperOpenApp(
         glassSpecular = defaults.glassSpecular
         glassMatteAlpha = defaults.glassMatteAlpha
         glassBorderLight = defaults.glassBorderLight
-        glassUseNative = defaults.glassUseNative
+        glassBackgroundSaturation = defaults.glassBackgroundSaturation
+        glassBackgroundBrightness = defaults.glassBackgroundBrightness
+        glassBackgroundBurn = defaults.glassBackgroundBurn
+        glassMatteWhiteMix = defaults.glassMatteWhiteMix
+        glassMatteColorMix = defaults.glassMatteColorMix
+        glassMatteColorPower = defaults.glassMatteColorPower
+        glassEdgeRange = defaults.glassEdgeRange
+        glassEdgePower = defaults.glassEdgePower
+        glassReflectOffset = defaults.glassReflectOffset
         globalBlurRadius = defaults.globalBlurRadius.toFloat()
         globalDimAlpha = defaults.globalDimAlpha
         bubbleMaterialFollowGlobal = defaults.bubbleMaterialFollowGlobal
@@ -708,7 +732,10 @@ fun HyperOpenApp(
     val currentLiveConfig = remember(
         materialStyle, bubbleDimAlpha, iconCornerRadius, iconAlpha,
         bubblePaddingPercent, glyphPadEnabled, glyphPadColor, glyphPadMode,
-        glassPreset, glassRefractIor, glassThickness, glassSpecular, glassMatteAlpha, glassBorderLight, glassUseNative,
+        glassPreset, glassRefractIor, glassThickness, glassSpecular, glassMatteAlpha, glassBorderLight,
+        glassBackgroundSaturation, glassBackgroundBrightness, glassBackgroundBurn,
+        glassMatteWhiteMix, glassMatteColorMix, glassMatteColorPower,
+        glassEdgeRange, glassEdgePower, glassReflectOffset,
         // 组件级材质解析依赖项（effectiveBlurRadiusDp / effectiveDimAlpha / glassParamsFor）：
         // 跟随全局开关、全局模糊/压暗与气泡磨砂浓度变化时，列表卡片的气泡材质必须同步刷新
         bubbleMaterialFollowGlobal, globalBlurRadius, globalDimAlpha, bubbleGlassMatteAlpha, bubbleBlurRadius
@@ -728,7 +755,15 @@ fun HyperOpenApp(
             this.glassSpecular = glassSpecular
             this.glassMatteAlpha = glassMatteAlpha
             this.glassBorderLight = glassBorderLight
-            this.glassUseNative = glassUseNative
+            this.glassBackgroundSaturation = glassBackgroundSaturation
+            this.glassBackgroundBrightness = glassBackgroundBrightness
+            this.glassBackgroundBurn = glassBackgroundBurn
+            this.glassMatteWhiteMix = glassMatteWhiteMix
+            this.glassMatteColorMix = glassMatteColorMix
+            this.glassMatteColorPower = glassMatteColorPower
+            this.glassEdgeRange = glassEdgeRange
+            this.glassEdgePower = glassEdgePower
+            this.glassReflectOffset = glassReflectOffset
         }
     }
 
@@ -956,7 +991,15 @@ fun HyperOpenApp(
                             this.glassSpecular = glassSpecular
                             this.glassMatteAlpha = glassMatteAlpha
                             this.glassBorderLight = glassBorderLight
-                            this.glassUseNative = glassUseNative
+                            this.glassBackgroundSaturation = glassBackgroundSaturation
+                            this.glassBackgroundBrightness = glassBackgroundBrightness
+                            this.glassBackgroundBurn = glassBackgroundBurn
+                            this.glassMatteWhiteMix = glassMatteWhiteMix
+                            this.glassMatteColorMix = glassMatteColorMix
+                            this.glassMatteColorPower = glassMatteColorPower
+                            this.glassEdgeRange = glassEdgeRange
+                            this.glassEdgePower = glassEdgePower
+                            this.glassReflectOffset = glassReflectOffset
                             // 组件级材质解析（柔光磨砂浓度驱动模糊半径、跟随全局材质等）已统一收敛到
                             // HyperOpenConfig.effective* / glassParamsFor 单一数据源，真机与预览同源取值；
                             // 这里只搬运原始滑块值，禁止在 UI 层再私自换算（历史上只在预览侧换算，
@@ -1094,8 +1137,24 @@ fun HyperOpenApp(
                             onGlassMatteAlpha = { glassMatteAlpha = it; persist() },
                             glassBorderLight = glassBorderLight,
                             onGlassBorderLight = { glassBorderLight = it; persist() },
-                            glassUseNative = glassUseNative,
-                            onGlassUseNative = { glassUseNative = it; persist() },
+                            glassBackgroundSaturation = glassBackgroundSaturation,
+                            onGlassBackgroundSaturation = { glassBackgroundSaturation = it; persist() },
+                            glassBackgroundBrightness = glassBackgroundBrightness,
+                            onGlassBackgroundBrightness = { glassBackgroundBrightness = it; persist() },
+                            glassBackgroundBurn = glassBackgroundBurn,
+                            onGlassBackgroundBurn = { glassBackgroundBurn = it; persist() },
+                            glassMatteWhiteMix = glassMatteWhiteMix,
+                            onGlassMatteWhiteMix = { glassMatteWhiteMix = it; persist() },
+                            glassMatteColorMix = glassMatteColorMix,
+                            onGlassMatteColorMix = { glassMatteColorMix = it; persist() },
+                            glassMatteColorPower = glassMatteColorPower,
+                            onGlassMatteColorPower = { glassMatteColorPower = it; persist() },
+                            glassEdgeRange = glassEdgeRange,
+                            onGlassEdgeRange = { glassEdgeRange = it; persist() },
+                            glassEdgePower = glassEdgePower,
+                            onGlassEdgePower = { glassEdgePower = it; persist() },
+                            glassReflectOffset = glassReflectOffset,
+                            onGlassReflectOffset = { glassReflectOffset = it; persist() },
                             onResetToDefaultPreset = {
                                 glassPreset = HyperOpenConfig.GLASS_PRESET_DEFAULT
                                 glassRefractIor = 1.12f
@@ -1103,6 +1162,15 @@ fun HyperOpenApp(
                                 glassSpecular = 0.8f
                                 glassMatteAlpha = 0.12f
                                 glassBorderLight = 0.45f
+                                glassBackgroundSaturation = 1.5f
+                                glassBackgroundBrightness = 0f
+                                glassBackgroundBurn = 0f
+                                glassMatteWhiteMix = 0f
+                                glassMatteColorMix = 0.4f
+                                glassMatteColorPower = 1.5f
+                                glassEdgeRange = 50f
+                                glassEdgePower = 4f
+                                glassReflectOffset = 600f
                                 persist()
                             },
                         )
