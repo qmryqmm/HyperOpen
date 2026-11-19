@@ -1,6 +1,7 @@
 package io.github.qmryqmm.hyperopen.ui
 
 import androidx.compose.ui.graphics.vector.ImageVector
+import io.github.qmryqmm.hyperopen.ui.icons.glass.MiuixGlassIconRegistry
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 
 /**
@@ -8,6 +9,8 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
  * 并支持动态切换 5 档粗细（Light / Normal / Regular / Medium / Demibold）。
  */
 object MiuixIconRegistry {
+
+    private const val GLASS_PREFIX = "glass:"
 
     val WEIGHTS = listOf("Light", "Normal", "Regular", "Medium", "Demibold")
 
@@ -40,6 +43,10 @@ object MiuixIconRegistry {
     fun find(key: String?, weightOverride: String? = null): ImageVector? {
         if (key.isNullOrBlank()) return null
         val cleanKey = key.trim()
+
+        if (isGlassKey(cleanKey)) {
+            return MiuixGlassIconRegistry.find(cleanKey.substring(GLASS_PREFIX.length), weightOverride)
+        }
 
         val rawName: String
         val rawWeight: String
@@ -76,5 +83,33 @@ object MiuixIconRegistry {
 
         cache[cacheKey] = vector
         return vector
+    }
+
+    fun isGlassKey(key: String?): Boolean {
+        return key?.trim()?.startsWith(GLASS_PREFIX, ignoreCase = true) == true
+    }
+
+    fun iconNameFromKey(key: String?): String {
+        val cleanKey = key?.trim().orEmpty()
+        val iconKey = if (isGlassKey(cleanKey)) {
+            cleanKey.substring(GLASS_PREFIX.length)
+        } else {
+            cleanKey
+        }
+        return iconKey.split(":").firstOrNull()?.trim().orEmpty()
+    }
+
+    fun iconWeightFromKey(key: String?): String {
+        val cleanKey = key?.trim().orEmpty()
+        val iconKey = if (isGlassKey(cleanKey)) {
+            cleanKey.substring(GLASS_PREFIX.length)
+        } else {
+            cleanKey
+        }
+        return iconKey.split(":")
+            .getOrNull(1)
+            ?.trim()
+            ?.takeIf { candidate -> WEIGHTS.any { it.equals(candidate, ignoreCase = true) } }
+            ?: "Regular"
     }
 }

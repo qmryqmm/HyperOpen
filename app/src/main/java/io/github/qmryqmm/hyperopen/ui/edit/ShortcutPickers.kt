@@ -64,6 +64,7 @@ import io.github.qmryqmm.hyperopen.ui.IconPainter
 import io.github.qmryqmm.hyperopen.ui.MiuixIconRegistry
 import io.github.qmryqmm.hyperopen.ui.RemixIconRegistry
 import io.github.qmryqmm.hyperopen.ui.components.toComposeImageBitmap
+import io.github.qmryqmm.hyperopen.ui.icons.glass.MiuixGlassIconRegistry
 import io.github.qmryqmm.hyperopen.view.IconGlyphFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -1181,7 +1182,7 @@ fun ActivityPickerDialog(
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Miuix 矢量图标选择弹窗组件（完整 125+ 图标库 + 5 档粗细切换 + 搜索）
+// Miuix 矢量图标选择弹窗组件（Miuix 完整库 + Glass 精选 + 5 档粗细切换 + 搜索）
 // ─────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -1191,22 +1192,28 @@ fun MiuixIconPickerDialog(
     onSelectIcon: (String) -> Unit,
 ) {
     val initialWeight = remember(currentIconWithWeight) {
-        if (currentIconWithWeight.contains(":")) currentIconWithWeight.split(":")[1].trim() else "Regular"
+        MiuixIconRegistry.iconWeightFromKey(currentIconWithWeight)
     }
     val initialName = remember(currentIconWithWeight) {
-        if (currentIconWithWeight.contains(":")) currentIconWithWeight.split(":")[0].trim() else currentIconWithWeight.trim()
+        MiuixIconRegistry.iconNameFromKey(currentIconWithWeight)
+    }
+    val sources = remember { listOf("Miuix", "Glass 精选") }
+    val initialSource = remember(currentIconWithWeight) {
+        if (MiuixIconRegistry.isGlassKey(currentIconWithWeight)) sources[1] else sources[0]
     }
 
-    var selectedWeight by remember { mutableStateOf(initialWeight) }
+    var selectedSource by remember(initialSource) { mutableStateOf(initialSource) }
+    var selectedWeight by remember(initialWeight) { mutableStateOf(initialWeight) }
     var searchQuery by remember { mutableStateOf("") }
 
-    val filteredNames = remember(searchQuery) {
-        if (searchQuery.isBlank()) MiuixIconRegistry.ICON_NAMES
-        else MiuixIconRegistry.ICON_NAMES.filter { it.contains(searchQuery, ignoreCase = true) }
-    }
-
-    val weightIndex = remember(selectedWeight) {
-        MiuixIconRegistry.WEIGHTS.indexOf(selectedWeight).coerceAtLeast(0)
+    val filteredNames = remember(selectedSource, searchQuery) {
+        val sourceNames = if (selectedSource == sources[1]) {
+            MiuixGlassIconRegistry.ICON_NAMES
+        } else {
+            MiuixIconRegistry.ICON_NAMES
+        }
+        if (searchQuery.isBlank()) sourceNames
+        else sourceNames.filter { it.contains(searchQuery, ignoreCase = true) }
     }
 
     Dialog(
@@ -1224,17 +1231,56 @@ fun MiuixIconPickerDialog(
                     .padding(20.dp),
             ) {
                 Text(
-                    text = "选择 Miuix 矢量图标",
+                    text = "选择矢量图标",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = MiuixTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = "支持 125+ 完整官方矢量库，并可调节线条粗细",
+                    text = "支持 Miuix 完整库与 Glass 精选，并可调节线条粗细",
                     fontSize = 12.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
+
+                Text(
+                    text = "图标风格",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MiuixTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    sources.forEach { source ->
+                        val isSelected = source == selectedSource
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (isSelected) MiuixTheme.colorScheme.primary
+                                    else MiuixTheme.colorScheme.surfaceVariant
+                                )
+                                .clickable {
+                                    selectedSource = source
+                                    searchQuery = ""
+                                }
+                                .padding(horizontal = 14.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = source,
+                                fontSize = 12.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) Color.White else MiuixTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
 
                 // 粗细字重切换器
                 Text(
@@ -1277,7 +1323,11 @@ fun MiuixIconPickerDialog(
                 TextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    label = "搜索图标名称（如 Scan, Search, Settings...）",
+                    label = if (selectedSource == sources[1]) {
+                        "搜索 Glass 图标（如 AiScan, Wallet, WiFi7...）"
+                    } else {
+                        "搜索图标名称（如 Scan, Search, Settings...）"
+                    },
                     singleLine = true,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1293,10 +1343,16 @@ fun MiuixIconPickerDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(filteredNames, key = { it }) { name ->
-                        val isSelected = name.equals(initialName, ignoreCase = true)
-                        val vector = remember(name, selectedWeight) {
-                            MiuixIconRegistry.find(name, selectedWeight)
+                    items(filteredNames, key = { "$selectedSource/$it" }) { name ->
+                        val isSelected = selectedSource == initialSource &&
+                            name.equals(initialName, ignoreCase = true)
+                        val finalKey = if (selectedSource == sources[1]) {
+                            "glass:$name:$selectedWeight"
+                        } else {
+                            "$name:$selectedWeight"
+                        }
+                        val vector = remember(finalKey) {
+                            MiuixIconRegistry.find(finalKey)
                         }
 
                         Column(
@@ -1307,7 +1363,6 @@ fun MiuixIconPickerDialog(
                                     else MiuixTheme.colorScheme.surfaceVariant,
                                 )
                                 .clickable {
-                                    val finalKey = "$name:$selectedWeight"
                                     onSelectIcon(finalKey)
                                 }
                                 .padding(vertical = 10.dp, horizontal = 4.dp),
@@ -1317,7 +1372,7 @@ fun MiuixIconPickerDialog(
                             if (vector != null) {
                                 Icon(
                                     imageVector = vector,
-                                    contentDescription = name,
+                                    contentDescription = "$selectedSource $name",
                                     tint = if (isSelected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
                                     modifier = Modifier.size(28.dp),
                                 )
