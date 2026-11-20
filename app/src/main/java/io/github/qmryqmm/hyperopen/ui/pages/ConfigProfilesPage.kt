@@ -65,6 +65,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import io.github.qmryqmm.hyperopen.config.ConfigProfile
 import io.github.qmryqmm.hyperopen.config.ConfigProfileStore
+import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import top.yukonga.miuix.kmp.basic.BasicComponent
@@ -366,6 +367,31 @@ private fun Modifier.configProfileDragVisuals(
         .zIndex(if (dragging) 1f else 0f)
 }
 
+private fun displayMaterialLabel(
+    baseLabel: String,
+    materialStyle: Int,
+    softGlassSupported: Boolean,
+): String = if (!softGlassSupported && materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) {
+    "柔光玻璃(转高斯)"
+} else {
+    baseLabel
+}
+
+@Composable
+private fun SoftGlassNoticeBanner(text: String) {
+    Text(
+        text = text,
+        fontSize = 12.sp,
+        lineHeight = 17.sp,
+        color = Color(0xFFFAAD14),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0x1FFAAD14))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    )
+}
+
 @Composable
 fun ConfigProfilesPage(
     contentPadding: PaddingValues,
@@ -374,14 +400,25 @@ fun ConfigProfilesPage(
     selectionState: ConfigProfileSelectionState,
     activeProfileId: String,
     activeSyncStatus: ConfigProfileStore.ProfileSyncStatus,
+    softGlassSupported: Boolean,
     currentLayoutLabel: String,
     currentMaterialLabel: String,
     currentShortcutCount: Int,
     pendingImportPreview: ConfigProfileStore.ImportPreview?,
     onDismissImportPreview: () -> Unit,
     onCreateProfile: (String) -> Unit,
-    onApplyProfile: (profile: ConfigProfile, includeShortcuts: Boolean, backupCurrentFirst: Boolean) -> Unit,
-    onSyncProfile: (profile: ConfigProfile, syncParams: Boolean, syncShortcuts: Boolean) -> Unit,
+    onApplyProfile: (
+        profile: ConfigProfile,
+        applyParams: Boolean,
+        applyShortcuts: Boolean,
+        backupCurrentFirst: Boolean,
+    ) -> Unit,
+    onSyncProfile: (
+        profile: ConfigProfile,
+        syncParams: Boolean,
+        syncShortcuts: Boolean,
+        preserveSoftGlassMetadata: Boolean,
+    ) -> Unit,
     onRequestPickImportFile: () -> Unit,
     onCommitImport: (
         preview: ConfigProfileStore.ImportPreview,
@@ -493,6 +530,7 @@ fun ConfigProfilesPage(
             ActiveProfileStatusCard(
                 activeProfile = activeProfile,
                 syncStatus = activeSyncStatus,
+                softGlassSupported = softGlassSupported,
                 currentLayoutLabel = currentLayoutLabel,
                 currentMaterialLabel = currentMaterialLabel,
                 currentShortcutCount = currentShortcutCount,
@@ -612,7 +650,8 @@ fun ConfigProfilesPage(
             val primary = MiuixTheme.colorScheme.primary
             val dragging = interactionState.draggingId == profile.id
             val shortcutText = if (profile.hasShortcuts) "${profile.shortcutCount} 个快捷项" else "仅参数"
-            val summaryText = "${profile.layoutLabel()} · ${profile.materialLabel()} · $shortcutText · ${formatProfileShortTime(profile.updatedAt)}"
+            val materialDesc = displayMaterialLabel(profile.materialLabel(), profile.materialStyle, softGlassSupported)
+            val summaryText = "${profile.layoutLabel()} · $materialDesc · $shortcutText · ${formatProfileShortTime(profile.updatedAt)}"
 
             Box(
                 modifier = Modifier
@@ -762,6 +801,7 @@ fun ConfigProfilesPage(
             profile = latest,
             isActive = isActive,
             isModifiedActive = isModifiedActive,
+            softGlassSupported = softGlassSupported,
             onDismiss = { actionSheetProfile = null },
             onApply = {
                 actionSheetProfile = null
@@ -833,9 +873,10 @@ fun ConfigProfilesPage(
             profile = profile,
             isActiveRestore = isActiveRestore,
             needsBackupSuggestion = needsBackupSuggestion,
-            onConfirm = { includeShortcuts, backupCurrentFirst ->
+            softGlassSupported = softGlassSupported,
+            onConfirm = { applyParams, applyShortcuts, backupCurrentFirst ->
                 applyTargetProfile = null
-                onApplyProfile(profile, includeShortcuts, backupCurrentFirst)
+                onApplyProfile(profile, applyParams, applyShortcuts, backupCurrentFirst)
             },
             onDismiss = { applyTargetProfile = null },
         )
@@ -847,9 +888,10 @@ fun ConfigProfilesPage(
             profile = profile,
             isActive = profile.id == activeProfileId,
             syncStatus = activeSyncStatus,
-            onConfirm = { syncParams, syncShortcuts ->
+            softGlassSupported = softGlassSupported,
+            onConfirm = { syncParams, syncShortcuts, preserveSoftGlass ->
                 syncTargetProfile = null
-                onSyncProfile(profile, syncParams, syncShortcuts)
+                onSyncProfile(profile, syncParams, syncShortcuts, preserveSoftGlass)
             },
             onDismiss = { syncTargetProfile = null },
         )
@@ -860,6 +902,7 @@ fun ConfigProfilesPage(
         ImportPreviewDialog(
             preview = preview,
             existingNames = profiles.map { it.name }.toSet(),
+            softGlassSupported = softGlassSupported,
             onConfirm = { singleNameOverride, includeShortcuts, applyImmediately ->
                 onCommitImport(preview, singleNameOverride, includeShortcuts, applyImmediately)
             },
@@ -982,6 +1025,7 @@ fun ConfigProfilesPage(
 private fun ActiveProfileStatusCard(
     activeProfile: ConfigProfile?,
     syncStatus: ConfigProfileStore.ProfileSyncStatus,
+    softGlassSupported: Boolean,
     currentLayoutLabel: String,
     currentMaterialLabel: String,
     currentShortcutCount: Int,
@@ -997,6 +1041,13 @@ private fun ActiveProfileStatusCard(
         Column(modifier = Modifier.padding(16.dp)) {
             if (activeProfile != null) {
                 val modified = syncStatus.isModified()
+                val softGlassDowngraded =
+                    !softGlassSupported && activeProfile.materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS
+                val materialLabel = displayMaterialLabel(
+                    activeProfile.materialLabel(),
+                    activeProfile.materialStyle,
+                    softGlassSupported,
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1019,7 +1070,7 @@ private fun ActiveProfileStatusCard(
                             syncStatus.shortcutsModified ->
                                 "快捷项目已修改，尚未更新到此配置"
                             else ->
-                                "${activeProfile.layoutLabel()} · ${activeProfile.materialLabel()} · 已与保存方案同步"
+                                "${activeProfile.layoutLabel()} · $materialLabel · 已与保存方案同步"
                         }
                         Text(
                             text = statusDetail,
@@ -1027,6 +1078,15 @@ private fun ActiveProfileStatusCard(
                             lineHeight = 17.sp,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
+                        if (softGlassDowngraded) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "当前设备不支持柔光玻璃，已自动转为高斯模糊并补偿模糊半径（原配置档案已保留）",
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                                color = Color(0xFFFAAD14),
+                            )
+                        }
                     }
                     Spacer(Modifier.width(10.dp))
                     ProfileBadge(
@@ -1240,6 +1300,7 @@ private fun ProfileActionDialog(
     profile: ConfigProfile,
     isActive: Boolean,
     isModifiedActive: Boolean,
+    softGlassSupported: Boolean,
     onDismiss: () -> Unit,
     onApply: () -> Unit,
     onSync: () -> Unit,
@@ -1290,8 +1351,9 @@ private fun ProfileActionDialog(
                     }
                     Spacer(Modifier.height(6.dp))
                     val shortcutMeta = if (profile.hasShortcuts) "${profile.shortcutCount} 个快捷项目" else "仅包含参数（不替换快捷项目）"
+                    val materialMeta = displayMaterialLabel(profile.materialLabel(), profile.materialStyle, softGlassSupported)
                     Text(
-                        text = "${profile.layoutLabel()} · ${profile.materialLabel()} · ${profile.keyCount} 项参数 · $shortcutMeta",
+                        text = "${profile.layoutLabel()} · $materialMeta · ${profile.keyCount} 项参数 · $shortcutMeta",
                         fontSize = 12.sp,
                         lineHeight = 17.sp,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -1302,6 +1364,12 @@ private fun ProfileActionDialog(
                         lineHeight = 17.sp,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
+                    if (!softGlassSupported && profile.materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) {
+                        Spacer(Modifier.height(10.dp))
+                        SoftGlassNoticeBanner(
+                            "此配置原为柔光玻璃材质，当前设备不支持柔光玻璃；应用时将保留原档案并在本机转为高斯模糊+模糊半径补偿。",
+                        )
+                    }
                 }
 
                 if (profile.hasShortcuts && profile.shortcutCount > 0) {
@@ -1465,11 +1533,22 @@ private fun ApplyProfileDialog(
     profile: ConfigProfile,
     isActiveRestore: Boolean,
     needsBackupSuggestion: Boolean,
-    onConfirm: (includeShortcuts: Boolean, backupCurrentFirst: Boolean) -> Unit,
+    softGlassSupported: Boolean,
+    onConfirm: (applyParams: Boolean, applyShortcuts: Boolean, backupCurrentFirst: Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var includeShortcuts by remember(profile.id) { mutableStateOf(profile.hasShortcuts) }
+    var applyParams by remember(profile.id) { mutableStateOf(true) }
+    var applyShortcuts by remember(profile.id) { mutableStateOf(profile.hasShortcuts) }
     var backupCurrentFirst by remember(profile.id) { mutableStateOf(false) }
+
+    val finalApplyShortcuts = profile.hasShortcuts && applyShortcuts
+    val softGlassDowngraded =
+        !softGlassSupported && profile.materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS
+    val materialDesc = displayMaterialLabel(
+        profile.materialLabel(),
+        profile.materialStyle,
+        softGlassSupported,
+    )
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -1496,7 +1575,7 @@ private fun ApplyProfileDialog(
                     text = if (isActiveRestore) {
                         "将当前面板恢复为「${profile.name}」上次保存时的状态，未保存的改动将被覆盖。"
                     } else {
-                        "将「${profile.name}」设为当前配置（${profile.layoutLabel()} · ${profile.materialLabel()}）。"
+                        "将「${profile.name}」应用到当前面板（${profile.layoutLabel()} · $materialDesc）。"
                     },
                     fontSize = 14.sp,
                     lineHeight = 20.sp,
@@ -1506,12 +1585,22 @@ private fun ApplyProfileDialog(
 
                 if (profile.hasShortcuts) {
                     BasicComponent(
-                        title = "同时应用快捷项目",
-                        summary = "应用 ${profile.shortcutCount} 个快捷项目并替换当前列表；关闭后仅应用 ${profile.keyCount} 项参数。",
+                        title = "应用配置参数",
+                        summary = "应用 ${profile.keyCount} 项外观、布局、动效与触感参数；关闭后仅替换快捷项目，不改变当前参数与激活方案。",
                         endActions = {
                             Switch(
-                                checked = includeShortcuts,
-                                onCheckedChange = { includeShortcuts = it },
+                                checked = applyParams,
+                                onCheckedChange = { applyParams = it },
+                            )
+                        },
+                    )
+                    BasicComponent(
+                        title = "应用快捷项目",
+                        summary = "用此配置中的 ${profile.shortcutCount} 个快捷项目替换当前列表；关闭后保留当前快捷项目。",
+                        endActions = {
+                            Switch(
+                                checked = applyShortcuts,
+                                onCheckedChange = { applyShortcuts = it },
                             )
                         },
                     )
@@ -1529,11 +1618,18 @@ private fun ApplyProfileDialog(
                     )
                 }
 
-                if (needsBackupSuggestion) {
+                if (softGlassDowngraded && applyParams) {
+                    Spacer(Modifier.height(10.dp))
+                    SoftGlassNoticeBanner(
+                        "此配置为柔光玻璃材质，当前设备不支持；应用参数时将自动转为高斯模糊并按磨砂浓度补偿模糊半径（原配置档案保持不变）。",
+                    )
+                }
+
+                if (needsBackupSuggestion && (applyParams || finalApplyShortcuts)) {
                     Spacer(Modifier.height(10.dp))
                     BasicComponent(
                         title = "切换前备份当前配置",
-                        summary = "当前生效设置尚未归档或有未保存改动，开启后先另存为新备份再切换。",
+                        summary = "当前生效设置尚未归档或有未保存改动，开启后先另存为新备份再应用。",
                         endActions = {
                             Switch(
                                 checked = backupCurrentFirst,
@@ -1548,12 +1644,19 @@ private fun ApplyProfileDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                 ) {
+                    val confirmEnabled = applyParams || finalApplyShortcuts
+                    val confirmLabel = when {
+                        isActiveRestore && applyParams && finalApplyShortcuts -> "还原"
+                        isActiveRestore -> "部分还原"
+                        else -> "应用"
+                    }
                     TextButton(text = "取消", onClick = onDismiss)
                     Spacer(Modifier.width(10.dp))
                     TextButton(
-                        text = if (isActiveRestore) "还原" else "应用",
+                        text = confirmLabel,
                         colors = ButtonDefaults.textButtonColorsPrimary(),
-                        onClick = { onConfirm(profile.hasShortcuts && includeShortcuts, backupCurrentFirst) },
+                        enabled = confirmEnabled,
+                        onClick = { onConfirm(applyParams, finalApplyShortcuts, backupCurrentFirst) },
                     )
                 }
             }
@@ -1566,7 +1669,8 @@ private fun ProfileSyncDialog(
     profile: ConfigProfile,
     isActive: Boolean,
     syncStatus: ConfigProfileStore.ProfileSyncStatus,
-    onConfirm: (syncParams: Boolean, syncShortcuts: Boolean) -> Unit,
+    softGlassSupported: Boolean,
+    onConfirm: (syncParams: Boolean, syncShortcuts: Boolean, preserveSoftGlassMetadata: Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var syncParams by remember(profile.id) {
@@ -1587,6 +1691,9 @@ private fun ProfileSyncDialog(
             }
         )
     }
+    var preserveSoftGlass by remember(profile.id) { mutableStateOf(true) }
+    val showPreserveSoftGlass =
+        !softGlassSupported && profile.materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS && syncParams
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -1626,6 +1733,18 @@ private fun ProfileSyncDialog(
                         )
                     },
                 )
+                if (showPreserveSoftGlass) {
+                    BasicComponent(
+                        title = "保留原柔光玻璃材质标记",
+                        summary = "仅同步其余参数改动，保留原配置中的柔光玻璃材质与光学参数；关闭后将改写为高斯模糊。",
+                        endActions = {
+                            Switch(
+                                checked = preserveSoftGlass,
+                                onCheckedChange = { preserveSoftGlass = it },
+                            )
+                        },
+                    )
+                }
                 BasicComponent(
                     title = "同步快捷项目",
                     summary = "用当前的快捷项目列表与顺序覆盖此配置。",
@@ -1647,7 +1766,7 @@ private fun ProfileSyncDialog(
                         text = "更新覆盖",
                         colors = ButtonDefaults.textButtonColorsPrimary(),
                         enabled = syncParams || syncShortcuts,
-                        onClick = { onConfirm(syncParams, syncShortcuts) },
+                        onClick = { onConfirm(syncParams, syncShortcuts, showPreserveSoftGlass && preserveSoftGlass) },
                     )
                 }
             }
@@ -1659,6 +1778,7 @@ private fun ProfileSyncDialog(
 private fun ImportPreviewDialog(
     preview: ConfigProfileStore.ImportPreview,
     existingNames: Set<String>,
+    softGlassSupported: Boolean,
     onConfirm: (singleNameOverride: String, includeShortcuts: Boolean, applyImmediately: Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -1667,6 +1787,8 @@ private fun ImportPreviewDialog(
     val anyHasShortcuts = preview.anyHasShortcuts()
     var includeShortcuts by remember(preview) { mutableStateOf(anyHasShortcuts) }
     var applyImmediately by remember(preview) { mutableStateOf(false) }
+    val hasUnsupportedSoftGlass =
+        !softGlassSupported && preview.candidates.any { it.materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -1701,8 +1823,13 @@ private fun ImportPreviewDialog(
                     } else {
                         ""
                     }
+                    val firstMaterial = displayMaterialLabel(
+                        firstCandidate.materialLabel(),
+                        firstCandidate.materialStyle,
+                        softGlassSupported,
+                    )
                     Text(
-                        text = "${verInfo}${firstCandidate.layoutLabel()} · ${firstCandidate.materialLabel()} · ${firstCandidate.keyCount} 项参数 · $shortcutDesc",
+                        text = "${verInfo}${firstCandidate.layoutLabel()} · $firstMaterial · ${firstCandidate.keyCount} 项参数 · $shortcutDesc",
                         fontSize = 13.sp,
                         lineHeight = 19.sp,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -1782,13 +1909,24 @@ private fun ImportPreviewDialog(
                                     }
                                 }
                                 Text(
-                                    text = "${item.layoutLabel()} · ${item.materialLabel()} · ${if (item.hasShortcuts) "${item.shortcutCount} 个快捷项" else "仅参数"}",
+                                    text = "${item.layoutLabel()} · ${displayMaterialLabel(item.materialLabel(), item.materialStyle, softGlassSupported)} · ${if (item.hasShortcuts) "${item.shortcutCount} 个快捷项" else "仅参数"}",
                                     fontSize = 12.sp,
                                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                 )
                             }
                         }
                     }
+                }
+
+                if (hasUnsupportedSoftGlass) {
+                    Spacer(Modifier.height(12.dp))
+                    SoftGlassNoticeBanner(
+                        if (preview.isBundle) {
+                            "部分导入配置为柔光玻璃材质，当前设备不支持；导入将完整保留原参数，应用时会自动转为高斯模糊并补偿模糊半径。"
+                        } else {
+                            "检测到此配置为柔光玻璃材质，当前设备不支持；导入仍会完整保留原方案参数，应用时将自动转为高斯模糊并补偿模糊半径。"
+                        },
+                    )
                 }
 
                 Spacer(Modifier.height(12.dp))

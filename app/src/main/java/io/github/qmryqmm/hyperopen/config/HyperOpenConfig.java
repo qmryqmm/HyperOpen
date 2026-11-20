@@ -523,6 +523,48 @@ public class HyperOpenConfig {
     }
 
     /**
+     * 在不支持柔光玻璃材质的设备上，统一将柔光玻璃配置降级为高斯模糊并做模糊半径补偿。
+     * 所有加载入口与备份对比共用此规则，确保降级应用后的生效配置与导入/预览基线一致。
+     */
+    public static void adaptUnsupportedSoftGlass(HyperOpenConfig config) {
+        if (config == null || HyperOSMaterialFactory.isSoftGlassSupported()) {
+            return;
+        }
+        if (config.materialStyle != MATERIAL_SOFT_GLASS) {
+            return;
+        }
+        HyperOSMaterialFactory.GlassParams globalGlass =
+                HyperOSMaterialFactory.GlassParams.fromConfig(config);
+        int compensatedGlobal = matteToBlurDp(
+                HyperOSMaterialFactory.clampMatte(globalGlass.matteAlpha));
+        if (compensatedGlobal > config.globalBlurRadius) {
+            config.globalBlurRadius = compensatedGlobal;
+        }
+        if (!config.bubbleMaterialFollowGlobal) {
+            int compensatedBubble = matteToBlurDp(
+                    HyperOSMaterialFactory.clampMatte(config.bubbleGlassMatteAlpha));
+            if (compensatedBubble > config.bubbleBlurRadius) {
+                config.bubbleBlurRadius = compensatedBubble;
+            }
+        }
+        if (!config.regionMaterialFollowGlobal) {
+            int compensatedRegion = matteToBlurDp(
+                    HyperOSMaterialFactory.clampMatte(config.regionGlassMatteAlpha));
+            if (compensatedRegion > config.regionBlurRadius) {
+                config.regionBlurRadius = compensatedRegion;
+            }
+        }
+        if (!config.headerMaterialFollowGlobal) {
+            int compensatedHeader = matteToBlurDp(
+                    HyperOSMaterialFactory.clampMatte(config.headerGlassMatteAlpha));
+            if (compensatedHeader > config.headerBlurRadius) {
+                config.headerBlurRadius = compensatedHeader;
+            }
+        }
+        config.materialStyle = MATERIAL_GAUSSIAN_BLUR;
+    }
+
+    /**
      * 该组件最终生效的玻璃光学参数：全局 GlassParams 基础上叠加组件级磨砂浓度。
      * 图标气泡、图标显示区域底衬、顶部提示胶囊必须共用此入口，保证严格同一套材质参数。
      */
@@ -681,9 +723,6 @@ public class HyperOpenConfig {
                 if (bundle != null) {
                     HyperOpenConfig config = new HyperOpenConfig();
                     config.materialStyle = bundle.getInt("material_style", MATERIAL_GAUSSIAN_BLUR);
-                    if (!HyperOSMaterialFactory.isSoftGlassSupported()) {
-                        config.materialStyle = MATERIAL_GAUSSIAN_BLUR;
-                    }
                     config.offsetY = bundle.getInt("offset_y", 100);
                     config.regionDiameter = bundle.getInt("region_diameter", 220);
                     config.showRegionBg = bundle.getBoolean("show_region_bg", false);
@@ -813,6 +852,7 @@ public class HyperOpenConfig {
                         migrateFromLegacy(config);
                     }
                     config.healBlurBaselineIfNeeded();
+                    adaptUnsupportedSoftGlass(config);
 
                     String jsonStr = bundle.getString("shortcuts_json", null);
                     config.shortcuts = parseShortcutsJson(jsonStr);
@@ -845,9 +885,6 @@ public class HyperOpenConfig {
 
         HyperOpenConfig config = new HyperOpenConfig();
         config.materialStyle = xPrefs.getInt("material_style", MATERIAL_GAUSSIAN_BLUR);
-        if (!HyperOSMaterialFactory.isSoftGlassSupported()) {
-            config.materialStyle = MATERIAL_GAUSSIAN_BLUR;
-        }
         config.offsetY = xPrefs.getInt("offset_y", 100);
         config.regionDiameter = xPrefs.getInt("region_diameter", 220);
         config.showRegionBg = xPrefs.getBoolean("show_region_bg", false);
@@ -978,6 +1015,7 @@ public class HyperOpenConfig {
             migrateFromLegacy(config);
         }
         config.healBlurBaselineIfNeeded();
+        adaptUnsupportedSoftGlass(config);
 
         String jsonStr = xPrefs.getString("shortcuts_json", null);
         config.shortcuts = parseShortcutsJson(jsonStr);
@@ -992,9 +1030,6 @@ public class HyperOpenConfig {
         SharedPreferences sp = io.github.qmryqmm.hyperopen.util.DePrefs.get(context, PREF_NAME);
         HyperOpenConfig config = new HyperOpenConfig();
         config.materialStyle = sp.getInt("material_style", MATERIAL_GAUSSIAN_BLUR);
-        if (!HyperOSMaterialFactory.isSoftGlassSupported()) {
-            config.materialStyle = MATERIAL_GAUSSIAN_BLUR;
-        }
         config.uiStyle = sp.getInt("ui_style", UI_STYLE_MATERIAL);
         config.themeMode = sp.getInt("theme_mode", THEME_FOLLOW_SYSTEM);
         config.monetColors = sp.getBoolean("monet_colors", false);
@@ -1133,10 +1168,292 @@ public class HyperOpenConfig {
             migrateFromLegacy(config);
         }
         config.healBlurBaselineIfNeeded();
+        adaptUnsupportedSoftGlass(config);
 
         String jsonStr = sp.getString("shortcuts_json", null);
         config.shortcuts = parseShortcutsJson(jsonStr);
         return config;
+    }
+
+    /**
+     * 从备份 JSON 的 {@code values} 对象构建规范化面板配置，与 {@link #loadFromApp}
+     * 使用完全一致的默认值与旧版迁移规则，供差异检测使用（不读取 App 界面设置及 FOD 实测坐标）。
+     */
+    public static HyperOpenConfig fromBackupValues(JSONObject values) {
+        HyperOpenConfig config = new HyperOpenConfig();
+        config.materialStyle = readInt(values, "material_style", MATERIAL_GAUSSIAN_BLUR);
+        config.offsetY = readInt(values, "offset_y", 100);
+        config.regionDiameter = readInt(values, "region_diameter", 220);
+        config.showRegionBg = readBoolean(values, "show_region_bg", false);
+        config.showHeaderPillBg = readBoolean(values, "show_header_pill_bg", false);
+        config.showHeaderPill = readBoolean(values, "show_header_pill", true);
+        config.headerTopMargin = readInt(values, "header_top_margin", 100);
+        config.headerTitleSize = readInt(values, "header_title_size", 17);
+        config.headerSubtitleSize = readInt(values, "header_subtitle_size", 11);
+        config.headerBlurRadius = readInt(values, "header_blur_radius", 25);
+        config.headerTextCentered = readBoolean(values, "header_text_centered", true);
+        config.iconSize = readInt(values, "icon_size", 60);
+        config.maxIconCount = readInt(values, "max_icon_count", 0);
+        config.layoutStyle = readInt(values, "layout_style", LAYOUT_HONEYCOMB);
+        config.ringSectorMode = readBoolean(values, "ring_sector_mode", true);
+        config.sectorLineColor = readInt(values, "sector_line_color", 0xFFBFBFBF);
+        config.sectorLineAlpha = readFloat(values, "sector_line_alpha", 0.4f);
+        config.sectorDashLength = readInt(values, "sector_dash_length", 6);
+        config.sectorDashGap = readInt(values, "sector_dash_gap", 5);
+        config.sectorLineWidth = readFloat(values, "sector_line_width", 1.2f);
+        config.sectorHighlightEnabled = readBoolean(values, "sector_highlight_enabled", true);
+        config.animDurationMs = readInt(values, "anim_duration_ms", 320);
+        config.panelExpandAnimType = normalizePanelExpandAnimType(
+                readInt(values, "panel_expand_anim_type", PANEL_EXPAND_BLOOM),
+                config.layoutStyle,
+                readBoolean(values, "stock_system_anim", true)
+        );
+        config.panelExpandStaggerMs = readInt(values, "panel_expand_stagger_ms", 12);
+        config.dismissAnimEnabled = readBoolean(values, "dismiss_anim_enabled", true);
+        config.panelCollapseAnimType = readInt(values, "panel_collapse_anim_type", PANEL_COLLAPSE_SELECTED_POP);
+        config.panelCollapseDurationMs = readInt(values, "panel_collapse_duration_ms", 120);
+        config.panelCollapseStaggerMs = readInt(values, "panel_collapse_stagger_ms", 0);
+        config.panelSelectedPopScale = readFloat(values, "panel_selected_pop_scale", 1.30f);
+        config.globalHintColorMode = readInt(values, "global_hint_color_mode", HINT_COLOR_MODE_AUTO);
+        config.globalHintCustomColor = readInt(values, "global_hint_custom_color", 0xFFFFFFFF);
+        config.defaultHintTextStroke = readInt(values, "default_hint_text_stroke", 0);
+        config.defaultHintTextShadow = readInt(values, "default_hint_text_shadow", 0);
+        config.defaultHintTextWeight = readInt(values, "default_hint_text_weight", 3);
+        config.defaultHintTextLetterSpacing = readFloat(values, "default_hint_text_letter_spacing", 0f);
+        config.defaultShowHintTitle = readBoolean(values, "default_show_hint_title", true);
+        config.defaultShowHintSubtitle = readBoolean(values, "default_show_hint_subtitle", true);
+        config.folderHoverDelayMs = readInt(values, "folder_hover_delay_ms", 250);
+        config.stockSystemRegion = readBoolean(values, "stock_system_region", true);
+        config.folderChildDisplayRangeScale = readFloat(values, "folder_child_display_range_scale", 1f);
+        config.folderChildDirectionMode = normalizeFolderChildDirectionMode(
+                readInt(values, "folder_child_direction_mode", FOLDER_CHILD_DIRECTION_OUTWARD)
+        );
+        config.folderChildDirectionOffsetDeg = readFloat(values, "folder_child_direction_offset_deg", 0f);
+        config.folderChildOrderMode = readInt(values, "folder_child_order_mode", 0);
+        config.folderChildMinGapDp = readInt(values, "folder_child_min_gap_dp", 8);
+        config.folderChildSizeScale = readFloat(values, "folder_child_size_scale", 1f);
+        config.folderChildExpandAnimType = readInt(values, "folder_child_expand_anim_type", FOLDER_CHILD_EXPAND_FAN_SPRING);
+        config.folderChildExpandDurationMs = readInt(values, "folder_child_expand_duration_ms", 180);
+        config.folderChildExpandStaggerMs = readInt(values, "folder_child_expand_stagger_ms", 15);
+        config.folderChildCollapseAnimType = readInt(values, "folder_child_collapse_anim_type", FOLDER_CHILD_COLLAPSE_CENTER);
+        config.folderChildCollapseDurationMs = readInt(values, "folder_child_collapse_duration_ms", 140);
+        config.folderChildCollapseStaggerMs = readInt(values, "folder_child_collapse_stagger_ms", 0);
+        config.folderChildStartScale = readFloat(values, "folder_child_start_scale", 0.1f);
+        config.folderChildOvershoot = readFloat(values, "folder_child_overshoot", 1.2f);
+        config.maxScale = readFloat(values, "max_scale", 1.60f);
+        config.influenceRadius = readInt(values, "influence_radius", 70);
+        config.iconAlpha = readFloat(values, "icon_alpha", 1.0f);
+        config.fisheyeZoomAlpha = readFloat(values, "fisheye_zoom_alpha", 1.0f);
+        config.fisheyeOtherAlpha = readFloat(values, "fisheye_other_alpha", 1.0f);
+        config.iconCornerRadius = readInt(values, "icon_corner_radius", 50);
+        config.fullscreenBlurMaskAlpha = readFloat(values, "fullscreen_blur_mask_alpha", 1.0f);
+        config.fullscreenDimAlpha = readFloat(values, "fullscreen_dim_alpha", 0.45f);
+        config.headerDimAlpha = readFloat(values, "header_dim_alpha", 0f);
+        config.regionDimAlpha = readFloat(values, "region_dim_alpha", 0f);
+        config.bubbleDimAlpha = readFloat(values, "bubble_dim_alpha", 0f);
+        config.showDelayMs = readInt(values, "show_delay_ms", 500);
+        config.disableSystemEnterAnim = readBoolean(values, "disable_system_enter_anim", false);
+        config.faceUnlockQuickOpen = readBoolean(values, "face_unlock_quick_open", true);
+        config.hapticEnabled = readBoolean(values, "haptic_enabled", true);
+        config.hapticStrength = readInt(values, "haptic_strength", 140);
+        config.hapticDurationMs = readInt(values, "haptic_duration_ms", 24);
+        config.hapticMode = readInt(values, "haptic_mode", HAPTIC_MODE_STOCK);
+        config.hapticStockWaveExpand = readInt(values, "haptic_stock_wave_expand", HAPTIC_STOCK_WAVE_LONG_PRESS);
+        config.hapticBrakePulse = readBoolean(values, "haptic_brake_pulse", false);
+        config.hapticDoubleGapMs = readInt(values, "haptic_double_gap_ms", 28);
+        config.hapticSlideEnabled = readBoolean(values, "haptic_slide_enabled", true);
+        config.hapticSlideStrength = readInt(values, "haptic_slide_strength", 100);
+        config.hapticSlideDurationMs = readInt(values, "haptic_slide_duration_ms", 12);
+        config.hapticSlideMode = readInt(values, "haptic_slide_mode", HAPTIC_MODE_STOCK);
+        config.hapticStockWaveSlide = readInt(values, "haptic_stock_wave_slide", HAPTIC_STOCK_WAVE_MESH_NORMAL);
+        config.hapticSlideBrakePulse = readBoolean(values, "haptic_slide_brake_pulse", false);
+        config.hapticSlideDoubleGapMs = readInt(values, "haptic_slide_double_gap_ms", 28);
+        config.regionBlurRadius = readInt(values, "region_blur_radius", 25);
+        config.iconSpacingOffset = readInt(values, "icon_spacing_offset", 5);
+        config.bubblePaddingPercent = readInt(values, "bubble_padding_percent", 0);
+        config.bubbleBlurRadius = readInt(values, "bubble_blur_radius", 25);
+        migrateLegacySelectedScale(config, readFloat(values, "selected_icon_scale", 1.0f));
+        config.appIconCropMode = readInt(values, "app_icon_crop_mode", CROP_ADAPTIVE_EXPAND);
+        config.glyphPadEnabled = readBoolean(values, "glyph_pad_enabled", true);
+        config.glyphPadColor = readInt(values, "glyph_pad_color", 0xFF2A82E4);
+        config.glyphPadMode = readInt(values, "glyph_pad_mode", GLYPH_PAD_MODE_TRANSLUCENT);
+        config.iconGlowEffect = false;
+
+        config.glassPreset = readInt(values, "glass_preset", GLASS_PRESET_DEFAULT);
+        config.glassRefractIor = readFloat(values, "glass_refract_ior", 1.12f);
+        config.glassThickness = readFloat(values, "glass_thickness", 1.5f);
+        config.glassSpecular = readFloat(values, "glass_specular", 0.8f);
+        config.glassMatteAlpha = readFloat(values, "glass_matte_alpha", 0.12f);
+        config.glassBorderLight = readFloat(values, "glass_border_light", 0.45f);
+        config.glassBackgroundSaturation = readFloat(values, "glass_background_saturation", 1.5f);
+        config.glassBackgroundBrightness = readFloat(values, "glass_background_brightness", 0f);
+        config.glassBackgroundBurn = readFloat(values, "glass_background_burn", 0f);
+        config.glassMatteWhiteMix = readFloat(values, "glass_matte_white_mix", 0f);
+        config.glassMatteColorMix = readFloat(values, "glass_matte_color_mix", 0.4f);
+        config.glassMatteColorPower = readFloat(values, "glass_matte_color_power", 1.5f);
+        config.glassEdgeRange = readFloat(values, "glass_edge_range", 50f);
+        config.glassEdgePower = readFloat(values, "glass_edge_power", 4f);
+        config.glassReflectOffset = readFloat(values, "glass_reflect_offset", 600f);
+        config.globalBlurRadius = readInt(values, "global_blur_radius", 25);
+        config.globalDimAlpha = readFloat(values, "global_dim_alpha", 0f);
+        config.bubbleMaterialFollowGlobal = readBoolean(values, "bubble_material_follow_global", true);
+        config.regionMaterialFollowGlobal = readBoolean(values, "region_material_follow_global", true);
+        config.headerMaterialFollowGlobal = readBoolean(values, "header_material_follow_global", true);
+        config.bubbleGlassMatteAlpha = readFloat(values, "bubble_glass_matte_alpha", 0.12f);
+        config.regionGlassMatteAlpha = readFloat(values, "region_glass_matte_alpha", 0.12f);
+        config.headerGlassMatteAlpha = readFloat(values, "header_glass_matte_alpha", 0.12f);
+        config.blurBaselineHealed = readBoolean(values, "blur_baseline_healed", false);
+
+        if (values == null || !values.has("global_blur_radius")) {
+            migrateFromLegacy(config);
+        }
+        config.healBlurBaselineIfNeeded();
+        adaptUnsupportedSoftGlass(config);
+        return config;
+    }
+
+    /** 逐项比对面板参数是否完全一致（忽略 App 界面设置、运行时状态及快捷方式列表）。 */
+    public boolean panelParamsEquals(HyperOpenConfig other) {
+        if (this == other) return true;
+        if (other == null) return false;
+        return materialStyle == other.materialStyle
+                && offsetY == other.offsetY
+                && regionDiameter == other.regionDiameter
+                && showRegionBg == other.showRegionBg
+                && showHeaderPillBg == other.showHeaderPillBg
+                && showHeaderPill == other.showHeaderPill
+                && headerTopMargin == other.headerTopMargin
+                && headerTitleSize == other.headerTitleSize
+                && headerSubtitleSize == other.headerSubtitleSize
+                && headerBlurRadius == other.headerBlurRadius
+                && headerTextCentered == other.headerTextCentered
+                && iconSize == other.iconSize
+                && maxIconCount == other.maxIconCount
+                && layoutStyle == other.layoutStyle
+                && ringSectorMode == other.ringSectorMode
+                && sectorLineColor == other.sectorLineColor
+                && floatEq(sectorLineAlpha, other.sectorLineAlpha)
+                && sectorDashLength == other.sectorDashLength
+                && sectorDashGap == other.sectorDashGap
+                && floatEq(sectorLineWidth, other.sectorLineWidth)
+                && sectorHighlightEnabled == other.sectorHighlightEnabled
+                && animDurationMs == other.animDurationMs
+                && panelExpandAnimType == other.panelExpandAnimType
+                && panelExpandStaggerMs == other.panelExpandStaggerMs
+                && dismissAnimEnabled == other.dismissAnimEnabled
+                && panelCollapseAnimType == other.panelCollapseAnimType
+                && panelCollapseDurationMs == other.panelCollapseDurationMs
+                && panelCollapseStaggerMs == other.panelCollapseStaggerMs
+                && floatEq(panelSelectedPopScale, other.panelSelectedPopScale)
+                && globalHintColorMode == other.globalHintColorMode
+                && globalHintCustomColor == other.globalHintCustomColor
+                && defaultHintTextStroke == other.defaultHintTextStroke
+                && defaultHintTextShadow == other.defaultHintTextShadow
+                && defaultHintTextWeight == other.defaultHintTextWeight
+                && floatEq(defaultHintTextLetterSpacing, other.defaultHintTextLetterSpacing)
+                && defaultShowHintTitle == other.defaultShowHintTitle
+                && defaultShowHintSubtitle == other.defaultShowHintSubtitle
+                && folderHoverDelayMs == other.folderHoverDelayMs
+                && stockSystemRegion == other.stockSystemRegion
+                && floatEq(folderChildDisplayRangeScale, other.folderChildDisplayRangeScale)
+                && folderChildDirectionMode == other.folderChildDirectionMode
+                && floatEq(folderChildDirectionOffsetDeg, other.folderChildDirectionOffsetDeg)
+                && folderChildOrderMode == other.folderChildOrderMode
+                && folderChildMinGapDp == other.folderChildMinGapDp
+                && floatEq(folderChildSizeScale, other.folderChildSizeScale)
+                && folderChildExpandAnimType == other.folderChildExpandAnimType
+                && folderChildExpandDurationMs == other.folderChildExpandDurationMs
+                && folderChildExpandStaggerMs == other.folderChildExpandStaggerMs
+                && folderChildCollapseAnimType == other.folderChildCollapseAnimType
+                && folderChildCollapseDurationMs == other.folderChildCollapseDurationMs
+                && folderChildCollapseStaggerMs == other.folderChildCollapseStaggerMs
+                && floatEq(folderChildStartScale, other.folderChildStartScale)
+                && floatEq(folderChildOvershoot, other.folderChildOvershoot)
+                && floatEq(maxScale, other.maxScale)
+                && influenceRadius == other.influenceRadius
+                && floatEq(iconAlpha, other.iconAlpha)
+                && floatEq(fisheyeZoomAlpha, other.fisheyeZoomAlpha)
+                && floatEq(fisheyeOtherAlpha, other.fisheyeOtherAlpha)
+                && iconCornerRadius == other.iconCornerRadius
+                && floatEq(fullscreenBlurMaskAlpha, other.fullscreenBlurMaskAlpha)
+                && floatEq(fullscreenDimAlpha, other.fullscreenDimAlpha)
+                && floatEq(headerDimAlpha, other.headerDimAlpha)
+                && floatEq(regionDimAlpha, other.regionDimAlpha)
+                && floatEq(bubbleDimAlpha, other.bubbleDimAlpha)
+                && showDelayMs == other.showDelayMs
+                && disableSystemEnterAnim == other.disableSystemEnterAnim
+                && faceUnlockQuickOpen == other.faceUnlockQuickOpen
+                && hapticEnabled == other.hapticEnabled
+                && hapticStrength == other.hapticStrength
+                && hapticDurationMs == other.hapticDurationMs
+                && hapticMode == other.hapticMode
+                && hapticStockWaveExpand == other.hapticStockWaveExpand
+                && hapticBrakePulse == other.hapticBrakePulse
+                && hapticDoubleGapMs == other.hapticDoubleGapMs
+                && hapticSlideEnabled == other.hapticSlideEnabled
+                && hapticSlideStrength == other.hapticSlideStrength
+                && hapticSlideDurationMs == other.hapticSlideDurationMs
+                && hapticSlideMode == other.hapticSlideMode
+                && hapticStockWaveSlide == other.hapticStockWaveSlide
+                && hapticSlideBrakePulse == other.hapticSlideBrakePulse
+                && hapticSlideDoubleGapMs == other.hapticSlideDoubleGapMs
+                && regionBlurRadius == other.regionBlurRadius
+                && iconSpacingOffset == other.iconSpacingOffset
+                && bubblePaddingPercent == other.bubblePaddingPercent
+                && bubbleBlurRadius == other.bubbleBlurRadius
+                && appIconCropMode == other.appIconCropMode
+                && glyphPadEnabled == other.glyphPadEnabled
+                && glyphPadColor == other.glyphPadColor
+                && glyphPadMode == other.glyphPadMode
+                && glassPreset == other.glassPreset
+                && floatEq(glassRefractIor, other.glassRefractIor)
+                && floatEq(glassThickness, other.glassThickness)
+                && floatEq(glassSpecular, other.glassSpecular)
+                && floatEq(glassMatteAlpha, other.glassMatteAlpha)
+                && floatEq(glassBorderLight, other.glassBorderLight)
+                && floatEq(glassBackgroundSaturation, other.glassBackgroundSaturation)
+                && floatEq(glassBackgroundBrightness, other.glassBackgroundBrightness)
+                && floatEq(glassBackgroundBurn, other.glassBackgroundBurn)
+                && floatEq(glassMatteWhiteMix, other.glassMatteWhiteMix)
+                && floatEq(glassMatteColorMix, other.glassMatteColorMix)
+                && floatEq(glassMatteColorPower, other.glassMatteColorPower)
+                && floatEq(glassEdgeRange, other.glassEdgeRange)
+                && floatEq(glassEdgePower, other.glassEdgePower)
+                && floatEq(glassReflectOffset, other.glassReflectOffset)
+                && globalBlurRadius == other.globalBlurRadius
+                && floatEq(globalDimAlpha, other.globalDimAlpha)
+                && bubbleMaterialFollowGlobal == other.bubbleMaterialFollowGlobal
+                && regionMaterialFollowGlobal == other.regionMaterialFollowGlobal
+                && headerMaterialFollowGlobal == other.headerMaterialFollowGlobal
+                && floatEq(bubbleGlassMatteAlpha, other.bubbleGlassMatteAlpha)
+                && floatEq(regionGlassMatteAlpha, other.regionGlassMatteAlpha)
+                && floatEq(headerGlassMatteAlpha, other.headerGlassMatteAlpha);
+    }
+
+    private static boolean floatEq(float a, float b) {
+        return Math.abs(a - b) < 1e-4f;
+    }
+
+    private static int readInt(JSONObject values, String key, int def) {
+        if (values == null) return def;
+        JSONObject item = values.optJSONObject(key);
+        if (item == null || item.isNull("v")) return def;
+        return item.optInt("v", def);
+    }
+
+    private static float readFloat(JSONObject values, String key, float def) {
+        if (values == null) return def;
+        JSONObject item = values.optJSONObject(key);
+        if (item == null || item.isNull("v")) return def;
+        double d = item.optDouble("v", def);
+        return Double.isNaN(d) || Double.isInfinite(d) ? def : (float) d;
+    }
+
+    private static boolean readBoolean(JSONObject values, String key, boolean def) {
+        if (values == null) return def;
+        JSONObject item = values.optJSONObject(key);
+        if (item == null || item.isNull("v")) return def;
+        return item.optBoolean("v", def);
     }
 
     /**

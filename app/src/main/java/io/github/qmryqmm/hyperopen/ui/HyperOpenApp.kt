@@ -622,122 +622,125 @@ fun HyperOpenApp(
         config: HyperOpenConfig,
         applyShortcuts: Boolean,
         applyAppUiPrefs: Boolean,
+        applyParams: Boolean = true,
     ) {
-        materialStyle = if (!softGlassSupported || config.materialStyle == HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR) {
-            HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR
-        } else {
-            HyperOpenConfig.MATERIAL_SOFT_GLASS
+        if (applyParams) {
+            materialStyle = if (!softGlassSupported || config.materialStyle == HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR) {
+                HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR
+            } else {
+                HyperOpenConfig.MATERIAL_SOFT_GLASS
+            }
+            offsetY = config.offsetY.toFloat()
+            regionDiameter = config.regionDiameter.toFloat()
+            showRegionBg = config.showRegionBg
+            showHeaderPill = config.showHeaderPill
+            showHeaderPillBg = config.showHeaderPillBg
+            headerTopMargin = config.headerTopMargin.toFloat()
+            headerTitleSize = config.headerTitleSize.toFloat()
+            headerSubtitleSize = config.headerSubtitleSize.toFloat()
+            headerBlurRadius = config.headerBlurRadius.toFloat()
+            headerTextCentered = config.headerTextCentered
+            iconSize = config.iconSize.toFloat()
+            maxIconCount = config.maxIconCount.toFloat()
+            layoutStyle = config.layoutStyle
+            stockSystemRegion = config.stockSystemRegion
+            ringSectorMode = config.ringSectorMode
+            sectorLineColor = config.sectorLineColor
+            sectorLineAlpha = config.sectorLineAlpha
+            sectorDashLength = config.sectorDashLength.toFloat()
+            sectorDashGap = config.sectorDashGap.toFloat()
+            sectorLineWidth = config.sectorLineWidth
+            sectorHighlightEnabled = config.sectorHighlightEnabled
+            animDurationMs = config.animDurationMs.toFloat()
+            panelExpandAnimType = config.panelExpandAnimType
+            panelExpandStaggerMs = config.panelExpandStaggerMs.toFloat()
+            dismissAnimEnabled = config.dismissAnimEnabled
+            panelCollapseAnimType = config.panelCollapseAnimType
+            panelCollapseDurationMs = config.panelCollapseDurationMs.toFloat()
+            panelCollapseStaggerMs = config.panelCollapseStaggerMs.toFloat()
+            panelSelectedPopScale = config.panelSelectedPopScale
+            globalHintColorMode = config.globalHintColorMode
+            globalHintCustomColor = config.globalHintCustomColor
+            defaultHintTextStroke = config.defaultHintTextStroke.toFloat()
+            defaultHintTextShadow = config.defaultHintTextShadow.toFloat()
+            defaultHintTextWeight = config.defaultHintTextWeight
+            defaultHintTextLetterSpacing = config.defaultHintTextLetterSpacing
+            defaultShowHintTitle = config.defaultShowHintTitle
+            defaultShowHintSubtitle = config.defaultShowHintSubtitle
+            folderHoverDelayMs = config.folderHoverDelayMs.toFloat()
+            folderChildDisplayRangeScale = config.folderChildDisplayRangeScale
+            folderChildDirectionMode = config.folderChildDirectionMode
+            folderChildDirectionOffsetDeg = config.folderChildDirectionOffsetDeg
+            folderChildOrderMode = config.folderChildOrderMode
+            folderChildMinGapDp = config.folderChildMinGapDp.toFloat()
+            folderChildSizeScale = config.folderChildSizeScale
+            folderChildExpandAnimType = config.folderChildExpandAnimType
+            folderChildExpandDurationMs = config.folderChildExpandDurationMs.toFloat()
+            folderChildExpandStaggerMs = config.folderChildExpandStaggerMs.toFloat()
+            folderChildCollapseAnimType = config.folderChildCollapseAnimType
+            folderChildCollapseDurationMs = config.folderChildCollapseDurationMs.toFloat()
+            folderChildCollapseStaggerMs = config.folderChildCollapseStaggerMs.toFloat()
+            folderChildStartScale = config.folderChildStartScale
+            folderChildOvershoot = config.folderChildOvershoot
+            maxScale = config.maxScale
+            influenceRadius = config.influenceRadius.toFloat()
+            iconAlpha = config.iconAlpha
+            fisheyeZoomAlpha = config.fisheyeZoomAlpha
+            fisheyeOtherAlpha = config.fisheyeOtherAlpha
+            iconCornerRadius = config.iconCornerRadius.toFloat()
+            fullscreenBlurMaskAlpha = config.fullscreenBlurMaskAlpha
+            fullscreenDimAlpha = config.fullscreenDimAlpha
+            headerDimAlpha = config.headerDimAlpha
+            regionDimAlpha = config.regionDimAlpha
+            bubbleDimAlpha = config.bubbleDimAlpha
+            showDelayMs = config.showDelayMs.toFloat()
+            disableSystemEnterAnim = config.disableSystemEnterAnim
+            faceUnlockQuickOpen = config.faceUnlockQuickOpen
+            hapticEnabled = config.hapticEnabled
+            hapticStrength = config.hapticStrength.toFloat()
+            hapticDurationMs = config.hapticDurationMs.toFloat()
+            hapticMode = config.hapticMode
+            hapticStockWaveExpand = config.hapticStockWaveExpand
+            hapticBrakePulse = config.hapticBrakePulse
+            hapticDoubleGapMs = config.hapticDoubleGapMs.toFloat()
+            hapticSlideEnabled = config.hapticSlideEnabled
+            hapticSlideStrength = config.hapticSlideStrength.toFloat()
+            hapticSlideDurationMs = config.hapticSlideDurationMs.toFloat()
+            hapticSlideMode = config.hapticSlideMode
+            hapticStockWaveSlide = config.hapticStockWaveSlide
+            hapticSlideBrakePulse = config.hapticSlideBrakePulse
+            hapticSlideDoubleGapMs = config.hapticSlideDoubleGapMs.toFloat()
+            regionBlurRadius = config.regionBlurRadius.toFloat()
+            iconSpacingOffset = config.iconSpacingOffset.toFloat()
+            bubblePaddingPercent = config.bubblePaddingPercent.toFloat()
+            bubbleBlurRadius = config.bubbleBlurRadius.toFloat()
+            glyphPadEnabled = config.glyphPadEnabled
+            glyphPadColor = config.glyphPadColor
+            glyphPadMode = config.glyphPadMode
+            glassPreset = config.glassPreset
+            glassRefractIor = config.glassRefractIor
+            glassThickness = config.glassThickness
+            glassSpecular = config.glassSpecular
+            glassMatteAlpha = config.glassMatteAlpha
+            glassBorderLight = config.glassBorderLight
+            glassBackgroundSaturation = config.glassBackgroundSaturation
+            glassBackgroundBrightness = config.glassBackgroundBrightness
+            glassBackgroundBurn = config.glassBackgroundBurn
+            glassMatteWhiteMix = config.glassMatteWhiteMix
+            glassMatteColorMix = config.glassMatteColorMix
+            glassMatteColorPower = config.glassMatteColorPower
+            glassEdgeRange = config.glassEdgeRange
+            glassEdgePower = config.glassEdgePower
+            glassReflectOffset = config.glassReflectOffset
+            globalBlurRadius = config.globalBlurRadius.toFloat()
+            globalDimAlpha = config.globalDimAlpha
+            bubbleMaterialFollowGlobal = config.bubbleMaterialFollowGlobal
+            regionMaterialFollowGlobal = config.regionMaterialFollowGlobal
+            headerMaterialFollowGlobal = config.headerMaterialFollowGlobal
+            bubbleGlassMatteAlpha = config.bubbleGlassMatteAlpha
+            regionGlassMatteAlpha = config.regionGlassMatteAlpha
+            headerGlassMatteAlpha = config.headerGlassMatteAlpha
         }
-        offsetY = config.offsetY.toFloat()
-        regionDiameter = config.regionDiameter.toFloat()
-        showRegionBg = config.showRegionBg
-        showHeaderPill = config.showHeaderPill
-        showHeaderPillBg = config.showHeaderPillBg
-        headerTopMargin = config.headerTopMargin.toFloat()
-        headerTitleSize = config.headerTitleSize.toFloat()
-        headerSubtitleSize = config.headerSubtitleSize.toFloat()
-        headerBlurRadius = config.headerBlurRadius.toFloat()
-        headerTextCentered = config.headerTextCentered
-        iconSize = config.iconSize.toFloat()
-        maxIconCount = config.maxIconCount.toFloat()
-        layoutStyle = config.layoutStyle
-        stockSystemRegion = config.stockSystemRegion
-        ringSectorMode = config.ringSectorMode
-        sectorLineColor = config.sectorLineColor
-        sectorLineAlpha = config.sectorLineAlpha
-        sectorDashLength = config.sectorDashLength.toFloat()
-        sectorDashGap = config.sectorDashGap.toFloat()
-        sectorLineWidth = config.sectorLineWidth
-        sectorHighlightEnabled = config.sectorHighlightEnabled
-        animDurationMs = config.animDurationMs.toFloat()
-        panelExpandAnimType = config.panelExpandAnimType
-        panelExpandStaggerMs = config.panelExpandStaggerMs.toFloat()
-        dismissAnimEnabled = config.dismissAnimEnabled
-        panelCollapseAnimType = config.panelCollapseAnimType
-        panelCollapseDurationMs = config.panelCollapseDurationMs.toFloat()
-        panelCollapseStaggerMs = config.panelCollapseStaggerMs.toFloat()
-        panelSelectedPopScale = config.panelSelectedPopScale
-        globalHintColorMode = config.globalHintColorMode
-        globalHintCustomColor = config.globalHintCustomColor
-        defaultHintTextStroke = config.defaultHintTextStroke.toFloat()
-        defaultHintTextShadow = config.defaultHintTextShadow.toFloat()
-        defaultHintTextWeight = config.defaultHintTextWeight
-        defaultHintTextLetterSpacing = config.defaultHintTextLetterSpacing
-        defaultShowHintTitle = config.defaultShowHintTitle
-        defaultShowHintSubtitle = config.defaultShowHintSubtitle
-        folderHoverDelayMs = config.folderHoverDelayMs.toFloat()
-        folderChildDisplayRangeScale = config.folderChildDisplayRangeScale
-        folderChildDirectionMode = config.folderChildDirectionMode
-        folderChildDirectionOffsetDeg = config.folderChildDirectionOffsetDeg
-        folderChildOrderMode = config.folderChildOrderMode
-        folderChildMinGapDp = config.folderChildMinGapDp.toFloat()
-        folderChildSizeScale = config.folderChildSizeScale
-        folderChildExpandAnimType = config.folderChildExpandAnimType
-        folderChildExpandDurationMs = config.folderChildExpandDurationMs.toFloat()
-        folderChildExpandStaggerMs = config.folderChildExpandStaggerMs.toFloat()
-        folderChildCollapseAnimType = config.folderChildCollapseAnimType
-        folderChildCollapseDurationMs = config.folderChildCollapseDurationMs.toFloat()
-        folderChildCollapseStaggerMs = config.folderChildCollapseStaggerMs.toFloat()
-        folderChildStartScale = config.folderChildStartScale
-        folderChildOvershoot = config.folderChildOvershoot
-        maxScale = config.maxScale
-        influenceRadius = config.influenceRadius.toFloat()
-        iconAlpha = config.iconAlpha
-        fisheyeZoomAlpha = config.fisheyeZoomAlpha
-        fisheyeOtherAlpha = config.fisheyeOtherAlpha
-        iconCornerRadius = config.iconCornerRadius.toFloat()
-        fullscreenBlurMaskAlpha = config.fullscreenBlurMaskAlpha
-        fullscreenDimAlpha = config.fullscreenDimAlpha
-        headerDimAlpha = config.headerDimAlpha
-        regionDimAlpha = config.regionDimAlpha
-        bubbleDimAlpha = config.bubbleDimAlpha
-        showDelayMs = config.showDelayMs.toFloat()
-        disableSystemEnterAnim = config.disableSystemEnterAnim
-        faceUnlockQuickOpen = config.faceUnlockQuickOpen
-        hapticEnabled = config.hapticEnabled
-        hapticStrength = config.hapticStrength.toFloat()
-        hapticDurationMs = config.hapticDurationMs.toFloat()
-        hapticMode = config.hapticMode
-        hapticStockWaveExpand = config.hapticStockWaveExpand
-        hapticBrakePulse = config.hapticBrakePulse
-        hapticDoubleGapMs = config.hapticDoubleGapMs.toFloat()
-        hapticSlideEnabled = config.hapticSlideEnabled
-        hapticSlideStrength = config.hapticSlideStrength.toFloat()
-        hapticSlideDurationMs = config.hapticSlideDurationMs.toFloat()
-        hapticSlideMode = config.hapticSlideMode
-        hapticStockWaveSlide = config.hapticStockWaveSlide
-        hapticSlideBrakePulse = config.hapticSlideBrakePulse
-        hapticSlideDoubleGapMs = config.hapticSlideDoubleGapMs.toFloat()
-        regionBlurRadius = config.regionBlurRadius.toFloat()
-        iconSpacingOffset = config.iconSpacingOffset.toFloat()
-        bubblePaddingPercent = config.bubblePaddingPercent.toFloat()
-        bubbleBlurRadius = config.bubbleBlurRadius.toFloat()
-        glyphPadEnabled = config.glyphPadEnabled
-        glyphPadColor = config.glyphPadColor
-        glyphPadMode = config.glyphPadMode
-        glassPreset = config.glassPreset
-        glassRefractIor = config.glassRefractIor
-        glassThickness = config.glassThickness
-        glassSpecular = config.glassSpecular
-        glassMatteAlpha = config.glassMatteAlpha
-        glassBorderLight = config.glassBorderLight
-        glassBackgroundSaturation = config.glassBackgroundSaturation
-        glassBackgroundBrightness = config.glassBackgroundBrightness
-        glassBackgroundBurn = config.glassBackgroundBurn
-        glassMatteWhiteMix = config.glassMatteWhiteMix
-        glassMatteColorMix = config.glassMatteColorMix
-        glassMatteColorPower = config.glassMatteColorPower
-        glassEdgeRange = config.glassEdgeRange
-        glassEdgePower = config.glassEdgePower
-        glassReflectOffset = config.glassReflectOffset
-        globalBlurRadius = config.globalBlurRadius.toFloat()
-        globalDimAlpha = config.globalDimAlpha
-        bubbleMaterialFollowGlobal = config.bubbleMaterialFollowGlobal
-        regionMaterialFollowGlobal = config.regionMaterialFollowGlobal
-        headerMaterialFollowGlobal = config.headerMaterialFollowGlobal
-        bubbleGlassMatteAlpha = config.bubbleGlassMatteAlpha
-        regionGlassMatteAlpha = config.regionGlassMatteAlpha
-        headerGlassMatteAlpha = config.headerGlassMatteAlpha
         if (applyAppUiPrefs) {
             themeMode = config.themeMode
             monetColors = config.monetColors
@@ -765,6 +768,7 @@ fun HyperOpenApp(
                     configProfiles.clear()
                     configProfiles.addAll(storeState.profiles)
                     activeConfigProfileId = storeState.activeId
+                    activeSyncStatus = ConfigProfileStore.ProfileSyncStatus.CLEAN
                     configRevision++
                     Toast.makeText(ctx, "已从当前配置创建「${profile.name}」", Toast.LENGTH_SHORT).show()
                 }.onFailure { err ->
@@ -780,7 +784,8 @@ fun HyperOpenApp(
 
     fun applyConfigProfile(
         profile: ConfigProfile,
-        includeShortcuts: Boolean,
+        applyParams: Boolean,
+        applyShortcuts: Boolean,
         backupCurrentFirst: Boolean,
     ) {
         val activeSnapshotName = configProfiles.firstOrNull { it.id == activeConfigProfileId }?.name
@@ -798,16 +803,28 @@ fun HyperOpenApp(
                     ConfigProfileStore.add(ctx, created, false)
                     backupProfile = created
                 }
-                val applyShortcuts = includeShortcuts && profile.hasShortcuts
-                val applyResult = ConfigBackup.apply(ctx, profile.backupJson, applyShortcuts)
+                val finalApplyShortcuts = applyShortcuts && profile.hasShortcuts
+                val applyResult = ConfigBackup.apply(ctx, profile.backupJson, applyParams, finalApplyShortcuts)
                 if (applyResult.ok) {
-                    ConfigProfileStore.setActive(ctx, profile.id)
-                    val reloaded = HyperOpenConfig.loadFromApp(ctx)
+                    if (applyParams) {
+                        ConfigProfileStore.setActive(ctx, profile.id)
+                    }
                     val storeState = ConfigProfileStore.loadState(ctx)
-                    Triple(applyResult, reloaded, Pair(backupProfile, storeState))
+                    val reloaded = HyperOpenConfig.loadFromApp(ctx)
+                    val targetActiveProfile = if (applyParams) {
+                        profile
+                    } else {
+                        storeState.profiles.firstOrNull { it.id == storeState.activeId }
+                    }
+                    val syncedStatus = if (targetActiveProfile != null) {
+                        ConfigProfileStore.inspectSyncStatus(ctx, targetActiveProfile)
+                    } else {
+                        ConfigProfileStore.ProfileSyncStatus.CLEAN
+                    }
+                    Pair(Pair(applyResult, reloaded), Triple(backupProfile, storeState, syncedStatus))
                 } else {
                     val storeState = if (backupProfile != null) ConfigProfileStore.loadState(ctx) else null
-                    Triple(applyResult, null, Pair(backupProfile, storeState))
+                    Pair(Pair(applyResult, null), Triple(backupProfile, storeState, null))
                 }
             }
             withContext(Dispatchers.Main) {
@@ -817,36 +834,56 @@ fun HyperOpenApp(
                         "应用失败：${err.message ?: err.javaClass.simpleName}",
                         Toast.LENGTH_LONG,
                     ).show()
-                }.onSuccess { (applyResult, reloaded, extra) ->
-                    val (backupProfile, storeState) = extra
+                }.onSuccess { (resultPair, extra) ->
+                    val (applyResult, reloaded) = resultPair
+                    val (backupProfile, storeState, syncedStatus) = extra
                     if (storeState != null) {
                         configProfiles.clear()
                         configProfiles.addAll(storeState.profiles)
                         activeConfigProfileId = storeState.activeId
                     }
                     if (applyResult.ok && reloaded != null) {
-                        val applyShortcuts = includeShortcuts && profile.hasShortcuts
+                        val finalApplyShortcuts = applyShortcuts && profile.hasShortcuts
                         applyConfigToState(
                             config = reloaded,
-                            applyShortcuts = applyShortcuts,
+                            applyShortcuts = finalApplyShortcuts,
                             applyAppUiPrefs = false,
+                            applyParams = applyParams,
                         )
-                        val cap = computeLayoutCapacity()
-                        if (maxIconCount > cap) {
-                            maxIconCount = cap.toFloat()
-                            persist()
+                        val clamped = if (applyParams) {
+                            val cap = computeLayoutCapacity()
+                            if (maxIconCount > cap) {
+                                maxIconCount = cap.toFloat()
+                                persist()
+                                true
+                            } else {
+                                false
+                            }
                         } else {
+                            false
+                        }
+                        if (!clamped) {
+                            if (syncedStatus != null) {
+                                activeSyncStatus = syncedStatus
+                            }
                             configRevision++
                         }
-                        val requestedSoftGlass =
+                        val requestedSoftGlass = applyParams &&
                             profile.materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS && !softGlassSupported
                         val msg = buildString {
-                            append(if (applyShortcuts) "已应用「${profile.name}」及快捷项目" else "已应用「${profile.name}」参数")
+                            when {
+                                applyParams && finalApplyShortcuts ->
+                                    append("已应用「${profile.name}」及快捷项目")
+                                applyParams ->
+                                    append("已应用「${profile.name}」参数")
+                                else ->
+                                    append("已单独应用「${profile.name}」的 ${applyResult.shortcutCount} 个快捷项目")
+                            }
                             if (backupProfile != null) {
                                 append("（已备份为「${backupProfile.name}」）")
                             }
                             if (requestedSoftGlass) {
-                                append("；当前系统不支持柔光玻璃，已自动使用高斯模糊")
+                                append("；当前设备不支持柔光玻璃，已自动转为高斯模糊并补偿模糊半径")
                             }
                         }
                         Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
@@ -862,22 +899,52 @@ fun HyperOpenApp(
         profile: ConfigProfile,
         syncParams: Boolean,
         syncShortcuts: Boolean,
+        preserveSoftGlassMetadata: Boolean,
     ) {
+        val isTargetActive = profile.id == activeConfigProfileId
         persist()
         configScope.launch(Dispatchers.IO) {
             val outcome = runCatching {
-                ConfigProfileStore.syncFromCurrent(ctx, profile.id, syncParams, syncShortcuts)
+                val synced = ConfigProfileStore.syncFromCurrent(
+                    ctx,
+                    profile.id,
+                    syncParams,
+                    syncShortcuts,
+                    preserveSoftGlassMetadata,
+                )
+                val syncedStatus = if (synced != null && isTargetActive) {
+                    ConfigProfileStore.inspectSyncStatus(ctx, synced)
+                } else {
+                    null
+                }
+                Pair(synced, syncedStatus)
             }
             withContext(Dispatchers.Main) {
-                outcome.onSuccess { synced ->
+                outcome.onSuccess { (synced, syncedStatus) ->
                     if (synced != null) {
                         val index = configProfiles.indexOfFirst { it.id == synced.id }
                         if (index >= 0) configProfiles[index] = synced
+                        if (syncedStatus != null) {
+                            activeSyncStatus = syncedStatus
+                        }
                         configRevision++
+                        val preservedNote = if (
+                            preserveSoftGlassMetadata &&
+                            syncParams &&
+                            !softGlassSupported &&
+                            profile.materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS
+                        ) {
+                            "（已保留柔光玻璃标记）"
+                        } else {
+                            ""
+                        }
                         val msg = when {
-                            syncParams && syncShortcuts -> "已将当前参数与快捷项目更新到「${synced.name}」"
-                            syncParams -> "已将 ${synced.keyCount} 项当前参数更新到「${synced.name}」"
-                            else -> "已将 ${synced.shortcutCount} 个快捷项目更新到「${synced.name}」"
+                            syncParams && syncShortcuts ->
+                                "已将当前参数与快捷项目更新到「${synced.name}」$preservedNote"
+                            syncParams ->
+                                "已将 ${synced.keyCount} 项当前参数更新到「${synced.name}」$preservedNote"
+                            else ->
+                                "已将 ${synced.shortcutCount} 个快捷项目更新到「${synced.name}」"
                         }
                         Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
                     } else {
@@ -916,7 +983,8 @@ fun HyperOpenApp(
                     if (applyImmediately && firstImported != null) {
                         applyConfigProfile(
                             profile = firstImported,
-                            includeShortcuts = includeShortcuts && firstImported.hasShortcuts,
+                            applyParams = true,
+                            applyShortcuts = includeShortcuts && firstImported.hasShortcuts,
                             backupCurrentFirst = false,
                         )
                     } else {
@@ -1908,6 +1976,7 @@ fun HyperOpenApp(
                                     selectionState = configProfileSelectionState,
                                     activeProfileId = activeConfigProfileId,
                                     activeSyncStatus = activeSyncStatus,
+                                    softGlassSupported = softGlassSupported,
                                     currentLayoutLabel = currentLayoutLabel,
                                     currentMaterialLabel = currentMaterialLabel,
                                     currentShortcutCount = shortcuts.size,

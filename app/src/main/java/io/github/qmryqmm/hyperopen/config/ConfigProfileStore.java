@@ -18,6 +18,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -25,6 +26,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory;
 import io.github.qmryqmm.hyperopen.model.ShortcutItem;
 import io.github.qmryqmm.hyperopen.util.DePrefs;
 
@@ -337,6 +339,22 @@ public final class ConfigProfileStore {
             boolean syncParams,
             boolean syncShortcuts
     ) throws Exception {
+        return syncFromCurrent(ctx, id, syncParams, syncShortcuts, false);
+    }
+
+    /**
+     * 将当前生效参数和/或快捷项目同步覆盖到指定配置。
+     *
+     * @param preserveSoftGlassMetadata 当目标配置原为柔光玻璃且当前设备不支持柔光玻璃时，
+     *                                  同步参数时保留原配置的 material_style 与 glass_* 参数。
+     */
+    public static ConfigProfile syncFromCurrent(
+            Context ctx,
+            String id,
+            boolean syncParams,
+            boolean syncShortcuts,
+            boolean preserveSoftGlassMetadata
+    ) throws Exception {
         if (!syncParams && !syncShortcuts) return null;
         synchronized (LOCK) {
             StoreState state = readStateLocked(ctx);
@@ -346,23 +364,31 @@ public final class ConfigProfileStore {
                 if (!profile.id.equals(id)) continue;
 
                 String backupJson;
-                if (syncParams && syncShortcuts) {
-                    backupJson = ConfigBackup.buildExportJson(ctx, true, false);
-                } else if (syncParams) {
-                    String currentJson = ConfigBackup.buildExportJson(ctx, false, false);
+                if (syncParams) {
+                    String currentJson = ConfigBackup.buildExportJson(ctx, syncShortcuts, false);
                     JSONObject currentRoot = new JSONObject(currentJson);
                     JSONObject previousRoot = new JSONObject(profile.backupJson);
-                    JSONArray previousShortcuts = previousRoot.optJSONArray("shortcuts");
-                    if (previousShortcuts != null) {
-                        currentRoot.put("shortcuts", previousShortcuts);
-                    }
-                    JSONObject previousValues = previousRoot.optJSONObject("values");
-                    JSONObject currentValues = currentRoot.optJSONObject("values");
-                    if (previousValues != null && currentValues != null) {
-                        JSONObject legacyShortcuts = previousValues.optJSONObject(ConfigBackup.KEY_SHORTCUTS);
-                        if (legacyShortcuts != null) {
-                            currentValues.put(ConfigBackup.KEY_SHORTCUTS, legacyShortcuts);
+                    if (!syncShortcuts) {
+                        JSONArray previousShortcuts = previousRoot.optJSONArray("shortcuts");
+                        if (previousShortcuts != null) {
+                            currentRoot.put("shortcuts", previousShortcuts);
                         }
+                        JSONObject previousValues = previousRoot.optJSONObject("values");
+                        JSONObject currentValues = currentRoot.optJSONObject("values");
+                        if (previousValues != null && currentValues != null) {
+                            JSONObject legacyShortcuts = previousValues.optJSONObject(ConfigBackup.KEY_SHORTCUTS);
+                            if (legacyShortcuts != null) {
+                                currentValues.put(ConfigBackup.KEY_SHORTCUTS, legacyShortcuts);
+                            }
+                        }
+                    }
+                    if (preserveSoftGlassMetadata
+                            && !HyperOSMaterialFactory.isSoftGlassSupported()
+                            && profile.materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) {
+                        preserveSoftGlassValues(
+                                previousRoot.optJSONObject("values"),
+                                currentRoot.optJSONObject("values")
+                        );
                     }
                     backupJson = currentRoot.toString();
                 } else {
@@ -404,6 +430,35 @@ public final class ConfigProfileStore {
                 return synced;
             }
             return null;
+        }
+    }
+
+    private static boolean isSoftGlassMetadataKey(String key) {
+        return "material_style".equals(key)
+                || key.startsWith("glass_")
+                || "bubble_glass_matte_alpha".equals(key)
+                || "region_glass_matte_alpha".equals(key)
+                || "header_glass_matte_alpha".equals(key);
+    }
+
+    private static void preserveSoftGlassValues(JSONObject prevValues, JSONObject currValues)
+            throws Exception {
+        if (prevValues == null || currValues == null) return;
+        List<String> keysToClear = new ArrayList<>();
+        for (Iterator<String> it = currValues.keys(); it.hasNext(); ) {
+            String k = it.next();
+            if (isSoftGlassMetadataKey(k)) {
+                keysToClear.add(k);
+            }
+        }
+        for (String k : keysToClear) {
+            currValues.remove(k);
+        }
+        for (Iterator<String> it = prevValues.keys(); it.hasNext(); ) {
+            String k = it.next();
+            if (isSoftGlassMetadataKey(k)) {
+                currValues.put(k, prevValues.get(k));
+            }
         }
     }
 
