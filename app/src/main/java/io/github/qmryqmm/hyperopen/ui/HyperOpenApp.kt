@@ -45,6 +45,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
@@ -70,6 +71,8 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import io.github.qmryqmm.hyperopen.config.ConfigBackup
+import io.github.qmryqmm.hyperopen.config.ConfigProfile
+import io.github.qmryqmm.hyperopen.config.ConfigProfileStore
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
 import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory
 import io.github.qmryqmm.hyperopen.layout.LayoutCapacity
@@ -84,12 +87,16 @@ import io.github.qmryqmm.hyperopen.ui.pages.FolderMotionSettings
 import io.github.qmryqmm.hyperopen.ui.pages.PanelMotionSettings
 import io.github.qmryqmm.hyperopen.ui.pages.PermissionCheckPage
 import io.github.qmryqmm.hyperopen.ui.pages.BlurMaterialSettingsPage
+import io.github.qmryqmm.hyperopen.ui.pages.ConfigProfileMultiSelectBottomBar
+import io.github.qmryqmm.hyperopen.ui.pages.ConfigProfilesPage
+import io.github.qmryqmm.hyperopen.ui.pages.ConfigProfileSelectionState
 import io.github.qmryqmm.hyperopen.ui.pages.SettingsPage
 import io.github.qmryqmm.hyperopen.ui.pages.ShortcutsManagementPage
 import io.github.qmryqmm.hyperopen.ui.pages.SoftGlassSettingsPage
 import io.github.qmryqmm.hyperopen.ui.pages.ShortcutsTreeState
 import io.github.qmryqmm.hyperopen.ui.pages.ShortcutMultiSelectBottomBar
 import io.github.qmryqmm.hyperopen.ui.pages.rememberShortcutsTreeState
+import io.github.qmryqmm.hyperopen.ui.pages.rememberConfigProfileSelectionState
 import io.github.qmryqmm.hyperopen.ui.pages.ThemeSettingsPage
 import io.github.qmryqmm.hyperopen.util.LiveWallpaperLoader
 import kotlinx.coroutines.Dispatchers
@@ -115,6 +122,7 @@ import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.ListView
 import top.yukonga.miuix.kmp.icon.extended.Reset
@@ -129,8 +137,8 @@ import java.util.UUID
 
 /**
  * HyperOpen 设置界面顶层组合容器。
- * 负责主界面整体状态调度、底栏导航（参数、快捷项目、设置）、子页面导航栈路由、
- * 备份导入导出启动器以及全局对话框。
+ * 负责主界面整体状态调度、底栏导航（参数、快捷项目、配置管理、设置）、子页面导航栈路由、
+ * 配置包导入导出启动器以及全局对话框。
  */
 
 @Composable
@@ -274,60 +282,108 @@ fun HyperOpenApp(
     var page by remember { mutableStateOf(0) }
     var showResetDefaultsDialog by remember { mutableStateOf(false) }
     var showResetShortcutsDialog by remember { mutableStateOf(false) }
-    // 配置导入：先读文件并预检，通过后弹确认框再落盘
-    var showImportConfirmDialog by remember { mutableStateOf(false) }
-    var pendingImportText by remember { mutableStateOf<String?>(null) }
-    var pendingImportSummary by remember { mutableStateOf<ConfigBackup.Result?>(null) }
+    val configProfiles = remember { mutableStateListOf<ConfigProfile>() }
+    val configProfileSelectionState = rememberConfigProfileSelectionState()
+    var activeConfigProfileId by remember { mutableStateOf("") }
+    var configRevision by remember { mutableIntStateOf(0) }
+    var activeSyncStatus by remember { mutableStateOf(ConfigProfileStore.ProfileSyncStatus.CLEAN) }
+    var pendingImportPreview by remember { mutableStateOf<ConfigProfileStore.ImportPreview?>(null) }
+    var pendingExportTargetIdsCsv by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingExportIncludeShortcuts by rememberSaveable { mutableStateOf(true) }
+    var pendingExportCurrentLive by rememberSaveable { mutableStateOf(false) }
 
-    // ── 配置导入 / 导出：SAF 选文件，读写与解析都在 IO 线程 ──
+    // ── 配置导入 / 导出：SAF 选文件，主线程先拍快照，读写与解析都在 IO 线程 ──
     val configScope = rememberCoroutineScope()
 
-    val exportConfigLauncher = rememberLauncherForActivityResult(
+    val exportProfilesLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
         if (uri != null) {
+            val targetIds = pendingExportTargetIdsCsv
+                ?.split("|")
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+            val includeShortcuts = pendingExportIncludeShortcuts
+            val exportCurrentLive = pendingExportCurrentLive
+            val wasFromSelection = targetIds != null &&
+                configProfileSelectionState.multiSelect &&
+                targetIds == configProfileSelectionState.selectedIds.toSet()
+            val snapshotProfiles = when {
+                exportCurrentLive -> emptyList()
+                targetIds == null -> configProfiles.toList()
+                else -> configProfiles.filter { it.id in targetIds }
+            }
+            if (!exportCurrentLive && snapshotProfiles.isEmpty()) {
+                Toast.makeText(ctx, "导出失败：没有可导出的配置", Toast.LENGTH_LONG).show()
+                return@rememberLauncherForActivityResult
+            }
             configScope.launch(Dispatchers.IO) {
-                val msg = runCatching {
-                    val json = ConfigBackup.buildExportJson(ctx)
-                    ConfigBackup.writeTo(ctx, uri, json)
-                    // prefs 只存「改过的项」，全默认时文件里只有快捷方式，这里如实告知
-                    val preview = ConfigBackup.preview(json)
-                    if (preview.keyCount == 0) {
-                        "已导出快捷方式（当前参数均为默认值，无自定义项）"
+                val result = runCatching {
+                    val json = if (exportCurrentLive) {
+                        ConfigBackup.buildExportJson(ctx, includeShortcuts, true)
                     } else {
-                        "配置已导出：${preview.keyCount} 项参数、${preview.shortcutCount} 个快捷方式"
+                        ConfigProfileStore.buildExportJson(snapshotProfiles, includeShortcuts)
                     }
-                }.getOrElse { "导出失败：${it.message ?: it.javaClass.simpleName}" }
+                    ConfigBackup.writeTo(ctx, uri, json)
+                    if (exportCurrentLive) {
+                        "已导出当前生效配置" + if (includeShortcuts) "（包含快捷项目）" else "（仅配置参数）"
+                    } else {
+                        "已导出 ${snapshotProfiles.size} 份配置" + if (includeShortcuts) "（包含快捷项目）" else "（仅配置参数）"
+                    }
+                }
                 withContext(Dispatchers.Main) {
+                    if (result.isSuccess && wasFromSelection) {
+                        configProfileSelectionState.clear()
+                    }
+                    val msg = result.getOrElse { "导出失败：${it.message ?: it.javaClass.simpleName}" }
                     Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
                 }
             }
         }
     }
 
-    val importConfigLauncher = rememberLauncherForActivityResult(
+    val importProfilesLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             configScope.launch(Dispatchers.IO) {
-                val pair = runCatching {
+                val preview = runCatching {
                     val text = ConfigBackup.readFrom(ctx, uri)
-                    ConfigBackup.preview(text) to text
+                    val suggestedName = ConfigBackup.queryDisplayName(ctx, uri)
+                    ConfigProfileStore.previewImport(ctx, text, suggestedName)
                 }.getOrElse {
-                    ConfigBackup.Result.fail("读取失败：${it.message ?: it.javaClass.simpleName}") to null
+                    ConfigProfileStore.ImportPreview.fail("读取失败：${it.message ?: it.javaClass.simpleName}")
                 }
                 withContext(Dispatchers.Main) {
-                    val preview = pair.first
-                    val text = pair.second
-                    if (preview.ok && text != null) {
-                        pendingImportText = text
-                        pendingImportSummary = preview
-                        showImportConfirmDialog = true
+                    if (preview.ok) {
+                        pendingImportPreview = preview
                     } else {
-                        Toast.makeText(ctx, preview.message ?: "读取失败", Toast.LENGTH_LONG).show()
+                        Toast.makeText(ctx, preview.message, Toast.LENGTH_LONG).show()
                     }
                 }
             }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val state = withContext(Dispatchers.IO) {
+            ConfigProfileStore.loadState(ctx)
+        }
+        configProfiles.clear()
+        configProfiles.addAll(state.profiles)
+        activeConfigProfileId = state.activeId
+        configRevision++
+    }
+
+    LaunchedEffect(activeConfigProfileId, configRevision) {
+        val activeProfile = configProfiles.firstOrNull { it.id == activeConfigProfileId }
+        if (activeProfile == null) {
+            activeSyncStatus = ConfigProfileStore.ProfileSyncStatus.CLEAN
+        } else {
+            val status = withContext(Dispatchers.IO) {
+                ConfigProfileStore.inspectSyncStatus(ctx, activeProfile)
+            }
+            activeSyncStatus = status
         }
     }
 
@@ -343,6 +399,7 @@ fun HyperOpenApp(
     )
     var paramsTab by remember { mutableIntStateOf(0) }
     val shortcutsListState = rememberLazyListState()
+    val configProfilesListState = rememberLazyListState()
     val settingsListState = rememberLazyListState()
     val themeListState = rememberLazyListState()
     val softGlassListState = rememberLazyListState()
@@ -547,6 +604,7 @@ fun HyperOpenApp(
         c.predictiveBack = predictiveBack
         c.shortcuts = ArrayList(shortcuts)
         c.save(ctx)
+        configRevision++
     }
 
     val shortcutsTreeState = rememberShortcutsTreeState(shortcuts = shortcuts, onShortcutsChanged = { persist() })
@@ -560,137 +618,476 @@ fun HyperOpenApp(
         }
     }
 
+    fun applyConfigToState(
+        config: HyperOpenConfig,
+        applyShortcuts: Boolean,
+        applyAppUiPrefs: Boolean,
+    ) {
+        materialStyle = if (!softGlassSupported || config.materialStyle == HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR) {
+            HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR
+        } else {
+            HyperOpenConfig.MATERIAL_SOFT_GLASS
+        }
+        offsetY = config.offsetY.toFloat()
+        regionDiameter = config.regionDiameter.toFloat()
+        showRegionBg = config.showRegionBg
+        showHeaderPill = config.showHeaderPill
+        showHeaderPillBg = config.showHeaderPillBg
+        headerTopMargin = config.headerTopMargin.toFloat()
+        headerTitleSize = config.headerTitleSize.toFloat()
+        headerSubtitleSize = config.headerSubtitleSize.toFloat()
+        headerBlurRadius = config.headerBlurRadius.toFloat()
+        headerTextCentered = config.headerTextCentered
+        iconSize = config.iconSize.toFloat()
+        maxIconCount = config.maxIconCount.toFloat()
+        layoutStyle = config.layoutStyle
+        stockSystemRegion = config.stockSystemRegion
+        ringSectorMode = config.ringSectorMode
+        sectorLineColor = config.sectorLineColor
+        sectorLineAlpha = config.sectorLineAlpha
+        sectorDashLength = config.sectorDashLength.toFloat()
+        sectorDashGap = config.sectorDashGap.toFloat()
+        sectorLineWidth = config.sectorLineWidth
+        sectorHighlightEnabled = config.sectorHighlightEnabled
+        animDurationMs = config.animDurationMs.toFloat()
+        panelExpandAnimType = config.panelExpandAnimType
+        panelExpandStaggerMs = config.panelExpandStaggerMs.toFloat()
+        dismissAnimEnabled = config.dismissAnimEnabled
+        panelCollapseAnimType = config.panelCollapseAnimType
+        panelCollapseDurationMs = config.panelCollapseDurationMs.toFloat()
+        panelCollapseStaggerMs = config.panelCollapseStaggerMs.toFloat()
+        panelSelectedPopScale = config.panelSelectedPopScale
+        globalHintColorMode = config.globalHintColorMode
+        globalHintCustomColor = config.globalHintCustomColor
+        defaultHintTextStroke = config.defaultHintTextStroke.toFloat()
+        defaultHintTextShadow = config.defaultHintTextShadow.toFloat()
+        defaultHintTextWeight = config.defaultHintTextWeight
+        defaultHintTextLetterSpacing = config.defaultHintTextLetterSpacing
+        defaultShowHintTitle = config.defaultShowHintTitle
+        defaultShowHintSubtitle = config.defaultShowHintSubtitle
+        folderHoverDelayMs = config.folderHoverDelayMs.toFloat()
+        folderChildDisplayRangeScale = config.folderChildDisplayRangeScale
+        folderChildDirectionMode = config.folderChildDirectionMode
+        folderChildDirectionOffsetDeg = config.folderChildDirectionOffsetDeg
+        folderChildOrderMode = config.folderChildOrderMode
+        folderChildMinGapDp = config.folderChildMinGapDp.toFloat()
+        folderChildSizeScale = config.folderChildSizeScale
+        folderChildExpandAnimType = config.folderChildExpandAnimType
+        folderChildExpandDurationMs = config.folderChildExpandDurationMs.toFloat()
+        folderChildExpandStaggerMs = config.folderChildExpandStaggerMs.toFloat()
+        folderChildCollapseAnimType = config.folderChildCollapseAnimType
+        folderChildCollapseDurationMs = config.folderChildCollapseDurationMs.toFloat()
+        folderChildCollapseStaggerMs = config.folderChildCollapseStaggerMs.toFloat()
+        folderChildStartScale = config.folderChildStartScale
+        folderChildOvershoot = config.folderChildOvershoot
+        maxScale = config.maxScale
+        influenceRadius = config.influenceRadius.toFloat()
+        iconAlpha = config.iconAlpha
+        fisheyeZoomAlpha = config.fisheyeZoomAlpha
+        fisheyeOtherAlpha = config.fisheyeOtherAlpha
+        iconCornerRadius = config.iconCornerRadius.toFloat()
+        fullscreenBlurMaskAlpha = config.fullscreenBlurMaskAlpha
+        fullscreenDimAlpha = config.fullscreenDimAlpha
+        headerDimAlpha = config.headerDimAlpha
+        regionDimAlpha = config.regionDimAlpha
+        bubbleDimAlpha = config.bubbleDimAlpha
+        showDelayMs = config.showDelayMs.toFloat()
+        disableSystemEnterAnim = config.disableSystemEnterAnim
+        faceUnlockQuickOpen = config.faceUnlockQuickOpen
+        hapticEnabled = config.hapticEnabled
+        hapticStrength = config.hapticStrength.toFloat()
+        hapticDurationMs = config.hapticDurationMs.toFloat()
+        hapticMode = config.hapticMode
+        hapticStockWaveExpand = config.hapticStockWaveExpand
+        hapticBrakePulse = config.hapticBrakePulse
+        hapticDoubleGapMs = config.hapticDoubleGapMs.toFloat()
+        hapticSlideEnabled = config.hapticSlideEnabled
+        hapticSlideStrength = config.hapticSlideStrength.toFloat()
+        hapticSlideDurationMs = config.hapticSlideDurationMs.toFloat()
+        hapticSlideMode = config.hapticSlideMode
+        hapticStockWaveSlide = config.hapticStockWaveSlide
+        hapticSlideBrakePulse = config.hapticSlideBrakePulse
+        hapticSlideDoubleGapMs = config.hapticSlideDoubleGapMs.toFloat()
+        regionBlurRadius = config.regionBlurRadius.toFloat()
+        iconSpacingOffset = config.iconSpacingOffset.toFloat()
+        bubblePaddingPercent = config.bubblePaddingPercent.toFloat()
+        bubbleBlurRadius = config.bubbleBlurRadius.toFloat()
+        glyphPadEnabled = config.glyphPadEnabled
+        glyphPadColor = config.glyphPadColor
+        glyphPadMode = config.glyphPadMode
+        glassPreset = config.glassPreset
+        glassRefractIor = config.glassRefractIor
+        glassThickness = config.glassThickness
+        glassSpecular = config.glassSpecular
+        glassMatteAlpha = config.glassMatteAlpha
+        glassBorderLight = config.glassBorderLight
+        glassBackgroundSaturation = config.glassBackgroundSaturation
+        glassBackgroundBrightness = config.glassBackgroundBrightness
+        glassBackgroundBurn = config.glassBackgroundBurn
+        glassMatteWhiteMix = config.glassMatteWhiteMix
+        glassMatteColorMix = config.glassMatteColorMix
+        glassMatteColorPower = config.glassMatteColorPower
+        glassEdgeRange = config.glassEdgeRange
+        glassEdgePower = config.glassEdgePower
+        glassReflectOffset = config.glassReflectOffset
+        globalBlurRadius = config.globalBlurRadius.toFloat()
+        globalDimAlpha = config.globalDimAlpha
+        bubbleMaterialFollowGlobal = config.bubbleMaterialFollowGlobal
+        regionMaterialFollowGlobal = config.regionMaterialFollowGlobal
+        headerMaterialFollowGlobal = config.headerMaterialFollowGlobal
+        bubbleGlassMatteAlpha = config.bubbleGlassMatteAlpha
+        regionGlassMatteAlpha = config.regionGlassMatteAlpha
+        headerGlassMatteAlpha = config.headerGlassMatteAlpha
+        if (applyAppUiPrefs) {
+            themeMode = config.themeMode
+            monetColors = config.monetColors
+            barBlur = config.barBlur
+            floatingNavBar = config.floatingNavBar
+            predictiveBack = config.predictiveBack
+        }
+        if (applyShortcuts) {
+            shortcuts.clear()
+            shortcuts.addAll(config.shortcuts)
+            shortcutsTreeState.interactionState.clearSelection()
+        }
+    }
+
+    fun createConfigProfile(name: String) {
+        persist()
+        configScope.launch(Dispatchers.IO) {
+            val outcome = runCatching {
+                val profile = ConfigProfileStore.createFromCurrent(ctx, name)
+                val storeState = ConfigProfileStore.add(ctx, profile, true)
+                Pair(profile, storeState)
+            }
+            withContext(Dispatchers.Main) {
+                outcome.onSuccess { (profile, storeState) ->
+                    configProfiles.clear()
+                    configProfiles.addAll(storeState.profiles)
+                    activeConfigProfileId = storeState.activeId
+                    configRevision++
+                    Toast.makeText(ctx, "已从当前配置创建「${profile.name}」", Toast.LENGTH_SHORT).show()
+                }.onFailure { err ->
+                    Toast.makeText(
+                        ctx,
+                        "创建失败：${err.message ?: err.javaClass.simpleName}",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
+    }
+
+    fun applyConfigProfile(
+        profile: ConfigProfile,
+        includeShortcuts: Boolean,
+        backupCurrentFirst: Boolean,
+    ) {
+        val activeSnapshotName = configProfiles.firstOrNull { it.id == activeConfigProfileId }?.name
+        if (backupCurrentFirst) {
+            persist()
+        }
+        configScope.launch(Dispatchers.IO) {
+            val outcome = runCatching {
+                var backupProfile: ConfigProfile? = null
+                if (backupCurrentFirst) {
+                    val stamp = java.text.SimpleDateFormat("MMdd-HHmm", java.util.Locale.US).format(java.util.Date())
+                    val prefix = activeSnapshotName?.take(18)?.trim().orEmpty()
+                    val backupName = if (prefix.isNotEmpty()) "${prefix}_备份_$stamp" else "切换前备份_$stamp"
+                    val created = ConfigProfileStore.createFromCurrent(ctx, backupName)
+                    ConfigProfileStore.add(ctx, created, false)
+                    backupProfile = created
+                }
+                val applyShortcuts = includeShortcuts && profile.hasShortcuts
+                val applyResult = ConfigBackup.apply(ctx, profile.backupJson, applyShortcuts)
+                if (applyResult.ok) {
+                    ConfigProfileStore.setActive(ctx, profile.id)
+                    val reloaded = HyperOpenConfig.loadFromApp(ctx)
+                    val storeState = ConfigProfileStore.loadState(ctx)
+                    Triple(applyResult, reloaded, Pair(backupProfile, storeState))
+                } else {
+                    val storeState = if (backupProfile != null) ConfigProfileStore.loadState(ctx) else null
+                    Triple(applyResult, null, Pair(backupProfile, storeState))
+                }
+            }
+            withContext(Dispatchers.Main) {
+                outcome.onFailure { err ->
+                    Toast.makeText(
+                        ctx,
+                        "应用失败：${err.message ?: err.javaClass.simpleName}",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }.onSuccess { (applyResult, reloaded, extra) ->
+                    val (backupProfile, storeState) = extra
+                    if (storeState != null) {
+                        configProfiles.clear()
+                        configProfiles.addAll(storeState.profiles)
+                        activeConfigProfileId = storeState.activeId
+                    }
+                    if (applyResult.ok && reloaded != null) {
+                        val applyShortcuts = includeShortcuts && profile.hasShortcuts
+                        applyConfigToState(
+                            config = reloaded,
+                            applyShortcuts = applyShortcuts,
+                            applyAppUiPrefs = false,
+                        )
+                        val cap = computeLayoutCapacity()
+                        if (maxIconCount > cap) {
+                            maxIconCount = cap.toFloat()
+                            persist()
+                        } else {
+                            configRevision++
+                        }
+                        val requestedSoftGlass =
+                            profile.materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS && !softGlassSupported
+                        val msg = buildString {
+                            append(if (applyShortcuts) "已应用「${profile.name}」及快捷项目" else "已应用「${profile.name}」参数")
+                            if (backupProfile != null) {
+                                append("（已备份为「${backupProfile.name}」）")
+                            }
+                            if (requestedSoftGlass) {
+                                append("；当前系统不支持柔光玻璃，已自动使用高斯模糊")
+                            }
+                        }
+                        Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(ctx, applyResult.message, Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+    }
+
+    fun syncConfigProfile(
+        profile: ConfigProfile,
+        syncParams: Boolean,
+        syncShortcuts: Boolean,
+    ) {
+        persist()
+        configScope.launch(Dispatchers.IO) {
+            val outcome = runCatching {
+                ConfigProfileStore.syncFromCurrent(ctx, profile.id, syncParams, syncShortcuts)
+            }
+            withContext(Dispatchers.Main) {
+                outcome.onSuccess { synced ->
+                    if (synced != null) {
+                        val index = configProfiles.indexOfFirst { it.id == synced.id }
+                        if (index >= 0) configProfiles[index] = synced
+                        configRevision++
+                        val msg = when {
+                            syncParams && syncShortcuts -> "已将当前参数与快捷项目更新到「${synced.name}」"
+                            syncParams -> "已将 ${synced.keyCount} 项当前参数更新到「${synced.name}」"
+                            else -> "已将 ${synced.shortcutCount} 个快捷项目更新到「${synced.name}」"
+                        }
+                        Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(ctx, "更新失败：配置不存在", Toast.LENGTH_LONG).show()
+                    }
+                }.onFailure { err ->
+                    Toast.makeText(
+                        ctx,
+                        "更新失败：${err.message ?: err.javaClass.simpleName}",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
+    }
+
+    fun commitPendingImport(
+        preview: ConfigProfileStore.ImportPreview,
+        singleNameOverride: String,
+        includeShortcuts: Boolean,
+        applyImmediately: Boolean,
+    ) {
+        pendingImportPreview = null
+        configScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                ConfigProfileStore.commitImport(ctx, preview, singleNameOverride, includeShortcuts)
+            }.getOrElse {
+                ConfigProfileStore.ImportCommitResult.fail("导入失败：${it.message ?: it.javaClass.simpleName}")
+            }
+            withContext(Dispatchers.Main) {
+                if (result.ok) {
+                    configProfiles.clear()
+                    configProfiles.addAll(result.allProfiles)
+                    configRevision++
+                    val firstImported = result.importedProfiles.singleOrNull()
+                    if (applyImmediately && firstImported != null) {
+                        applyConfigProfile(
+                            profile = firstImported,
+                            includeShortcuts = includeShortcuts && firstImported.hasShortcuts,
+                            backupCurrentFirst = false,
+                        )
+                    } else {
+                        val msg = buildString {
+                            append("已导入 ${result.importedProfiles.size} 份配置")
+                            if (includeShortcuts && result.shortcutCount > 0) {
+                                append("、${result.shortcutCount} 个快捷项目")
+                            } else if (!includeShortcuts) {
+                                append("（仅参数）")
+                            }
+                            if (result.skippedCorruptCount > 0) {
+                                append("，跳过 ${result.skippedCorruptCount} 份损坏项")
+                            }
+                        }
+                        Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+                    }
+                } else {
+                    Toast.makeText(ctx, result.message, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    fun requestExportProfiles(
+        targetIds: List<String>?,
+        includeShortcuts: Boolean,
+        exportCurrentIfEmpty: Boolean,
+    ) {
+        pendingExportTargetIdsCsv = targetIds?.joinToString("|")
+        pendingExportIncludeShortcuts = includeShortcuts
+        pendingExportCurrentLive = exportCurrentIfEmpty
+        val suggestedName = if (exportCurrentIfEmpty) {
+            ConfigBackup.suggestedFileName(ctx)
+        } else {
+            val targets = if (targetIds == null) {
+                configProfiles.toList()
+            } else {
+                configProfiles.filter { it.id in targetIds }
+            }
+            ConfigProfileStore.suggestedFileName(targets)
+        }
+        exportProfilesLauncher.launch(suggestedName)
+    }
+
+    fun copyConfigProfiles(ids: Set<String>) {
+        val targetIds = ids.toSet()
+        if (targetIds.isEmpty()) return
+        configScope.launch(Dispatchers.IO) {
+            val outcome = runCatching { ConfigProfileStore.duplicate(ctx, targetIds) }
+            withContext(Dispatchers.Main) {
+                outcome.onSuccess { dupResult ->
+                    configProfiles.clear()
+                    configProfiles.addAll(dupResult.allProfiles)
+                    configProfileSelectionState.clear()
+                    Toast.makeText(ctx, "已复制 ${dupResult.copies.size} 份配置", Toast.LENGTH_SHORT).show()
+                }.onFailure { err ->
+                    Toast.makeText(
+                        ctx,
+                        "复制失败：${err.message ?: err.javaClass.simpleName}",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
+    }
+
+    fun copySelectedConfigProfiles() {
+        copyConfigProfiles(configProfileSelectionState.selectedIds.toSet())
+    }
+
+    fun deleteConfigProfiles(ids: Set<String>) {
+        val targetIds = ids.toSet()
+        if (targetIds.isEmpty()) return
+        configScope.launch(Dispatchers.IO) {
+            val outcome = runCatching { ConfigProfileStore.delete(ctx, targetIds) }
+            withContext(Dispatchers.Main) {
+                outcome.onSuccess { delResult ->
+                    configProfiles.clear()
+                    configProfiles.addAll(delResult.remainingProfiles)
+                    activeConfigProfileId = delResult.activeId
+                    configProfileSelectionState.clear()
+                    configRevision++
+                    Toast.makeText(ctx, "已删除 ${delResult.deletedCount} 份配置", Toast.LENGTH_SHORT).show()
+                }.onFailure { err ->
+                    Toast.makeText(
+                        ctx,
+                        "删除失败：${err.message ?: err.javaClass.simpleName}",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
+    }
+
+    fun renameConfigProfile(id: String, name: String) {
+        configScope.launch(Dispatchers.IO) {
+            val outcome = runCatching { ConfigProfileStore.rename(ctx, id, name) }
+            withContext(Dispatchers.Main) {
+                outcome.onSuccess { renamed ->
+                    if (renamed != null) {
+                        val index = configProfiles.indexOfFirst { it.id == id }
+                        if (index >= 0) configProfiles[index] = renamed
+                        Toast.makeText(ctx, "已重命名为「${renamed.name}」", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(ctx, "重命名失败：名称无效或配置不存在", Toast.LENGTH_LONG).show()
+                    }
+                    configProfileSelectionState.clear()
+                }.onFailure { err ->
+                    Toast.makeText(
+                        ctx,
+                        "重命名失败：${err.message ?: err.javaClass.simpleName}",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
+    }
+
+    fun moveConfigProfile(id: String, targetIndex: Int) {
+        val fromIndex = configProfiles.indexOfFirst { it.id == id }
+        if (fromIndex < 0) return
+        val profile = configProfiles.removeAt(fromIndex)
+        val destination = targetIndex.coerceIn(0, configProfiles.size)
+        configProfiles.add(destination, profile)
+    }
+
+    fun persistConfigProfileOrder(orderedIds: List<String>) {
+        val snapshot = orderedIds.toList()
+        configScope.launch(Dispatchers.IO) {
+            val outcome = runCatching { ConfigProfileStore.reorder(ctx, snapshot) }
+            if (outcome.isFailure) {
+                val err = outcome.exceptionOrNull()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        ctx,
+                        "保存排序失败：${err?.message ?: err?.javaClass?.simpleName}",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
+    }
+
     /**
      * 恢复全部参数为出厂默认值（视觉 / 物理 / 震动 / 等待时间 / 快捷方式列表）。
      * 以 HyperOpenConfig 字段初始值 + 默认快捷项为准，统一重置所有可编辑状态并持久化。
      */
     fun resetDefaults() {
-        val defaults = HyperOpenConfig()
-        materialStyle = defaults.materialStyle
-        offsetY = defaults.offsetY.toFloat()
-        regionDiameter = defaults.regionDiameter.toFloat()
-        showRegionBg = defaults.showRegionBg
-        showHeaderPill = defaults.showHeaderPill
-        showHeaderPillBg = defaults.showHeaderPillBg
-        headerTopMargin = defaults.headerTopMargin.toFloat()
-        headerTitleSize = defaults.headerTitleSize.toFloat()
-        headerSubtitleSize = defaults.headerSubtitleSize.toFloat()
-        headerBlurRadius = defaults.headerBlurRadius.toFloat()
-        headerTextCentered = defaults.headerTextCentered
-        iconSize = defaults.iconSize.toFloat()
-        maxIconCount = defaults.maxIconCount.toFloat()
-        layoutStyle = defaults.layoutStyle
-        stockSystemRegion = defaults.stockSystemRegion
-        ringSectorMode = defaults.ringSectorMode
-        sectorLineColor = defaults.sectorLineColor
-        sectorLineAlpha = defaults.sectorLineAlpha
-        sectorDashLength = defaults.sectorDashLength.toFloat()
-        sectorDashGap = defaults.sectorDashGap.toFloat()
-        sectorLineWidth = defaults.sectorLineWidth
-        sectorHighlightEnabled = defaults.sectorHighlightEnabled
-        animDurationMs = defaults.animDurationMs.toFloat()
-        panelExpandAnimType = defaults.panelExpandAnimType
-        panelExpandStaggerMs = defaults.panelExpandStaggerMs.toFloat()
-        dismissAnimEnabled = defaults.dismissAnimEnabled
-        panelCollapseAnimType = defaults.panelCollapseAnimType
-        panelCollapseDurationMs = defaults.panelCollapseDurationMs.toFloat()
-        panelCollapseStaggerMs = defaults.panelCollapseStaggerMs.toFloat()
-        panelSelectedPopScale = defaults.panelSelectedPopScale
-        globalHintColorMode = defaults.globalHintColorMode
-        globalHintCustomColor = defaults.globalHintCustomColor
-        defaultHintTextStroke = defaults.defaultHintTextStroke.toFloat()
-        defaultHintTextShadow = defaults.defaultHintTextShadow.toFloat()
-        defaultHintTextWeight = defaults.defaultHintTextWeight
-        defaultHintTextLetterSpacing = defaults.defaultHintTextLetterSpacing
-        defaultShowHintTitle = defaults.defaultShowHintTitle
-        defaultShowHintSubtitle = defaults.defaultShowHintSubtitle
-        folderHoverDelayMs = defaults.folderHoverDelayMs.toFloat()
-        folderChildDisplayRangeScale = defaults.folderChildDisplayRangeScale
-        folderChildDirectionMode = defaults.folderChildDirectionMode
-        folderChildDirectionOffsetDeg = defaults.folderChildDirectionOffsetDeg
-        folderChildOrderMode = defaults.folderChildOrderMode
-        folderChildMinGapDp = defaults.folderChildMinGapDp.toFloat()
-        folderChildSizeScale = defaults.folderChildSizeScale
-        folderChildExpandAnimType = defaults.folderChildExpandAnimType
-        folderChildExpandDurationMs = defaults.folderChildExpandDurationMs.toFloat()
-        folderChildExpandStaggerMs = defaults.folderChildExpandStaggerMs.toFloat()
-        folderChildCollapseAnimType = defaults.folderChildCollapseAnimType
-        folderChildCollapseDurationMs = defaults.folderChildCollapseDurationMs.toFloat()
-        folderChildCollapseStaggerMs = defaults.folderChildCollapseStaggerMs.toFloat()
-        folderChildStartScale = defaults.folderChildStartScale
-        folderChildOvershoot = defaults.folderChildOvershoot
-        maxScale = defaults.maxScale
-        influenceRadius = defaults.influenceRadius.toFloat()
-        iconAlpha = defaults.iconAlpha
-        fisheyeZoomAlpha = defaults.fisheyeZoomAlpha
-        fisheyeOtherAlpha = defaults.fisheyeOtherAlpha
-        iconCornerRadius = defaults.iconCornerRadius.toFloat()
-        fullscreenBlurMaskAlpha = defaults.fullscreenBlurMaskAlpha
-        fullscreenDimAlpha = defaults.fullscreenDimAlpha
-        headerDimAlpha = defaults.headerDimAlpha
-        regionDimAlpha = defaults.regionDimAlpha
-        bubbleDimAlpha = defaults.bubbleDimAlpha
-        showDelayMs = defaults.showDelayMs.toFloat()
-        disableSystemEnterAnim = defaults.disableSystemEnterAnim
-        faceUnlockQuickOpen = defaults.faceUnlockQuickOpen
-        hapticEnabled = defaults.hapticEnabled
-        hapticStrength = defaults.hapticStrength.toFloat()
-        hapticDurationMs = defaults.hapticDurationMs.toFloat()
-        hapticMode = defaults.hapticMode
-        hapticStockWaveExpand = defaults.hapticStockWaveExpand
-        hapticBrakePulse = defaults.hapticBrakePulse
-        hapticDoubleGapMs = defaults.hapticDoubleGapMs.toFloat()
-        hapticSlideEnabled = defaults.hapticSlideEnabled
-        hapticSlideStrength = defaults.hapticSlideStrength.toFloat()
-        hapticSlideDurationMs = defaults.hapticSlideDurationMs.toFloat()
-        hapticSlideMode = defaults.hapticSlideMode
-        hapticStockWaveSlide = defaults.hapticStockWaveSlide
-        hapticSlideBrakePulse = defaults.hapticSlideBrakePulse
-        hapticSlideDoubleGapMs = defaults.hapticSlideDoubleGapMs.toFloat()
-        regionBlurRadius = defaults.regionBlurRadius.toFloat()
-        iconSpacingOffset = defaults.iconSpacingOffset.toFloat()
-        bubblePaddingPercent = defaults.bubblePaddingPercent.toFloat()
-        bubbleBlurRadius = defaults.bubbleBlurRadius.toFloat()
-        glyphPadEnabled = defaults.glyphPadEnabled
-        glyphPadColor = defaults.glyphPadColor
-        glyphPadMode = defaults.glyphPadMode
-        glassPreset = defaults.glassPreset
-        glassRefractIor = defaults.glassRefractIor
-        glassThickness = defaults.glassThickness
-        glassSpecular = defaults.glassSpecular
-        glassMatteAlpha = defaults.glassMatteAlpha
-        glassBorderLight = defaults.glassBorderLight
-        glassBackgroundSaturation = defaults.glassBackgroundSaturation
-        glassBackgroundBrightness = defaults.glassBackgroundBrightness
-        glassBackgroundBurn = defaults.glassBackgroundBurn
-        glassMatteWhiteMix = defaults.glassMatteWhiteMix
-        glassMatteColorMix = defaults.glassMatteColorMix
-        glassMatteColorPower = defaults.glassMatteColorPower
-        glassEdgeRange = defaults.glassEdgeRange
-        glassEdgePower = defaults.glassEdgePower
-        glassReflectOffset = defaults.glassReflectOffset
-        globalBlurRadius = defaults.globalBlurRadius.toFloat()
-        globalDimAlpha = defaults.globalDimAlpha
-        bubbleMaterialFollowGlobal = defaults.bubbleMaterialFollowGlobal
-        regionMaterialFollowGlobal = defaults.regionMaterialFollowGlobal
-        headerMaterialFollowGlobal = defaults.headerMaterialFollowGlobal
-        bubbleGlassMatteAlpha = defaults.bubbleGlassMatteAlpha
-        regionGlassMatteAlpha = defaults.regionGlassMatteAlpha
-        headerGlassMatteAlpha = defaults.headerGlassMatteAlpha
-        themeMode = defaults.themeMode
-        monetColors = defaults.monetColors
-        barBlur = defaults.barBlur
-        floatingNavBar = defaults.floatingNavBar
-        predictiveBack = defaults.predictiveBack
+        applyConfigToState(
+            config = HyperOpenConfig(),
+            applyShortcuts = false,
+            applyAppUiPrefs = true,
+        )
         // 恢复默认参数：保留现有快捷项目列表不变，仅重置外观、几何、物理、震动与等待时间等其他参数
         persist()
     }
 
     // 拦截系统返回键与手势返回：在二级页或多选时优先处理
-    LaunchedEffect(activity, subPage, page, shortcutsTreeState.multiSelect) {
+    LaunchedEffect(
+        activity,
+        subPage,
+        page,
+        shortcutsTreeState.multiSelect,
+        configProfileSelectionState.multiSelect,
+    ) {
         activity?.backPressConsumer = {
             if (subPage == 0 && page == 1 && shortcutsTreeState.multiSelect) {
                 shortcutsTreeState.interactionState.clearSelection()
+                true
+            } else if (subPage == 0 && page == 2 && configProfileSelectionState.multiSelect) {
+                configProfileSelectionState.clear()
                 true
             } else {
                 when (subPage) {
@@ -714,9 +1111,15 @@ fun HyperOpenApp(
             }
         }
     }
-    BackHandler(enabled = subPage != 0 || (page == 1 && shortcutsTreeState.multiSelect)) {
+    BackHandler(
+        enabled = subPage != 0 ||
+            (page == 1 && shortcutsTreeState.multiSelect) ||
+            (page == 2 && configProfileSelectionState.multiSelect),
+    ) {
         if (subPage == 0 && page == 1 && shortcutsTreeState.multiSelect) {
             shortcutsTreeState.interactionState.clearSelection()
+        } else if (subPage == 0 && page == 2 && configProfileSelectionState.multiSelect) {
+            configProfileSelectionState.clear()
         } else {
             when (subPage) {
                 2 -> requestEditBackTrigger++
@@ -789,6 +1192,11 @@ fun HyperOpenApp(
             else -> when (page) {
                 0 -> "参数配置"
                 1 -> if (shortcutsTreeState.multiSelect) "已选择 ${shortcutsTreeState.selectedCount} 项" else "快捷项目"
+                2 -> if (configProfileSelectionState.multiSelect) {
+                    "已选择 ${configProfileSelectionState.selectedIds.size} 份配置"
+                } else {
+                    "配置管理"
+                }
                 else -> "软件设置"
             }
         }
@@ -797,6 +1205,7 @@ fun HyperOpenApp(
             listOf(
                 NavigationItem("参数配置", MiuixIcons.Tune),
                 NavigationItem("快捷项目", MiuixIcons.ListView),
+                NavigationItem("配置管理", MiuixIcons.Copy),
                 NavigationItem("软件设置", MiuixIcons.Settings),
             )
         }
@@ -822,6 +1231,10 @@ fun HyperOpenApp(
                                 } else if (page == 1 && shortcutsTreeState.multiSelect) {
                                     BackNavigationIcon(onClick = {
                                         shortcutsTreeState.interactionState.clearSelection()
+                                    })
+                                } else if (page == 2 && configProfileSelectionState.multiSelect) {
+                                    BackNavigationIcon(onClick = {
+                                        configProfileSelectionState.clear()
                                     })
                                 }
                             },
@@ -850,7 +1263,10 @@ fun HyperOpenApp(
                         selectedPage = page,
                         floating = floatingNavBar,
                         shortcutsTreeState = shortcutsTreeState,
+                        configProfiles = configProfiles,
+                        configProfileSelectionState = configProfileSelectionState,
                         onPageSelect = { page = it },
+                        onConfigProfileCopy = ::copySelectedConfigProfiles,
                     )
                 }
             },
@@ -1473,6 +1889,51 @@ fun HyperOpenApp(
                                     },
                                 )
                             }
+                            2 -> {
+                                val currentLayoutLabel = when (layoutStyle) {
+                                    HyperOpenConfig.LAYOUT_RING -> "空心圆环"
+                                    HyperOpenConfig.LAYOUT_ARC -> "弧形扇面"
+                                    HyperOpenConfig.LAYOUT_SYSTEM_STOCK -> "系统经典"
+                                    else -> "蜂窝"
+                                }
+                                val currentMaterialLabel = if (materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS) {
+                                    "柔光玻璃"
+                                } else {
+                                    "高斯模糊"
+                                }
+                                ConfigProfilesPage(
+                                    contentPadding = innerPadding,
+                                    lazyListState = configProfilesListState,
+                                    profiles = configProfiles,
+                                    selectionState = configProfileSelectionState,
+                                    activeProfileId = activeConfigProfileId,
+                                    activeSyncStatus = activeSyncStatus,
+                                    currentLayoutLabel = currentLayoutLabel,
+                                    currentMaterialLabel = currentMaterialLabel,
+                                    currentShortcutCount = shortcuts.size,
+                                    pendingImportPreview = pendingImportPreview,
+                                    onDismissImportPreview = { pendingImportPreview = null },
+                                    onCreateProfile = ::createConfigProfile,
+                                    onApplyProfile = ::applyConfigProfile,
+                                    onSyncProfile = ::syncConfigProfile,
+                                    onRequestPickImportFile = {
+                                        importProfilesLauncher.launch(
+                                            arrayOf(
+                                                "application/json",
+                                                "text/plain",
+                                                "application/octet-stream",
+                                            )
+                                        )
+                                    },
+                                    onCommitImport = ::commitPendingImport,
+                                    onRequestExport = ::requestExportProfiles,
+                                    onMoveProfile = ::moveConfigProfile,
+                                    onPersistProfileOrder = ::persistConfigProfileOrder,
+                                    onCopyProfiles = ::copyConfigProfiles,
+                                    onDeleteProfiles = ::deleteConfigProfiles,
+                                    onRenameProfile = ::renameConfigProfile,
+                                )
+                            }
                             else -> {
                                 SettingsPage(
                                     contentPadding = innerPadding,
@@ -1483,19 +1944,6 @@ fun HyperOpenApp(
                                     onOpenPermissionPage = { subPage = 4 },
                                     onResetDefaults = { showResetDefaultsDialog = true },
                                     onResetShortcuts = { showResetShortcutsDialog = true },
-                                    onExportConfig = {
-                                        exportConfigLauncher.launch(ConfigBackup.suggestedFileName(ctx))
-                                    },
-                                    onImportConfig = {
-                                        // 部分文件管理器把 .json 报成 text/plain 或 octet-stream，一并放行
-                                        importConfigLauncher.launch(
-                                            arrayOf(
-                                                "application/json",
-                                                "text/plain",
-                                                "application/octet-stream",
-                                            )
-                                        )
-                                    },
                                 )
                             }
                         }
@@ -1707,83 +2155,6 @@ fun HyperOpenApp(
             }
         }
 
-        // ── 导入配置二次确认：先展示文件来源与条目数，确认后再落盘 ──
-        if (showImportConfirmDialog) {
-            val summary = pendingImportSummary
-            Dialog(
-                onDismissRequest = { showImportConfirmDialog = false },
-                properties = DialogProperties(usePlatformDefaultWidth = false),
-            ) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth(0.86f)
-                        .padding(vertical = 16.dp),
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                    ) {
-                        Text(
-                            text = "导入配置？",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MiuixTheme.colorScheme.onSurface,
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            text = "文件来自 HyperOpen v${summary?.appVersion ?: "?"}，包含 " +
-                                "${summary?.keyCount ?: 0} 项参数、${summary?.shortcutCount ?: 0} 个快捷方式。\n" +
-                                "同名项会被覆盖，文件里没有的项保持不动；导入完成后界面会重新加载。",
-                            fontSize = 14.sp,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            lineHeight = 20.sp,
-                        )
-                        Spacer(Modifier.height(22.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End,
-                        ) {
-                            TextButton(
-                                text = "取消",
-                                onClick = { showImportConfirmDialog = false },
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            TextButton(
-                                text = "导入",
-                                colors = ButtonDefaults.textButtonColorsPrimary(),
-                                onClick = {
-                                    showImportConfirmDialog = false
-                                    val content = pendingImportText
-                                    if (content != null) {
-                                        configScope.launch(Dispatchers.IO) {
-                                            val r = ConfigBackup.apply(ctx, content)
-                                            withContext(Dispatchers.Main) {
-                                                if (r.ok) {
-                                                    Toast.makeText(
-                                                        ctx,
-                                                        "已导入 ${r.keyCount} 项参数、${r.shortcutCount} 个快捷方式",
-                                                        Toast.LENGTH_SHORT,
-                                                    ).show()
-                                                    // 界面状态是启动时的一次性快照，重建 Activity 才能读到新配置
-                                                    activity?.recreate()
-                                                } else {
-                                                    Toast.makeText(
-                                                        ctx,
-                                                        r.message ?: "导入失败",
-                                                        Toast.LENGTH_LONG,
-                                                    ).show()
-                                                }
-                                            }
-                                        }
-                                    }
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 }
@@ -1843,7 +2214,10 @@ private fun AppBottomBarOrMultiSelect(
     selectedPage: Int,
     floating: Boolean,
     shortcutsTreeState: ShortcutsTreeState,
+    configProfiles: List<ConfigProfile>,
+    configProfileSelectionState: ConfigProfileSelectionState,
     onPageSelect: (Int) -> Unit,
+    onConfigProfileCopy: () -> Unit,
 ) {
     if (selectedPage == 1 && shortcutsTreeState.multiSelect) {
         ShortcutMultiSelectBottomBar(
@@ -1855,6 +2229,15 @@ private fun AppBottomBarOrMultiSelect(
             onCopy = { shortcutsTreeState.copySelected() },
             onDelete = { shortcutsTreeState.showDeleteDialog = true },
             onCancel = { shortcutsTreeState.interactionState.clearSelection() },
+        )
+    } else if (selectedPage == 2 && configProfileSelectionState.multiSelect) {
+        ConfigProfileMultiSelectBottomBar(
+            floating = floating,
+            profiles = configProfiles,
+            selectionState = configProfileSelectionState,
+            onCopy = onConfigProfileCopy,
+            onDelete = { configProfileSelectionState.showDeleteRequest = true },
+            onRename = { configProfileSelectionState.showRenameRequest = true },
         )
     } else {
         AppBottomBar(

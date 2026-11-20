@@ -2,7 +2,6 @@ package io.github.qmryqmm.hyperopen.ui.pages
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -55,12 +54,10 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Delete
-import top.yukonga.miuix.kmp.icon.extended.Import
 import top.yukonga.miuix.kmp.icon.extended.ListView
 import top.yukonga.miuix.kmp.icon.extended.Reset
 import top.yukonga.miuix.kmp.icon.extended.Scan
 import top.yukonga.miuix.kmp.icon.extended.ScreenMirroring
-import top.yukonga.miuix.kmp.icon.extended.Share
 import top.yukonga.miuix.kmp.icon.extended.Theme
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
@@ -69,12 +66,11 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 /**
- * 软件设置页面（Tab 2）。
+ * 软件设置页面（Tab 3）。
  * 包含：
  *   - 外观与权限设置入口；
  *   - 重启系统界面 (SystemUI) 快捷按钮；
  *   - 桌面图标显隐控制；
- *   - 配置备份与恢复操作；
  *   - 安全模式状态机卡片与崩溃日志查看器；
  *   - 关于信息与开源社区链接。
  */
@@ -89,8 +85,6 @@ fun SettingsPage(
     onOpenPermissionPage: () -> Unit,
     onResetDefaults: () -> Unit,
     onResetShortcuts: () -> Unit,
-    onExportConfig: () -> Unit,
-    onImportConfig: () -> Unit,
 ) {
     LazyColumn(
         state = lazyListState,
@@ -244,43 +238,6 @@ fun SettingsPage(
                             Toast.makeText(ctx, "修改桌面图标失败，请重试", Toast.LENGTH_LONG).show()
                         }
                     },
-                )
-            }
-        }
-
-        // ── 配置备份 ──
-        item(key = "config_backup_title") { SmallTitle("配置备份") }
-        item(key = "config_backup_card") {
-            Card(
-                modifier = Modifier
-                    .padding(horizontal = 12.dp)
-                    .fillMaxWidth(),
-            ) {
-                ArrowPreference(
-                    title = "导出配置",
-                    summary = "把当前全部参数与快捷方式写成 JSON 文件，便于备份或换机迁移",
-                    startAction = {
-                        Icon(
-                            imageVector = MiuixIcons.Share,
-                            contentDescription = null,
-                            tint = MiuixTheme.colorScheme.primary,
-                            modifier = Modifier.padding(end = 8.dp),
-                        )
-                    },
-                    onClick = onExportConfig,
-                )
-                ArrowPreference(
-                    title = "导入配置",
-                    summary = "从 JSON 文件恢复参数与快捷方式；只覆盖文件里包含的项",
-                    startAction = {
-                        Icon(
-                            imageVector = MiuixIcons.Import,
-                            contentDescription = null,
-                            tint = MiuixTheme.colorScheme.primary,
-                            modifier = Modifier.padding(end = 8.dp),
-                        )
-                    },
-                    onClick = onImportConfig,
                 )
             }
         }

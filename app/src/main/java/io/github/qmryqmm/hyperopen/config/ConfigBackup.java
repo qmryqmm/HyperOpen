@@ -4,7 +4,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
 import android.net.Uri;
+import android.provider.OpenableColumns;
 import android.util.Log;
 
 import org.json.JSONArray;
@@ -16,13 +18,16 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import io.github.qmryqmm.hyperopen.model.ShortcutItem;
@@ -31,19 +36,21 @@ import io.github.qmryqmm.hyperopen.util.DePrefs;
 /**
  * 配置导入 / 导出（JSON）。
  *
- * <p>导出的是「用户配置」本身，不含任何运行时状态：
+ * <p>导出的是「用户指纹面板配置」本身，不含任何运行时状态或 App 自身界面偏好：
  * <ul>
  *   <li>{@code safety_*} 是崩溃保护 / 安全模式的会话状态，跨设备或跨时间导入会误导启用判定；</li>
  *   <li>{@code last_real_fod_*} 是本机指纹传感器实测坐标，换机型必须是另一组值（SystemUI 展开时会自己写回）；</li>
- *   <li>{@code __de_migrated_v1} 是存储迁移标记。</li>
+ *   <li>{@code __de_migrated_v1} 是存储迁移标记；</li>
+ *   <li>{@code ui_style / theme_mode / monet_colors / bar_blur / floating_nav_bar / predictive_back / edge_back / page_switch_gesture}
+ *       属于本机 App 自身的外观与手势设置，不应随面板配置切换而被覆盖。</li>
  * </ul>
  *
  * <p>写盘格式：{@code values} 里逐键带类型标记（b/i/f/l/s/ss）。SharedPreferences 的
  * getInt / getFloat 对类型敏感，只靠 JSON number 无法区分 100 和 100.0，标记类型后
  * 回写才不会踩 ClassCastException。{@code shortcuts} 单独提成结构化数组，方便手工编辑与分享。
  *
- * <p>导入采用「合并覆盖」而不是「先清空再写」：文件里没有的键保持原值，避免旧版配置文件
- * 把后来新增的配置项一把清空。
+ * <p>导入采用「精确还原」：在保留运行时状态、App 界面设置以及（未选择替换时的）快捷方式后，
+ * 先清空旧面板参数键再按文件写入，避免前一份配置残留键污染当前配置，并确保旧版本配置能正确触发迁移。
  */
 public final class ConfigBackup {
 
@@ -55,14 +62,28 @@ public final class ConfigBackup {
     /** 单次导入的文件大小上限，防止误选大文件把进程撑爆。 */
     private static final int MAX_IMPORT_BYTES = 4 * 1024 * 1024;
 
-    private static final String KEY_SHORTCUTS = "shortcuts_json";
+    static final String KEY_SHORTCUTS = "shortcuts_json";
+    private static final String KEY_ICON_GLOW_DEPRECATED = "icon_glow_effect";
+    private static final String KEY_BLUR_BASELINE_HEALED = "blur_baseline_healed";
 
-    /** 运行时状态：既不出现在导出文件里，也不会被导入覆盖。 */
+    /** 运行时状态：既不出现在导出文件里，也不会被导入覆盖或清理。 */
     private static final String SKIP_PREFIX = "safety_";
-    private static final Set<String> SKIP_KEYS = new HashSet<>(java.util.Arrays.asList(
+    private static final Set<String> RUNTIME_SKIP_KEYS = new HashSet<>(Arrays.asList(
             "last_real_fod_x",
             "last_real_fod_y",
             DePrefs.MIGRATION_MARK
+    ));
+
+    /** App 自身界面与交互偏好：剥离出面板配置导入导出，防止切配置或导入他人配置改写本机 App 外观。 */
+    private static final Set<String> APP_UI_SKIP_KEYS = new HashSet<>(Arrays.asList(
+            "ui_style",
+            "theme_mode",
+            "monet_colors",
+            "bar_blur",
+            "floating_nav_bar",
+            "predictive_back",
+            "edge_back",
+            "page_switch_gesture"
     ));
 
     private ConfigBackup() {
@@ -75,17 +96,41 @@ public final class ConfigBackup {
         public final int keyCount;
         public final int shortcutCount;
         public final String appVersion;
+        public final boolean hasShortcuts;
+        public final int layoutStyle;
+        public final int materialStyle;
 
-        Result(boolean ok, String message, int keyCount, int shortcutCount, String appVersion) {
+        Result(
+                boolean ok,
+                String message,
+                int keyCount,
+                int shortcutCount,
+                String appVersion,
+                boolean hasShortcuts,
+                int layoutStyle,
+                int materialStyle
+        ) {
             this.ok = ok;
             this.message = message;
             this.keyCount = keyCount;
             this.shortcutCount = shortcutCount;
             this.appVersion = appVersion;
+            this.hasShortcuts = hasShortcuts;
+            this.layoutStyle = layoutStyle;
+            this.materialStyle = materialStyle;
         }
 
         public static Result fail(String message) {
-            return new Result(false, message, 0, 0, null);
+            return new Result(
+                    false,
+                    message,
+                    0,
+                    0,
+                    null,
+                    false,
+                    HyperOpenConfig.LAYOUT_HONEYCOMB,
+                    HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR
+            );
         }
     }
 
@@ -93,8 +138,18 @@ public final class ConfigBackup {
     // 导出
     // ──────────────────────────────────────────────────────────────
 
-    /** 把当前配置序列化成 JSON 文本。 */
+    /** 把当前配置序列化成 JSON 文本（带缩进）。 */
     public static String buildExportJson(Context ctx) throws Exception {
+        return buildExportJson(ctx, true, true);
+    }
+
+    /** 把当前配置序列化成 JSON 文本，可选择是否包含快捷方式（带缩进）。 */
+    public static String buildExportJson(Context ctx, boolean includeShortcuts) throws Exception {
+        return buildExportJson(ctx, includeShortcuts, true);
+    }
+
+    /** 把当前配置序列化成 JSON 文本，可选择是否包含快捷方式与是否格式化缩进。 */
+    public static String buildExportJson(Context ctx, boolean includeShortcuts, boolean prettyPrint) throws Exception {
         SharedPreferences sp = DePrefs.get(ctx, HyperOpenConfig.PREF_NAME);
         Map<String, ?> all = sp.getAll();
 
@@ -119,12 +174,6 @@ public final class ConfigBackup {
             }
         }
 
-        JSONArray shortcuts = new JSONArray();
-        List<ShortcutItem> items = HyperOpenConfig.parseShortcutsJson(sp.getString(KEY_SHORTCUTS, null));
-        for (ShortcutItem it : items) {
-            shortcuts.put(it.toJson());
-        }
-
         JSONObject root = new JSONObject();
         root.put("format", FORMAT);
         root.put("version", FORMAT_VERSION);
@@ -132,11 +181,18 @@ public final class ConfigBackup {
         root.put("exportedAt", System.currentTimeMillis());
         root.put("exportedAtText", new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date()));
         root.put("values", values);
-        root.put("shortcuts", shortcuts);
-        return root.toString(2);
+        if (includeShortcuts) {
+            JSONArray shortcuts = new JSONArray();
+            List<ShortcutItem> items = HyperOpenConfig.parseShortcutsJson(sp.getString(KEY_SHORTCUTS, null));
+            for (ShortcutItem it : items) {
+                shortcuts.put(it.toJson());
+            }
+            root.put("shortcuts", shortcuts);
+        }
+        return prettyPrint ? root.toString(2) : root.toString();
     }
 
-    /** 建议的导出文件名，例如 hyperopen-0.34-20261028-2350.json */
+    /** 建议的导出文件名，例如 hyperopen-0.66-20261120-2010.json */
     public static String suggestedFileName(Context ctx) {
         String stamp = new SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(new Date());
         return "hyperopen-" + versionName(ctx) + "-" + stamp + ".json";
@@ -174,12 +230,15 @@ public final class ConfigBackup {
     }
 
     // ──────────────────────────────────────────────────────────────
-    // 导入
+    // 导入 / 预检
     // ──────────────────────────────────────────────────────────────
 
-    /** 只解析校验，不落盘。用于弹确认框前先判断文件是否可用。 */
+    /** 只解析校验，不落盘。用于弹确认框或缓存元数据时判断配置是否可用。 */
     public static Result preview(String json) {
         try {
+            if (json == null || json.trim().isEmpty()) {
+                return Result.fail("配置内容为空");
+            }
             JSONObject root = new JSONObject(json);
             String format = root.optString("format", "");
             if (!FORMAT.equals(format)) {
@@ -199,24 +258,46 @@ public final class ConfigBackup {
             int count = 0;
             for (Iterator<String> it = values.keys(); it.hasNext(); ) {
                 String k = it.next();
-                if (isSkipped(k)) continue;
+                if (isSkipped(k) || KEY_SHORTCUTS.equals(k)) continue;
                 if (values.optJSONObject(k) != null) count++;
             }
+
+            boolean hasShortcuts = false;
             int shortcutCount = 0;
             JSONArray shortcuts = root.optJSONArray("shortcuts");
             if (shortcuts != null) {
-                shortcutCount = shortcuts.length();
+                hasShortcuts = true;
+                for (int i = 0; i < shortcuts.length(); i++) {
+                    if (shortcuts.optJSONObject(i) != null) shortcutCount++;
+                }
             } else {
                 // 兼容手写 / 早期格式：values 里直接带 shortcuts_json 字符串
                 JSONObject sj = values.optJSONObject(KEY_SHORTCUTS);
                 if (sj != null) {
+                    hasShortcuts = true;
                     try {
-                        shortcutCount = new JSONArray(sj.optString("v", "")).length();
+                        JSONArray arr = new JSONArray(sj.optString("v", ""));
+                        for (int i = 0; i < arr.length(); i++) {
+                            if (arr.optJSONObject(i) != null) shortcutCount++;
+                        }
                     } catch (Throwable ignored) {
                     }
                 }
             }
-            return new Result(true, "可导入", count, shortcutCount, root.optString("appVersion", "?"));
+
+            int layoutStyle = HyperOpenConfig.LAYOUT_HONEYCOMB;
+            JSONObject layoutObj = values.optJSONObject("layout_style");
+            if (layoutObj != null) {
+                layoutStyle = layoutObj.optInt("v", HyperOpenConfig.LAYOUT_HONEYCOMB);
+            }
+            int materialStyle = HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR;
+            JSONObject materialObj = values.optJSONObject("material_style");
+            if (materialObj != null) {
+                materialStyle = materialObj.optInt("v", HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR);
+            }
+
+            String appVersion = root.isNull("appVersion") ? "?" : root.optString("appVersion", "?");
+            return new Result(true, "可导入", count, shortcutCount, appVersion, hasShortcuts, layoutStyle, materialStyle);
         } catch (Throwable t) {
             Log.w(TAG, "解析配置失败", t);
             return Result.fail("文件解析失败：" + t.getMessage());
@@ -224,11 +305,14 @@ public final class ConfigBackup {
     }
 
     /**
-     * 应用一份配置：按类型写回 prefs，然后重新开放读权限并通知 SystemUI 热重载。
-     *
-     * @return ok=true 时调用方应重建界面（App 内的 compose 状态是启动时一次性快照的）。
+     * 应用一份配置：按类型精确还原写回 prefs，然后重新开放读权限并通知 SystemUI 热重载。
      */
     public static Result apply(Context ctx, String json) {
+        return apply(ctx, json, true);
+    }
+
+    /** 应用配置，可选择是否同时应用快捷方式。 */
+    public static Result apply(Context ctx, String json, boolean includeShortcuts) {
         try {
             Result pre = preview(json);
             if (!pre.ok) {
@@ -240,52 +324,35 @@ public final class ConfigBackup {
             SharedPreferences sp = DePrefs.get(ctx, HyperOpenConfig.PREF_NAME);
             SharedPreferences.Editor editor = sp.edit();
 
+            boolean willApplyShortcuts = includeShortcuts && pre.hasShortcuts;
+
+            // 先清理旧面板键，仅保留运行时状态、App 界面设置和（不替换时的）快捷方式，
+            // 防止前一份配置遗留键值污染目标配置，并让缺少现代键的旧版本配置能触发迁移。
+            for (String existingKey : sp.getAll().keySet()) {
+                if (isSkipped(existingKey)) continue;
+                if (KEY_SHORTCUTS.equals(existingKey) && !willApplyShortcuts) continue;
+                editor.remove(existingKey);
+            }
+
             int count = 0;
+            int shortcutCount = 0;
             for (Iterator<String> it = values.keys(); it.hasNext(); ) {
                 String k = it.next();
                 if (isSkipped(k)) continue;
+                if (KEY_SHORTCUTS.equals(k) && !willApplyShortcuts) continue;
                 JSONObject item = values.optJSONObject(k);
                 if (item == null) continue;
-                String type = item.optString("t", "");
-                Object raw = item.opt("v");
-                switch (type) {
-                    case "b":
-                        editor.putBoolean(k, item.optBoolean("v"));
-                        break;
-                    case "i":
-                        editor.putInt(k, item.optInt("v"));
-                        break;
-                    case "f":
-                        editor.putFloat(k, (float) item.optDouble("v"));
-                        break;
-                    case "l":
-                        editor.putLong(k, item.optLong("v"));
-                        break;
-                    case "s":
-                        editor.putString(k, raw == null ? "" : String.valueOf(raw));
-                        break;
-                    case "ss": {
-                        JSONArray arr = item.optJSONArray("v");
-                        Set<String> set = new HashSet<>();
-                        if (arr != null) {
-                            for (int i = 0; i < arr.length(); i++) {
-                                set.add(arr.optString(i));
-                            }
-                        }
-                        editor.putStringSet(k, set);
-                        break;
-                    }
-                    default:
-                        Log.w(TAG, "未知的配置项类型标记，跳过: " + k + " t=" + type);
-                        continue;
+                if (!writeTypedPref(editor, k, item)) continue;
+                if (KEY_SHORTCUTS.equals(k)) {
+                    shortcutCount = pre.shortcutCount;
+                } else {
+                    count++;
                 }
-                count++;
             }
 
-            // 快捷方式：优先用结构化的 shortcuts 数组，回退到 values 里的 shortcuts_json
-            int shortcutCount = 0;
+            // 快捷方式：优先用结构化的 shortcuts 数组，否则保留上面回退写入的 values.shortcuts_json
             JSONArray shortcuts = root.optJSONArray("shortcuts");
-            if (shortcuts != null) {
+            if (willApplyShortcuts && shortcuts != null) {
                 List<ShortcutItem> items = new ArrayList<>();
                 for (int i = 0; i < shortcuts.length(); i++) {
                     JSONObject obj = shortcuts.optJSONObject(i);
@@ -293,11 +360,13 @@ public final class ConfigBackup {
                         items.add(ShortcutItem.fromJson(obj));
                     }
                 }
-                editor.putString("shortcuts_json", HyperOpenConfig.serializeShortcutsJson(items));
+                editor.putString(KEY_SHORTCUTS, HyperOpenConfig.serializeShortcutsJson(items));
                 shortcutCount = items.size();
             }
 
-            editor.apply();
+            if (!editor.commit()) {
+                return Result.fail("保存配置失败：写入存储未完成");
+            }
 
             // 与 HyperOpenConfig.save() 保持一致：DE 目录必须可读，SystemUI 才能用
             // XSharedPreferences 兜底；再发广播让运行中的 SystemUI 立刻重载。
@@ -310,10 +379,106 @@ public final class ConfigBackup {
             }
 
             Log.i(TAG, "配置导入完成: " + count + " 项参数, " + shortcutCount + " 个快捷方式");
-            return new Result(true, "导入完成", count, shortcutCount, root.optString("appVersion", "?"));
+            return new Result(true, "导入完成", count, shortcutCount, pre.appVersion, pre.hasShortcuts, pre.layoutStyle, pre.materialStyle);
         } catch (Throwable t) {
             Log.e(TAG, "导入配置失败", t);
             return Result.fail("导入失败：" + t.getMessage());
+        }
+    }
+
+    /** 从配置 JSON 中解析快捷方式清单；若该配置不含快捷方式字段则返回 null。 */
+    public static List<ShortcutItem> parseShortcutsFromBackup(String json) {
+        try {
+            if (json == null || json.trim().isEmpty()) return null;
+            JSONObject root = new JSONObject(json);
+            JSONArray shortcuts = root.optJSONArray("shortcuts");
+            if (shortcuts != null) {
+                List<ShortcutItem> items = new ArrayList<>();
+                for (int i = 0; i < shortcuts.length(); i++) {
+                    JSONObject obj = shortcuts.optJSONObject(i);
+                    if (obj != null) items.add(ShortcutItem.fromJson(obj));
+                }
+                return items;
+            }
+            JSONObject values = root.optJSONObject("values");
+            JSONObject sj = values != null ? values.optJSONObject(KEY_SHORTCUTS) : null;
+            if (sj != null) {
+                List<ShortcutItem> items = new ArrayList<>();
+                String raw = sj.optString("v", "");
+                if (!raw.trim().isEmpty()) {
+                    JSONArray arr = new JSONArray(raw);
+                    for (int i = 0; i < arr.length(); i++) {
+                        JSONObject obj = arr.optJSONObject(i);
+                        if (obj != null) items.add(ShortcutItem.fromJson(obj));
+                    }
+                }
+                return items;
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    /** 对比当前生效参数（不含 App 自身界面设置与快捷方式）是否与目标配置一致。 */
+    public static boolean areCurrentParamsMatching(Context ctx, String backupJson) {
+        try {
+            if (ctx == null || backupJson == null || backupJson.trim().isEmpty()) return false;
+            JSONObject root = new JSONObject(backupJson);
+            JSONObject values = root.optJSONObject("values");
+            if (values == null) return false;
+
+            SharedPreferences sp = DePrefs.get(ctx, HyperOpenConfig.PREF_NAME);
+            Map<String, ?> all = sp.getAll();
+            Map<String, Object> currentMap = new HashMap<>();
+            for (Map.Entry<String, ?> entry : all.entrySet()) {
+                String k = entry.getKey();
+                if (isParamExcludedFromDiff(k)) continue;
+                Object v = entry.getValue();
+                if (v instanceof Boolean || v instanceof Integer || v instanceof Float
+                        || v instanceof Long || v instanceof String || v instanceof Set) {
+                    currentMap.put(k, v);
+                }
+            }
+
+            Map<String, Object> profileMap = new HashMap<>();
+            for (Iterator<String> it = values.keys(); it.hasNext(); ) {
+                String k = it.next();
+                if (isParamExcludedFromDiff(k)) continue;
+                JSONObject item = values.optJSONObject(k);
+                if (item == null) continue;
+                Object decoded = decodeTypedValue(item);
+                if (decoded != null) {
+                    profileMap.put(k, decoded);
+                }
+            }
+
+            if (!currentMap.keySet().equals(profileMap.keySet())) {
+                return false;
+            }
+            for (String key : currentMap.keySet()) {
+                if (!valuesEqual(currentMap.get(key), profileMap.get(key))) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /** 对比当前生效快捷方式是否与目标配置一致；目标配置不含快捷方式时视为一致（不管理快捷项）。 */
+    public static boolean areCurrentShortcutsMatching(Context ctx, String backupJson) {
+        try {
+            if (ctx == null || backupJson == null || backupJson.trim().isEmpty()) return true;
+            List<ShortcutItem> profileShortcuts = parseShortcutsFromBackup(backupJson);
+            if (profileShortcuts == null) return true;
+            SharedPreferences sp = DePrefs.get(ctx, HyperOpenConfig.PREF_NAME);
+            List<ShortcutItem> currentShortcuts = HyperOpenConfig.parseShortcutsJson(sp.getString(KEY_SHORTCUTS, null));
+            String currentSerialized = HyperOpenConfig.serializeShortcutsJson(currentShortcuts);
+            String profileSerialized = HyperOpenConfig.serializeShortcutsJson(profileShortcuts);
+            return currentSerialized.equals(profileSerialized);
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 
@@ -351,10 +516,135 @@ public final class ConfigBackup {
         }
     }
 
+    /** 读取 SAF 文件展示名并去掉末尾 .json 扩展名，作为单份配置导入的默认名称建议。 */
+    public static String queryDisplayName(Context ctx, Uri uri) {
+        if (ctx == null || uri == null) return "";
+        String name = null;
+        try (Cursor cursor = ctx.getContentResolver().query(
+                uri,
+                new String[]{OpenableColumns.DISPLAY_NAME},
+                null,
+                null,
+                null
+        )) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (idx >= 0 && !cursor.isNull(idx)) {
+                    name = cursor.getString(idx);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        if (name == null || name.trim().isEmpty()) {
+            String segment = uri.getLastPathSegment();
+            if (segment != null) {
+                int slash = segment.lastIndexOf('/');
+                if (slash >= 0 && slash + 1 < segment.length()) {
+                    segment = segment.substring(slash + 1);
+                }
+                int colon = segment.lastIndexOf(':');
+                if (colon >= 0 && colon + 1 < segment.length()) {
+                    segment = segment.substring(colon + 1);
+                }
+                name = segment;
+            }
+        }
+        if (name == null) return "";
+        String trimmed = name.trim();
+        if (trimmed.toLowerCase(Locale.ROOT).endsWith(".json") && trimmed.length() > 5) {
+            trimmed = trimmed.substring(0, trimmed.length() - 5).trim();
+        }
+        return trimmed;
+    }
+
     // ──────────────────────────────────────────────────────────────
 
-    private static boolean isSkipped(String key) {
-        return key.startsWith(SKIP_PREFIX) || SKIP_KEYS.contains(key);
+    public static boolean isSkipped(String key) {
+        return key == null
+                || key.startsWith(SKIP_PREFIX)
+                || RUNTIME_SKIP_KEYS.contains(key)
+                || APP_UI_SKIP_KEYS.contains(key);
+    }
+
+    private static boolean isParamExcludedFromDiff(String key) {
+        return isSkipped(key)
+                || KEY_SHORTCUTS.equals(key)
+                || KEY_ICON_GLOW_DEPRECATED.equals(key)
+                || KEY_BLUR_BASELINE_HEALED.equals(key);
+    }
+
+    private static boolean writeTypedPref(SharedPreferences.Editor editor, String k, JSONObject item) {
+        String type = item.optString("t", "");
+        Object raw = item.opt("v");
+        switch (type) {
+            case "b":
+                editor.putBoolean(k, item.optBoolean("v"));
+                return true;
+            case "i":
+                editor.putInt(k, item.optInt("v"));
+                return true;
+            case "f":
+                editor.putFloat(k, (float) item.optDouble("v"));
+                return true;
+            case "l":
+                editor.putLong(k, item.optLong("v"));
+                return true;
+            case "s":
+                editor.putString(k, raw == null || raw == JSONObject.NULL ? "" : String.valueOf(raw));
+                return true;
+            case "ss": {
+                JSONArray arr = item.optJSONArray("v");
+                Set<String> set = new HashSet<>();
+                if (arr != null) {
+                    for (int i = 0; i < arr.length(); i++) {
+                        set.add(arr.optString(i));
+                    }
+                }
+                editor.putStringSet(k, set);
+                return true;
+            }
+            default:
+                Log.w(TAG, "未知的配置项类型标记，跳过: " + k + " t=" + type);
+                return false;
+        }
+    }
+
+    private static Object decodeTypedValue(JSONObject item) {
+        String type = item.optString("t", "");
+        Object raw = item.opt("v");
+        switch (type) {
+            case "b":
+                return item.optBoolean("v");
+            case "i":
+                return item.optInt("v");
+            case "f":
+                return (float) item.optDouble("v");
+            case "l":
+                return item.optLong("v");
+            case "s":
+                return raw == null || raw == JSONObject.NULL ? "" : String.valueOf(raw);
+            case "ss": {
+                JSONArray arr = item.optJSONArray("v");
+                Set<String> set = new HashSet<>();
+                if (arr != null) {
+                    for (int i = 0; i < arr.length(); i++) {
+                        set.add(arr.optString(i));
+                    }
+                }
+                return set;
+            }
+            default:
+                return null;
+        }
+    }
+
+    private static boolean valuesEqual(Object a, Object b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        if (a instanceof Float && b instanceof Float) {
+            return Math.abs((Float) a - (Float) b) < 1e-4f;
+        }
+        return Objects.equals(a, b);
     }
 
     private static String versionName(Context ctx) {
