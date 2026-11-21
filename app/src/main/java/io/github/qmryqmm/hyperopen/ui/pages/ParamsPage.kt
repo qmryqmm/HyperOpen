@@ -210,6 +210,7 @@ fun ParamsPage(
     showDelayMs: Float, onShowDelayMs: (Float) -> Unit,
     disableSystemEnterAnim: Boolean, onDisableSystemEnterAnim: (Boolean) -> Unit,
     faceUnlockQuickOpen: Boolean, onFaceUnlockQuickOpen: (Boolean) -> Unit,
+    bleUnlockQuickOpen: Boolean, onBleUnlockQuickOpen: (Boolean) -> Unit,
     hapticEnabled: Boolean, onHapticEnabled: (Boolean) -> Unit,
     hapticStrength: Float, onHapticStrength: (Float) -> Unit,
     hapticDurationMs: Float, onHapticDurationMs: (Float) -> Unit,
@@ -829,6 +830,12 @@ fun ParamsPage(
                         summary = "人脸识别成功停留在锁屏时，长按指纹进入桌面并继续唤出快捷方式（短按轻触仅进入桌面）",
                         checked = faceUnlockQuickOpen,
                         onCheckedChange = onFaceUnlockQuickOpen,
+                    )
+                    SwitchPreference(
+                        title = "蓝牙解锁后长按快捷方式",
+                        summary = "蓝牙设备或可信设备解锁停留在锁屏时，长按指纹进入桌面并继续唤出快捷方式（短按轻触仅进入桌面）",
+                        checked = bleUnlockQuickOpen,
+                        onCheckedChange = onBleUnlockQuickOpen,
                     )
                     SmallTitle(text = "面板展开")
                     RadioButtonPreference(

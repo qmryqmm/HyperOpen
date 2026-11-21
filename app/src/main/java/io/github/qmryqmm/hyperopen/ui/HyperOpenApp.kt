@@ -186,6 +186,7 @@ fun HyperOpenApp(
     var showDelayMs by remember { mutableFloatStateOf(initialConfig.showDelayMs.toFloat()) }
     var disableSystemEnterAnim by remember { mutableStateOf(initialConfig.disableSystemEnterAnim) }
     var faceUnlockQuickOpen by remember { mutableStateOf(initialConfig.faceUnlockQuickOpen) }
+    var bleUnlockQuickOpen by remember { mutableStateOf(initialConfig.bleUnlockQuickOpen) }
     var hapticEnabled by remember { mutableStateOf(initialConfig.hapticEnabled) }
     var hapticStrength by remember { mutableFloatStateOf(initialConfig.hapticStrength.toFloat()) }
     var hapticDurationMs by remember { mutableFloatStateOf(initialConfig.hapticDurationMs.toFloat()) }
@@ -553,6 +554,7 @@ fun HyperOpenApp(
         c.showDelayMs = showDelayMs.toInt()
         c.disableSystemEnterAnim = disableSystemEnterAnim
         c.faceUnlockQuickOpen = faceUnlockQuickOpen
+        c.bleUnlockQuickOpen = bleUnlockQuickOpen
         c.hapticEnabled = hapticEnabled
         c.hapticStrength = hapticStrength.toInt()
         c.hapticDurationMs = hapticDurationMs.toInt()
@@ -696,6 +698,7 @@ fun HyperOpenApp(
             showDelayMs = config.showDelayMs.toFloat()
             disableSystemEnterAnim = config.disableSystemEnterAnim
             faceUnlockQuickOpen = config.faceUnlockQuickOpen
+            bleUnlockQuickOpen = config.bleUnlockQuickOpen
             hapticEnabled = config.hapticEnabled
             hapticStrength = config.hapticStrength.toFloat()
             hapticDurationMs = config.hapticDurationMs.toFloat()
@@ -1462,6 +1465,7 @@ fun HyperOpenApp(
                             this.showDelayMs = showDelayMs.toInt()
                             this.disableSystemEnterAnim = disableSystemEnterAnim
                             this.faceUnlockQuickOpen = faceUnlockQuickOpen
+                            this.bleUnlockQuickOpen = bleUnlockQuickOpen
                             this.hapticEnabled = hapticEnabled
                             this.hapticStrength = hapticStrength.toInt()
                             this.hapticDurationMs = hapticDurationMs.toInt()
@@ -1854,6 +1858,8 @@ fun HyperOpenApp(
                                     onDisableSystemEnterAnim = { disableSystemEnterAnim = it; persist() },
                                     faceUnlockQuickOpen = faceUnlockQuickOpen,
                                     onFaceUnlockQuickOpen = { faceUnlockQuickOpen = it; persist() },
+                                    bleUnlockQuickOpen = bleUnlockQuickOpen,
+                                    onBleUnlockQuickOpen = { bleUnlockQuickOpen = it; persist() },
                                     hapticEnabled = hapticEnabled,
                                     onHapticEnabled = { hapticEnabled = it; persist() },
                                     hapticStrength = hapticStrength,

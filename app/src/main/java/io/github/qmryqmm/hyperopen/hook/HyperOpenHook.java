@@ -24,6 +24,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig;
@@ -111,11 +112,24 @@ public class HyperOpenHook {
     /** 缓存宿主 SystemUI 的 versionName，仅用于跨版本兼容诊断日志 */
     private static volatile String cachedHostVersionName;
 
+    /**
+     * KeyguardViewMediator#handleKeyguardDone() 同步执行期间的瞬态快照标记。
+     * handleKeyguardDone() 会先调用 unregisterUnlockListener() 将 mBleUnlockState 清成 FAILED，
+     * 再同步调用 handleHide() -> onKeyguardHide() -> dismissGxzwView()，
+     * 用 ThreadLocal 跨越该同步窗口，afterHookedMethod 中精确还原/移除。
+     */
+    private static final ThreadLocal<Boolean> BLE_OR_TRUST_UNLOCKING_IN_DONE = new ThreadLocal<>();
+
+    /** KeyguardViewMediator#handleKeyguardDone() Hook 是否已安装成功 */
+    private static volatile boolean handleKeyguardDoneHooked = false;
+
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
         final ClassLoader cl = lpparam.classLoader;
 
         // 每次部署前清空历史句柄，避免重复部署时句柄表里混入上一轮的失效项
         HANDLES.clear();
+        handleKeyguardDoneHooked = false;
+        BLE_OR_TRUST_UNLOCKING_IN_DONE.remove();
         active = true;
 
         // 配置异步刷新完成后（主线程回调），把新配置推给所有未处于展示态的容器。
@@ -545,7 +559,7 @@ public class HyperOpenHook {
         }
 
         // 6. Hook MiuiGxzwManager.isUnlockByGxzw() 与 KeyguardUpdateMonitorInjector.isFingerprintUnlock()：
-        //    人脸识别成功停留在锁屏时，用户按指纹图标会先进入桌面（触发 onKeyguardHide -> dismissGxzwView）；
+        //    人脸 / 蓝牙 / Android 可信设备解锁成功停留在锁屏时，用户按指纹图标会先进入桌面（触发 onKeyguardHide -> dismissGxzwView）；
         //    若用户继续保持按住指纹，放行解锁判定为 true，驱动系统安排 mShowRunnable 从而在桌面上唤出快捷面板。
         try {
             Class<?> gxzwManagerClass = XposedHelpers.findClass(
@@ -557,14 +571,14 @@ public class HyperOpenHook {
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         if (!active) return;
                         HyperOpenConfig cfg = HyperOpenConfig.getCached();
-                        if (cfg == null || !cfg.faceUnlockQuickOpen) return;
-                        if (isFaceUnlockPressing(param.thisObject)) {
+                        if (cfg == null || (!cfg.faceUnlockQuickOpen && !cfg.bleUnlockQuickOpen)) return;
+                        if (isStayScreenUnlockPressing(param.thisObject, cfg)) {
                             param.setResult(Boolean.TRUE);
                         }
                     }
                 }
             ));
-            Log.i(TAG, "已成功安装 MiuiGxzwManager.isUnlockByGxzw 人脸解锁长按放行 Hook！");
+            Log.i(TAG, "已成功安装 MiuiGxzwManager.isUnlockByGxzw 人脸/蓝牙解锁长按放行 Hook！");
         } catch (Throwable t) {
             Log.e(TAG, "Hook MiuiGxzwManager.isUnlockByGxzw 失败", t);
         }
@@ -579,14 +593,14 @@ public class HyperOpenHook {
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         if (!active) return;
                         HyperOpenConfig cfg = HyperOpenConfig.getCached();
-                        if (cfg == null || !cfg.faceUnlockQuickOpen) return;
-                        if (isFaceUnlockPressingGlobal(cl)) {
+                        if (cfg == null || (!cfg.faceUnlockQuickOpen && !cfg.bleUnlockQuickOpen)) return;
+                        if (isStayScreenUnlockPressingGlobal(cl, cfg)) {
                             param.setResult(Boolean.TRUE);
                         }
                     }
                 }
             ));
-            Log.i(TAG, "已成功安装 MiuiKeyguardUpdateMonitorInjectorStub.isFingerprintUnlock 人脸解锁长按放行 Hook！");
+            Log.i(TAG, "已成功安装 MiuiKeyguardUpdateMonitorInjectorStub.isFingerprintUnlock 人脸/蓝牙解锁长按放行 Hook！");
         } catch (Throwable t) {
             Log.w(TAG, "Hook MiuiKeyguardUpdateMonitorInjectorStub.isFingerprintUnlock 失败 (可能为旧版 MIUI)", t);
         }
@@ -603,8 +617,8 @@ public class HyperOpenHook {
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         if (!active) return;
                         HyperOpenConfig cfg = HyperOpenConfig.getCached();
-                        if (cfg == null || !cfg.faceUnlockQuickOpen) return;
-                        if (isFaceUnlockPressingGlobal(cl)) {
+                        if (cfg == null || (!cfg.faceUnlockQuickOpen && !cfg.bleUnlockQuickOpen)) return;
+                        if (isStayScreenUnlockPressingGlobal(cl, cfg)) {
                             param.setResult(Boolean.TRUE);
                         }
                     }
@@ -616,7 +630,7 @@ public class HyperOpenHook {
         }
 
         // 7. Hook MiuiGxzwIconView$1.run() (mGotoUnlockRunnable)：
-        //    在人脸识别成功停留在锁屏时，用户按指纹图标进入桌面时添加震动，
+        //    在人脸 / 蓝牙 / Android 可信设备解锁停留在锁屏时，用户按指纹图标进入桌面时添加震动，
         //    震动反馈与正常指纹解锁一致，且跟随模块震动参数（模式、强度、时长与总开关）。
         try {
             Class<?> gotoUnlockClass = XposedHelpers.findClass(
@@ -640,7 +654,7 @@ public class HyperOpenHook {
                     }
                 }
             ));
-            Log.i(TAG, "已成功安装 MiuiGxzwIconView$1.run 人脸解锁按指纹进桌面触觉震动 Hook！");
+            Log.i(TAG, "已成功安装 MiuiGxzwIconView$1.run 解锁按指纹进桌面触觉震动 Hook！");
         } catch (Throwable t) {
             Log.w(TAG, "Hook MiuiGxzwIconView$1 失败", t);
         }
@@ -691,6 +705,90 @@ public class HyperOpenHook {
                 ));
                 Log.i(TAG, "已成功安装 MiuiGxzwQuickOpenView#startLoadingAnimation 降级 Hook！");
             } catch (Throwable ignored) {}
+        }
+
+        // 9. Hook KeyguardViewMediator#handleKeyguardDone()（三版本同签名 ()V）：
+        //    handleKeyguardDone() 会先调用 unregisterUnlockListener() 将 mBleUnlockState 置为 FAILED，
+        //    再同步调用 handleHide() -> onKeyguardHide() -> dismissGxzwView()。
+        //    在进入前对当前蓝牙/可信设备活跃态做线程级瞬态快照，退出时精确还原，
+        //    彻底解决「蓝牙状态在 dismissGxzwView() 前被清空」及「断开后 userBleAuthenticated 误触发」问题。
+        try {
+            Class<?> mediatorClass = XposedHelpers.findClass(
+                "com.android.systemui.keyguard.KeyguardViewMediator", cl
+            );
+            record(XposedHelpers.findAndHookMethod(
+                mediatorClass, "handleKeyguardDone", new XC_MethodHook() {
+                    private static final String EXTRA_PREV_BLE_DONE = "hyperOpenPrevBleDone";
+
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (!active) return;
+                        Boolean prev = BLE_OR_TRUST_UNLOCKING_IN_DONE.get();
+                        param.setObjectExtra(EXTRA_PREV_BLE_DONE, prev);
+                        HyperOpenConfig cfg = HyperOpenConfig.getCached();
+                        if (cfg != null && cfg.bleUnlockQuickOpen && isBleOrTrustActiveFromMediator(param.thisObject, cl)) {
+                            BLE_OR_TRUST_UNLOCKING_IN_DONE.set(Boolean.TRUE);
+                        }
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Object prev = param.getObjectExtra(EXTRA_PREV_BLE_DONE);
+                        if (prev instanceof Boolean) {
+                            BLE_OR_TRUST_UNLOCKING_IN_DONE.set((Boolean) prev);
+                        } else {
+                            BLE_OR_TRUST_UNLOCKING_IN_DONE.remove();
+                        }
+                    }
+                }
+            ));
+            handleKeyguardDoneHooked = true;
+            Log.i(TAG, "已成功安装 KeyguardViewMediator.handleKeyguardDone 蓝牙/可信解锁快照 Hook！");
+        } catch (Throwable t) {
+            handleKeyguardDoneHooked = false;
+            Log.w(TAG, "Hook KeyguardViewMediator.handleKeyguardDone 失败，将启用残留状态兜底", t);
+        }
+
+        // 10. Hook shouldListenForFingerprintWhenUnlocked()：
+        //     小米原生仅判断人脸停留/小米蓝牙/密码，未包含 Android 原生 Smart Lock / TrustAgent (getUserHasTrust)。
+        //     当蓝牙长按快捷方式开启且处于原生可信设备解锁态（非锁屏编辑模式）时，放行指纹按压进桌面与长按展开。
+        XC_MethodHook trustShouldListenHook = new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                if (!active || Boolean.TRUE.equals(param.getResult())) return;
+                HyperOpenConfig cfg = HyperOpenConfig.getCached();
+                if (cfg == null || !cfg.bleUnlockQuickOpen) return;
+                Object um = resolveUpdateMonitorFromWhenUnlockedThis(param.thisObject);
+                if (isUserHasTrust(um, cl) && !isInEnterEditorMode(cl)) {
+                    param.setResult(Boolean.TRUE);
+                }
+            }
+        };
+        try {
+            Class<?> injectorClass = XposedHelpers.findClassIfExists(
+                "com.android.keyguard.injector.KeyguardUpdateMonitorInjector", cl
+            );
+            boolean installed = false;
+            if (injectorClass != null) {
+                try {
+                    record(XposedHelpers.findAndHookMethod(
+                        injectorClass, "shouldListenForFingerprintWhenUnlocked", trustShouldListenHook
+                    ));
+                    installed = true;
+                    Log.i(TAG, "已成功安装 KeyguardUpdateMonitorInjector.shouldListenForFingerprintWhenUnlocked 可信设备放行 Hook！");
+                } catch (NoSuchMethodError ignored) {}
+            }
+            if (!installed) {
+                Class<?> oldStubClass = XposedHelpers.findClass(
+                    "miui.stub.keyguard.KeyguardStub$registerKeyguardUpdateMonitorInjector$1", cl
+                );
+                record(XposedHelpers.findAndHookMethod(
+                    oldStubClass, "shouldListenForFingerprintWhenUnlocked", trustShouldListenHook
+                ));
+                Log.i(TAG, "已成功安装 KeyguardStub.shouldListenForFingerprintWhenUnlocked 可信设备放行 Hook (旧版 MIUI)！");
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Hook shouldListenForFingerprintWhenUnlocked 失败", t);
         }
     }
 
@@ -800,13 +898,17 @@ public class HyperOpenHook {
     }
 
     /**
-     * 判断当前是否处于「人脸识别成功停留在锁屏，且用户正按住指纹图标」的状态。
-     * 当且仅当手指按下且处于人脸解锁状态时放行，确保：
+     * 判断当前是否处于「人脸 / 蓝牙 / Android 可信设备解锁成功停留在锁屏，且用户正按住指纹图标」的状态。
+     * 必须同时满足 mTouchDown && isCatchDownEvent 才放行，确保：
      * 1. 短按轻触（< 等待时间即松手）：onTouchUp 已置 mTouchDown=false，原生直接进桌面；
-     * 2. 持续长按（手指不松开）：dismissGxzwView 判定为有效解锁，顺利触发 postDelayed(mShowRunnable) 展开快捷面板。
+     * 2. 持续长按（手指不松开）：dismissGxzwView 判定为有效解锁，顺利触发 postDelayed(mShowRunnable) 展开快捷面板；
+     * 3. dismissGxzwView() 末尾置 isCatchDownEvent=false / onTouchUp(false) 后再次查询 isUnlockByGxzw() 时恢复 false，
+     *    确保 MiuiGxzwOverlayView 正常 restoreScreenEffect() 并销毁，不残留屏幕高亮/覆盖层。
      */
-    private static boolean isFaceUnlockPressing(Object gxzwManager) {
-        if (gxzwManager == null) return false;
+    private static boolean isStayScreenUnlockPressing(Object gxzwManager, HyperOpenConfig cfg) {
+        if (gxzwManager == null || cfg == null || (!cfg.faceUnlockQuickOpen && !cfg.bleUnlockQuickOpen)) {
+            return false;
+        }
         try {
             Object iconView = XposedHelpers.getObjectField(gxzwManager, "mMiuiGxzwIconView");
             if (iconView == null) return false;
@@ -814,61 +916,278 @@ public class HyperOpenHook {
             boolean catchDown = XposedHelpers.getBooleanField(iconView, "isCatchDownEvent");
             if (!touchDown || !catchDown) return false;
 
-            // 1. 尝试从 gxzwManager 字段获取 injector
-            try {
-                Object injector = XposedHelpers.getObjectField(gxzwManager, "mKeyguardUpdateMonitorInjector");
-                if (injector != null) {
-                    Boolean shouldListen = (Boolean) XposedHelpers.callMethod(injector, "shouldListenForFingerprintWhenUnlocked");
-                    if (Boolean.TRUE.equals(shouldListen)) return true;
-                }
-            } catch (Throwable ignored) {}
-
-            // 2. 尝试从 InterfacesImplManager 获取单例 (新版)
-            try {
-                ClassLoader cl = gxzwManager.getClass().getClassLoader();
-                Class<?> stubClass = XposedHelpers.findClass(
-                    "com.android.keyguard.stub.MiuiKeyguardUpdateMonitorInjectorStub", cl
-                );
-                Class<?> ifaceMgr = XposedHelpers.findClass(
-                    "com.miui.systemui.interfacesmanager.InterfacesImplManager", cl
-                );
-                Object stub = XposedHelpers.callStaticMethod(ifaceMgr, "getImpl", stubClass);
-                if (stub != null) {
-                    Boolean shouldListen = (Boolean) XposedHelpers.callMethod(stub, "shouldListenForFingerprintWhenUnlocked");
-                    if (Boolean.TRUE.equals(shouldListen)) return true;
-                }
-            } catch (Throwable ignored) {}
-
-            // 3. 跨版本回退：尝试通过 MiuiFaceUnlockManager 直接检查是否处于停留锁屏状态 (三代通用)
-            try {
-                ClassLoader cl = gxzwManager.getClass().getClassLoader();
-                Class<?> faceMgrClass = XposedHelpers.findClass(
-                    "com.miui.keyguard.biometrics.faceunlock.MiuiFaceUnlockManager", cl
-                );
-                Class<?> ifaceMgr = XposedHelpers.findClass(
-                    "com.miui.systemui.interfacesmanager.InterfacesImplManager", cl
-                );
-                Object faceMgr = XposedHelpers.callStaticMethod(ifaceMgr, "getImpl", faceMgrClass);
-                if (faceMgr != null) {
-                    Boolean stayScreen = (Boolean) XposedHelpers.callMethod(faceMgr, "isFaceUnlockSuccessAndStayScreen");
-                    if (Boolean.TRUE.equals(stayScreen)) return true;
-                }
-            } catch (Throwable ignored) {}
+            ClassLoader cl = gxzwManager.getClass().getClassLoader();
+            if (cfg.faceUnlockQuickOpen && isFaceStayScreenActive(cl)) {
+                return true;
+            }
+            if (cfg.bleUnlockQuickOpen && isBleOrTrustStayScreenActive(gxzwManager, cl)) {
+                return true;
+            }
         } catch (Throwable t) {
-            Log.w(TAG, "检查人脸解锁按下状态异常", t);
+            Log.w(TAG, "检查人脸/蓝牙解锁按下状态异常", t);
         }
         return false;
     }
 
-    private static boolean isFaceUnlockPressingGlobal(ClassLoader cl) {
+    private static boolean isStayScreenUnlockPressingGlobal(ClassLoader cl, HyperOpenConfig cfg) {
         try {
             Class<?> factoryClass = XposedHelpers.findClass(
                 "com.miui.keyguard.biometrics.fod.MiuiFingerPrintFactory", cl
             );
             Object mgr = XposedHelpers.callStaticMethod(factoryClass, "getFingerPrintManager");
-            return isFaceUnlockPressing(mgr);
+            return isStayScreenUnlockPressing(mgr, cfg);
         } catch (Throwable t) {
             return false;
+        }
+    }
+
+    /**
+     * 跨版本判断是否处于「人脸识别成功停留在锁屏」状态（与蓝牙/密码解耦）：
+     *   - 17.03 / 20250121：InterfacesImplManager.getImpl(IMiuiFaceUnlockManager)
+     *   - 20240808：com.miui.systemui.MiuiDependency.get(MiuiFaceUnlockManager)
+     */
+    private static boolean isFaceStayScreenActive(ClassLoader cl) {
+        Object faceMgr = getImplIfExists(
+            cl,
+            "com.miui.systemui.interfacesmanager.InterfacesImplManager",
+            "com.miui.interfaces.keyguard.IMiuiFaceUnlockManager"
+        );
+        if (faceMgr == null) {
+            faceMgr = getMiuiDependencyIfExists(cl, "com.miui.keyguard.biometrics.faceunlock.MiuiFaceUnlockManager");
+        }
+        if (faceMgr == null) {
+            faceMgr = getImplIfExists(
+                cl,
+                "com.miui.systemui.interfacesmanager.InterfacesImplManager",
+                "com.miui.keyguard.biometrics.faceunlock.MiuiFaceUnlockManager"
+            );
+        }
+        return callBooleanIfNonNull(faceMgr, "isFaceUnlockSuccessAndStayScreen");
+    }
+
+    /**
+     * 跨版本判断是否处于「小米蓝牙设备解锁 / Android 可信设备解锁停留在锁屏」状态。
+     */
+    private static boolean isBleOrTrustStayScreenActive(Object gxzwManager, ClassLoader cl) {
+        if (Boolean.TRUE.equals(BLE_OR_TRUST_UNLOCKING_IN_DONE.get())) {
+            return true;
+        }
+        Object injector = resolveInjectorFromGxzw(gxzwManager, cl);
+        if (isBleUnlockStateSucceed(injector)) {
+            return true;
+        }
+        Object um = resolveUpdateMonitorFromGxzw(gxzwManager, cl);
+        if (isUserHasTrust(um, cl)) {
+            return true;
+        }
+        // 仅当 handleKeyguardDone() Hook 未能成功安装时，才降级使用 userBleAuthenticated 兜底
+        return !handleKeyguardDoneHooked && isUserBleAuthenticated(injector, um, cl);
+    }
+
+    private static boolean isBleOrTrustActiveFromMediator(Object mediator, ClassLoader cl) {
+        if (mediator == null) return false;
+        try {
+            Object um = tryGetField(mediator, "mUpdateMonitor");
+            if (um == null) return false;
+            Object injector = tryResolveLazy(tryGetField(um, "keyguardUpdateMonitorInjectorLazy"));
+            if (injector == null) {
+                injector = tryGetField(um, "mUpdateMonitorInjector");
+            }
+            return isBleUnlockStateSucceed(injector) || isUserHasTrust(um, cl);
+        } catch (Throwable t) {
+            Log.w(TAG, "检查 KeyguardViewMediator 蓝牙/可信解锁状态异常", t);
+            return false;
+        }
+    }
+
+    private static int getCurrentUserIdCompat(ClassLoader cl) {
+        try {
+            Class<?> userUtilsClass = XposedHelpers.findClassIfExists("com.miui.systemui.utils.UserUtils", cl);
+            if (userUtilsClass != null) {
+                Object uid = XposedHelpers.callStaticMethod(userUtilsClass, "getCurrentUserId");
+                if (uid instanceof Integer) {
+                    return (Integer) uid;
+                }
+            }
+        } catch (Throwable ignored) {}
+        return 0;
+    }
+
+    private static boolean isBleUnlockStateSucceed(Object injector) {
+        if (injector == null) return false;
+        Object state = tryGetField(injector, "mBleUnlockState");
+        return state instanceof Enum && "SUCCEED".equals(((Enum<?>) state).name());
+    }
+
+    private static boolean isUserHasTrust(Object updateMonitor, ClassLoader cl) {
+        if (updateMonitor == null) return false;
+        try {
+            return Boolean.TRUE.equals(
+                XposedHelpers.callMethod(updateMonitor, "getUserHasTrust", getCurrentUserIdCompat(cl))
+            );
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static boolean isInEnterEditorMode(ClassLoader cl) {
+        // 17.03: InterfacesImplManager.getImpl(KeyguardEditorHelper)
+        Object editor = getImplIfExists(
+            cl,
+            "com.miui.systemui.interfacesmanager.InterfacesImplManager",
+            "com.android.keyguard.editor.KeyguardEditorHelper"
+        );
+        // 20250121: InterfacesImplManager.getImpl(IKeyguardEditor)
+        if (editor == null) {
+            editor = getImplIfExists(
+                cl,
+                "com.miui.systemui.interfacesmanager.InterfacesImplManager",
+                "com.miui.interfaces.keyguard.IKeyguardEditor"
+            );
+        }
+        // 20240808: InterfacesImplManager.sClassContainer.get(KeyguardStub$registerKeyguardEditor$1)
+        if (editor == null) {
+            editor = getStubContainerImplIfExists(cl, "miui.stub.keyguard.KeyguardStub$registerKeyguardEditor$1");
+        }
+        return callBooleanIfNonNull(editor, "isInEnterEditorMode");
+    }
+
+    private static Object resolveInjectorFromGxzw(Object gxzwManager, ClassLoader cl) {
+        if (gxzwManager == null) return null;
+        Object holder = tryGetField(gxzwManager, "mKeyguardUpdateMonitorInjector");
+        if (holder != null) {
+            if ("com.android.keyguard.injector.KeyguardUpdateMonitorInjector".equals(holder.getClass().getName())) {
+                return holder;
+            }
+            // 17.03 / 20250121: MiuiKeyguardUpdateMonitorInjectorStub -> mKeyguardUpdateMonitorInjector(Lazy).get()
+            Object injector = tryResolveLazy(tryGetField(holder, "mKeyguardUpdateMonitorInjector"));
+            if (injector != null) return injector;
+
+            // 20240808: KeyguardStub$registerKeyguardUpdateMonitorInjector$1 -> $miuiModuleProvider -> mKeyguardUpdateMonitorInjector(Lazy).get()
+            Object miuiProvider = tryGetField(holder, "$miuiModuleProvider");
+            if (miuiProvider != null) {
+                injector = tryResolveLazy(tryGetField(miuiProvider, "mKeyguardUpdateMonitorInjector"));
+                if (injector != null) return injector;
+            }
+        }
+        Object stub = getImplIfExists(
+            cl,
+            "com.miui.systemui.interfacesmanager.InterfacesImplManager",
+            "com.android.keyguard.stub.MiuiKeyguardUpdateMonitorInjectorStub"
+        );
+        return stub != null ? tryResolveLazy(tryGetField(stub, "mKeyguardUpdateMonitorInjector")) : null;
+    }
+
+    private static Object resolveUpdateMonitorFromGxzw(Object gxzwManager, ClassLoader cl) {
+        if (gxzwManager == null) return null;
+        Object holder = tryGetField(gxzwManager, "mKeyguardUpdateMonitor");
+        if (holder != null) {
+            // 17.03 / 20250121: MiuiKeyguardUpdateMonitorStub -> keyguardUpdateMonitor(Lazy).get()
+            Object um = tryResolveLazy(tryGetField(holder, "keyguardUpdateMonitor"));
+            if (um != null) return um;
+
+            // 20240808: KeyguardStub$registerKeyguardUpdateMonitor$1 -> $sysUIProvider -> mKeyguardUpdateMonitor(Lazy).get()
+            Object sysProvider = tryGetField(holder, "$sysUIProvider");
+            if (sysProvider != null) {
+                um = tryResolveLazy(tryGetField(sysProvider, "mKeyguardUpdateMonitor"));
+                if (um != null) return um;
+            }
+        }
+        Object injector = resolveInjectorFromGxzw(gxzwManager, cl);
+        return injector != null ? tryResolveLazy(tryGetField(injector, "keyguardUpdateMonitor")) : null;
+    }
+
+    private static Object resolveUpdateMonitorFromWhenUnlockedThis(Object target) {
+        if (target == null) return null;
+        // 17.03 / 20250121: target is KeyguardUpdateMonitorInjector
+        Object um = tryResolveLazy(tryGetField(target, "keyguardUpdateMonitor"));
+        if (um != null) return um;
+        // 20240808: target is KeyguardStub$registerKeyguardUpdateMonitorInjector$1
+        Object miuiProvider = tryGetField(target, "$miuiModuleProvider");
+        if (miuiProvider != null) {
+            Object injector = tryResolveLazy(tryGetField(miuiProvider, "mKeyguardUpdateMonitorInjector"));
+            if (injector != null) {
+                return tryResolveLazy(tryGetField(injector, "keyguardUpdateMonitor"));
+            }
+        }
+        return null;
+    }
+
+    private static boolean isUserBleAuthenticated(Object injector, Object updateMonitor, ClassLoader cl) {
+        int uid = getCurrentUserIdCompat(cl);
+        if (injector != null) {
+            Object arr = tryGetField(injector, "userBleAuthenticated");
+            if (arr instanceof android.util.SparseBooleanArray && ((android.util.SparseBooleanArray) arr).get(uid)) {
+                return true;
+            }
+        }
+        if (updateMonitor != null) {
+            Object arr = tryGetField(updateMonitor, "mUserBleAuthenticated");
+            if (arr instanceof android.util.SparseBooleanArray && ((android.util.SparseBooleanArray) arr).get(uid)) {
+                return true;
+            }
+            try {
+                if (Boolean.TRUE.equals(XposedHelpers.callMethod(updateMonitor, "getUserUnlockedWithBle", uid))) {
+                    return true;
+                }
+            } catch (Throwable ignored) {}
+        }
+        return false;
+    }
+
+    private static Object getImplIfExists(ClassLoader cl, String managerClassName, String keyClassName) {
+        try {
+            Class<?> mgrClass = XposedHelpers.findClassIfExists(managerClassName, cl);
+            Class<?> keyClass = XposedHelpers.findClassIfExists(keyClassName, cl);
+            if (mgrClass != null && keyClass != null) {
+                return XposedHelpers.callStaticMethod(mgrClass, "getImpl", keyClass);
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static Object getMiuiDependencyIfExists(ClassLoader cl, String keyClassName) {
+        try {
+            Class<?> depClass = XposedHelpers.findClassIfExists("com.miui.systemui.MiuiDependency", cl);
+            Class<?> keyClass = XposedHelpers.findClassIfExists(keyClassName, cl);
+            if (depClass != null && keyClass != null) {
+                return XposedHelpers.callStaticMethod(depClass, "get", keyClass);
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static Object getStubContainerImplIfExists(ClassLoader cl, String keyClassName) {
+        try {
+            Class<?> mgrClass = XposedHelpers.findClassIfExists(
+                "com.miui.systemui.interfacesmanager.InterfacesImplManager", cl
+            );
+            Class<?> keyClass = XposedHelpers.findClassIfExists(keyClassName, cl);
+            if (mgrClass != null && keyClass != null) {
+                Object map = XposedHelpers.getStaticObjectField(mgrClass, "sClassContainer");
+                if (map instanceof Map) {
+                    return ((Map<?, ?>) map).get(keyClass);
+                }
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static boolean callBooleanIfNonNull(Object target, String methodName) {
+        if (target == null) return false;
+        try {
+            return Boolean.TRUE.equals(XposedHelpers.callMethod(target, methodName));
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static Object tryResolveLazy(Object lazy) {
+        if (lazy == null) return null;
+        try {
+            return XposedHelpers.callMethod(lazy, "get");
+        } catch (Throwable ignored) {
+            return null;
         }
     }
 
@@ -1328,6 +1647,8 @@ public class HyperOpenHook {
         // 1. 先断逻辑，后拆钩子：避免卸载过程中仍有回调进入本模块代码
         boolean wasActive = active;
         active = false;
+        handleKeyguardDoneHooked = false;
+        BLE_OR_TRUST_UNLOCKING_IN_DONE.remove();
 
         if (!wasActive && HANDLES.isEmpty()) {
             return 0;

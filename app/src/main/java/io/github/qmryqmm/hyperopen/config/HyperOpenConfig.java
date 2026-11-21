@@ -251,6 +251,8 @@ public class HyperOpenConfig {
     public boolean disableSystemEnterAnim = false;
     /** 人脸识别成功停留在锁屏时，按指纹进桌面并支持长按唤出快捷方式 (默认开启) */
     public boolean faceUnlockQuickOpen = true;
+    /** 蓝牙设备或 Android 可信设备解锁成功停留在锁屏时，按指纹进桌面并支持长按唤出快捷方式 (默认开启) */
+    public boolean bleUnlockQuickOpen = true;
 
     /* ===== 震动反馈配置（进入展开与手指滑动完全解耦独立控制） ===== */
     /** 进入快捷方式展开面板时的震动总开关 */
@@ -795,6 +797,7 @@ public class HyperOpenConfig {
                     config.showDelayMs = bundle.getInt("show_delay_ms", 500);
                     config.disableSystemEnterAnim = bundle.getBoolean("disable_system_enter_anim", false);
                     config.faceUnlockQuickOpen = bundle.getBoolean("face_unlock_quick_open", true);
+                    config.bleUnlockQuickOpen = bundle.getBoolean("ble_unlock_quick_open", true);
                     config.hapticEnabled = bundle.getBoolean("haptic_enabled", true);
                     config.hapticStrength = bundle.getInt("haptic_strength", 140);
                     config.hapticDurationMs = bundle.getInt("haptic_duration_ms", 24);
@@ -957,6 +960,7 @@ public class HyperOpenConfig {
         config.showDelayMs = xPrefs.getInt("show_delay_ms", 500);
         config.disableSystemEnterAnim = xPrefs.getBoolean("disable_system_enter_anim", false);
         config.faceUnlockQuickOpen = xPrefs.getBoolean("face_unlock_quick_open", true);
+        config.bleUnlockQuickOpen = xPrefs.getBoolean("ble_unlock_quick_open", true);
         config.hapticEnabled = xPrefs.getBoolean("haptic_enabled", true);
         config.hapticStrength = xPrefs.getInt("haptic_strength", 140);
         config.hapticDurationMs = xPrefs.getInt("haptic_duration_ms", 24);
@@ -1110,6 +1114,7 @@ public class HyperOpenConfig {
         config.showDelayMs = sp.getInt("show_delay_ms", 500);
         config.disableSystemEnterAnim = sp.getBoolean("disable_system_enter_anim", false);
         config.faceUnlockQuickOpen = sp.getBoolean("face_unlock_quick_open", true);
+        config.bleUnlockQuickOpen = sp.getBoolean("ble_unlock_quick_open", true);
         config.hapticEnabled = sp.getBoolean("haptic_enabled", true);
         config.hapticStrength = sp.getInt("haptic_strength", 140);
         config.hapticDurationMs = sp.getInt("haptic_duration_ms", 24);
@@ -1254,6 +1259,7 @@ public class HyperOpenConfig {
         config.showDelayMs = readInt(values, "show_delay_ms", 500);
         config.disableSystemEnterAnim = readBoolean(values, "disable_system_enter_anim", false);
         config.faceUnlockQuickOpen = readBoolean(values, "face_unlock_quick_open", true);
+        config.bleUnlockQuickOpen = readBoolean(values, "ble_unlock_quick_open", true);
         config.hapticEnabled = readBoolean(values, "haptic_enabled", true);
         config.hapticStrength = readInt(values, "haptic_strength", 140);
         config.hapticDurationMs = readInt(values, "haptic_duration_ms", 24);
@@ -1383,6 +1389,7 @@ public class HyperOpenConfig {
                 && showDelayMs == other.showDelayMs
                 && disableSystemEnterAnim == other.disableSystemEnterAnim
                 && faceUnlockQuickOpen == other.faceUnlockQuickOpen
+                && bleUnlockQuickOpen == other.bleUnlockQuickOpen
                 && hapticEnabled == other.hapticEnabled
                 && hapticStrength == other.hapticStrength
                 && hapticDurationMs == other.hapticDurationMs
@@ -1575,6 +1582,7 @@ public class HyperOpenConfig {
             .putInt("show_delay_ms", showDelayMs)
             .putBoolean("disable_system_enter_anim", disableSystemEnterAnim)
             .putBoolean("face_unlock_quick_open", faceUnlockQuickOpen)
+            .putBoolean("ble_unlock_quick_open", bleUnlockQuickOpen)
             .putBoolean("haptic_enabled", hapticEnabled)
             .putInt("haptic_strength", hapticStrength)
             .putInt("haptic_duration_ms", hapticDurationMs)
