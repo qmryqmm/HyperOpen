@@ -149,7 +149,7 @@ public final class SafetyStore {
                 .putInt(KEY_TOTAL_CRASH, total)
                 .putBoolean(KEY_SAFE_MODE, safeMode)
                 .putString(KEY_CRASH_LOG, joinLog(log))
-                .apply();
+                .commit();
 
             applyWorldReadable(ctx);
 
@@ -172,7 +172,7 @@ public final class SafetyStore {
                 .putBoolean(KEY_SESSION_HOOKED, true)
                 .putBoolean(KEY_SESSION_HEALTHY, false)
                 .putBoolean(KEY_SESSION_REPORTED, false)
-                .apply();
+                .commit();
             applyWorldReadable(ctx);
             Log.i(TAG, "本次 SystemUI 会话已登记为 Hook 会话");
             return getStateLocked(p);
@@ -193,7 +193,7 @@ public final class SafetyStore {
                 .putInt(KEY_HOOK_METHOD_COUNT, hookCount)
                 .putString(KEY_HOOK_SYSUI_VERSION, version != null ? version : "")
                 .putBoolean(KEY_SESSION_HOOKED, true)
-                .apply();
+                .commit();
             applyWorldReadable(ctx);
             Log.i(TAG, "已更新 SystemUI Hook 实时注入状态: pid=" + pid + ", hooks=" + hookCount + ", active=" + active);
             return getStateLocked(p);
@@ -232,7 +232,7 @@ public final class SafetyStore {
                 .putBoolean(KEY_SAFE_MODE, safeMode)
                 .putBoolean(KEY_SESSION_REPORTED, true)
                 .putString(KEY_CRASH_LOG, joinLog(log))
-                .apply();
+                .commit();
 
             applyWorldReadable(ctx);
 
@@ -250,7 +250,7 @@ public final class SafetyStore {
     public static Bundle heartbeat(Context ctx) {
         synchronized (LOCK) {
             SharedPreferences p = prefs(ctx);
-            p.edit().putBoolean(KEY_SESSION_HEALTHY, true).apply();
+            p.edit().putBoolean(KEY_SESSION_HEALTHY, true).commit();
             applyWorldReadable(ctx);
             Log.i(TAG, "已收到 SystemUI 存活确认，本次 Hook 安装判定为成功");
             return getStateLocked(p);
@@ -281,7 +281,7 @@ public final class SafetyStore {
                 .putBoolean(KEY_SESSION_REPORTED, false)
                 .putBoolean(KEY_SESSION_HOOKED, false)
                 .putString(KEY_CRASH_LOG, joinLog(log))
-                .apply();
+                .commit();
 
             applyWorldReadable(ctx);
             Log.i(TAG, "已退出安全模式");
@@ -304,7 +304,7 @@ public final class SafetyStore {
                 .putBoolean(KEY_SESSION_HEALTHY, true)
                 .putBoolean(KEY_SESSION_REPORTED, false)
                 .putBoolean(KEY_SESSION_HOOKED, false)
-                .apply();
+                .commit();
 
             applyWorldReadable(ctx);
             return getStateLocked(p);
@@ -324,7 +324,7 @@ public final class SafetyStore {
                  .putBoolean(KEY_SESSION_REPORTED, false)
                  .putBoolean(KEY_SESSION_HOOKED, false);
             }
-            e.apply();
+            e.commit();
             applyWorldReadable(ctx);
             Log.i(TAG, "Hook 总开关已设置为: " + enabled);
             try {

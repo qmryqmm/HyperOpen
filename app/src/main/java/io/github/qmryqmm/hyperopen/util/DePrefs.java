@@ -104,8 +104,12 @@ public final class DePrefs {
             if (all != null) {
                 for (Map.Entry<String, ?> e : all.entrySet()) {
                     String k = e.getKey();
-                    if (MIGRATION_MARK.equals(k) || TRANSIENT_KEYS.contains(k)) {
-                        // 会话瞬态键不迁移：CE 旧会话状态会覆盖锁定期刚写入的新会话状态
+                    if (k == null || MIGRATION_MARK.equals(k) || TRANSIENT_KEYS.contains(k) || k.startsWith("hook_")) {
+                        // 会话瞬态键与 hook_* 状态键不迁移：CE 旧状态不能覆盖锁定期写入的新状态
+                        continue;
+                    }
+                    if (de.contains(k)) {
+                        // 仅在 DE 尚无该键时迁移，绝不覆盖锁定期或当前会话已写入的 DE 新值
                         continue;
                     }
                     Object v = e.getValue();
@@ -129,8 +133,11 @@ public final class DePrefs {
                 }
             }
             ed.putBoolean(MIGRATION_MARK, true);
-            ed.apply();
-            MIGRATED.add(name);
+            boolean committed = ed.commit();
+            applyWorldReadable(ctx, name);
+            if (committed) {
+                MIGRATED.add(name);
+            }
             Log.i(TAG, "CE→DE 迁移完成: " + name + "（" + (all == null ? 0 : all.size()) + " 个键）");
         } catch (Throwable t) {
             Log.w(TAG, "CE→DE 迁移失败（下次入口重试）: " + name, t);

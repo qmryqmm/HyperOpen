@@ -80,17 +80,22 @@ public final class SafetyGuard {
         }
         hookAllowed = false;
         Log.e(TAG, "!!! 安全模式生效（" + why + "），立即停用本进程内全部 Hook !!!");
-        Runnable r = deactivator;
+        final Runnable r = deactivator;
         if (r == null) {
             // Hook 尚未部署或已自行退出：没有可拆的钩子，仅保持 hookAllowed=false
             Log.w(TAG, "当前无已部署的 Hook 需要卸载，本进程后续 Hook 逻辑一律拒绝执行");
             return;
         }
-        try {
-            r.run();
-        } catch (Throwable t) {
-            Log.e(TAG, "即时停用 Hook 时发生异常（安全模式标志已生效，Hook 逻辑已全部关闭）", t);
-        }
+        IpcExecutor.runOnMain(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    r.run();
+                } catch (Throwable t) {
+                    Log.e(TAG, "即时停用 Hook 时发生异常（安全模式标志已生效，Hook 逻辑已全部关闭）", t);
+                }
+            }
+        });
     }
 
     /**
@@ -224,6 +229,17 @@ public final class SafetyGuard {
     // ──────────────────────────────────────────────────────────────
 
     /**
+     * 供 MainHook 在首次主线程部署入口同步安装本地崩溃哨兵（纯本地无 IPC）。
+     */
+    public static synchronized void installCrashSentinel(Context ctx) {
+        if (ctx != null && appContext == null) {
+            Context app = ctx.getApplicationContext();
+            appContext = app != null ? app : ctx;
+        }
+        installCrashSentinel();
+    }
+
+    /**
      * 安装未捕获异常哨兵。
      *
      * 优先链式替换 Thread 的 uncaughtExceptionPreHandler（API 26+ 由 RuntimeInit 安装的
@@ -299,14 +315,14 @@ public final class SafetyGuard {
      */
     private static void reportIfHookRelated(Throwable e) {
         try {
+            if (!isHookRelated(e)) {
+                Log.w(TAG, "捕获到与 Hook 无关的未捕获异常，不上报: " + describe(e));
+                return;
+            }
             if (!crashReported.compareAndSet(false, true)) {
                 return;
             }
             String reason = describe(e);
-            if (!isHookRelated(e)) {
-                Log.w(TAG, "捕获到与 Hook 无关的未捕获异常，不上报: " + reason);
-                return;
-            }
             Log.e(TAG, "捕获到 Hook 相关未捕获异常，立即上报崩溃: " + reason);
             Bundle res = call(appContext, M_PROVIDER_REPORT, reason);
             if (res != null && res.getBoolean("just_triggered", false)) {

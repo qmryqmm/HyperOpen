@@ -6,6 +6,13 @@ import android.os.Looper;
 import android.os.Process;
 import android.util.Log;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
 /**
  * SystemUI 进程内的跨进程调用专用后台线程。
  *
@@ -19,6 +26,7 @@ public final class IpcExecutor {
 
     private static volatile Handler sBg;
     private static volatile Handler sMain;
+    private static volatile ExecutorService sShortcutPool;
 
     private IpcExecutor() {}
 
@@ -38,6 +46,50 @@ public final class IpcExecutor {
         return h;
     }
 
+    private static ExecutorService shortcutPool() {
+        ExecutorService pool = sShortcutPool;
+        if (pool == null) {
+            synchronized (IpcExecutor.class) {
+                pool = sShortcutPool;
+                if (pool == null) {
+                    ThreadFactory tf = new ThreadFactory() {
+                        private final AtomicInteger seq = new AtomicInteger(1);
+
+                        @Override
+                        public Thread newThread(Runnable runnable) {
+                            Thread t = new Thread(runnable, "HyperOpen-Shortcut-" + seq.getAndIncrement());
+                            t.setDaemon(true);
+                            return t;
+                        }
+                    };
+                    ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                            1,
+                            4,
+                            30L,
+                            TimeUnit.SECONDS,
+                            new LinkedBlockingQueue<Runnable>(32),
+                            tf,
+                            new ThreadPoolExecutor.CallerRunsPolicy() {
+                                @Override
+                                public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
+                                    // Avoid running blocking shortcut work back on main/gesture thread
+                                    if (!e.isShutdown()) {
+                                        Thread fallback = new Thread(r, "HyperOpen-Shortcut-Overflow");
+                                        fallback.setDaemon(true);
+                                        fallback.start();
+                                    }
+                                }
+                            }
+                    );
+                    executor.allowCoreThreadTimeOut(true);
+                    pool = executor;
+                    sShortcutPool = pool;
+                }
+            }
+        }
+        return pool;
+    }
+
     private static Handler main() {
         Handler h = sMain;
         if (h == null) {
@@ -47,12 +99,15 @@ public final class IpcExecutor {
         return h;
     }
 
-    /** 在后台 IPC 线程执行（串行，异常被吞掉并记录，绝不外抛）。 */
+    /** 在后台控制 IPC 单线程执行（串行，异常被吞掉并记录，绝不外抛）。 */
     public static void runAsync(final Runnable r) {
         runAsyncDelayed(r, 0);
     }
 
     public static void runAsyncDelayed(final Runnable r, long delayMs) {
+        if (r == null) {
+            return;
+        }
         try {
             bg().postDelayed(new Runnable() {
                 @Override
@@ -69,8 +124,32 @@ public final class IpcExecutor {
         }
     }
 
+    /** 在独立的快捷方式执行线程池中异步运行，防止慢快捷方式阻塞 15s 安全心跳与配置同步。 */
+    public static void runShortcutAsync(final Runnable r) {
+        if (r == null) {
+            return;
+        }
+        try {
+            shortcutPool().execute(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        r.run();
+                    } catch (Throwable t) {
+                        Log.w(TAG, "快捷方式后台任务异常", t);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            Log.w(TAG, "投递快捷方式任务失败", t);
+        }
+    }
+
     /** 切回主线程执行；若当前已在主线程则直接执行。 */
     public static void runOnMain(final Runnable r) {
+        if (r == null) {
+            return;
+        }
         if (Looper.myLooper() == Looper.getMainLooper()) {
             try {
                 r.run();

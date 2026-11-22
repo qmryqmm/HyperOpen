@@ -16,6 +16,7 @@ import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -110,6 +111,8 @@ public final class ConfigProfileStore {
         public final int layoutStyle;
         public final int materialStyle;
         public final boolean hasNameConflict;
+        public final int skippedKeyCount;
+        public final List<String> highRiskShortcuts;
 
         ImportCandidate(
                 String name,
@@ -121,6 +124,22 @@ public final class ConfigProfileStore {
                 int materialStyle,
                 boolean hasNameConflict
         ) {
+            this(name, backupJson, keyCount, shortcutCount, hasShortcuts, layoutStyle, materialStyle,
+                    hasNameConflict, 0, Collections.emptyList());
+        }
+
+        ImportCandidate(
+                String name,
+                String backupJson,
+                int keyCount,
+                int shortcutCount,
+                boolean hasShortcuts,
+                int layoutStyle,
+                int materialStyle,
+                boolean hasNameConflict,
+                int skippedKeyCount,
+                List<String> highRiskShortcuts
+        ) {
             this.name = name;
             this.backupJson = backupJson;
             this.keyCount = keyCount;
@@ -129,6 +148,14 @@ public final class ConfigProfileStore {
             this.layoutStyle = layoutStyle;
             this.materialStyle = materialStyle;
             this.hasNameConflict = hasNameConflict;
+            this.skippedKeyCount = skippedKeyCount;
+            this.highRiskShortcuts = highRiskShortcuts == null
+                    ? Collections.emptyList()
+                    : Collections.unmodifiableList(new ArrayList<>(highRiskShortcuts));
+        }
+
+        public boolean hasHighRiskShortcuts() {
+            return !highRiskShortcuts.isEmpty();
         }
 
         public String layoutLabel() {
@@ -179,6 +206,32 @@ public final class ConfigProfileStore {
                 if (candidate.hasShortcuts) return true;
             }
             return false;
+        }
+
+        public int totalSkippedKeyCount() {
+            int total = 0;
+            for (ImportCandidate candidate : candidates) {
+                total += candidate.skippedKeyCount;
+            }
+            return total;
+        }
+
+        public boolean anyHighRiskShortcuts() {
+            for (ImportCandidate candidate : candidates) {
+                if (!candidate.highRiskShortcuts.isEmpty()) return true;
+            }
+            return false;
+        }
+
+        public List<String> collectHighRiskShortcuts() {
+            List<String> out = new ArrayList<>();
+            boolean prefixProfile = isBundle && candidates.size() > 1;
+            for (ImportCandidate candidate : candidates) {
+                for (String entry : candidate.highRiskShortcuts) {
+                    out.add(prefixProfile ? ("[" + candidate.name + "] " + entry) : entry);
+                }
+            }
+            return out;
         }
 
         public static ImportPreview fail(String message) {
@@ -607,7 +660,9 @@ public final class ConfigProfileStore {
                             preview.hasShortcuts,
                             preview.layoutStyle,
                             preview.materialStyle,
-                            existingNames.contains(name)
+                            existingNames.contains(name),
+                            preview.skippedKeyCount,
+                            preview.highRiskShortcuts
                     ));
                 }
                 if (candidates.isEmpty()) {
@@ -630,7 +685,9 @@ public final class ConfigProfileStore {
                         preview.hasShortcuts,
                         preview.layoutStyle,
                         preview.materialStyle,
-                        existingNames.contains(defaultName)
+                        existingNames.contains(defaultName),
+                        preview.skippedKeyCount,
+                        preview.highRiskShortcuts
                 ));
                 return new ImportPreview(true, "解析成功", false, preview.appVersion, 0, candidates);
             } else {

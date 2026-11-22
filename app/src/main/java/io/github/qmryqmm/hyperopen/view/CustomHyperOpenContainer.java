@@ -1,6 +1,7 @@
 package io.github.qmryqmm.hyperopen.view;
 
 import android.content.Context;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.PointF;
 import android.os.Build;
@@ -367,6 +368,12 @@ public class CustomHyperOpenContainer extends FrameLayout {
         }
     }
 
+    @Override
+    protected void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        IconGlyphFactory.clearCache();
+    }
+
     /**
      * 尝试调用小米澎湃OS / MIUI 专有的线性马达 RichTap 触觉引擎 (HapticFeedBackImpl / HapticFeedbackUtil)
      * 支持动态缩放振幅强度比例 (ratio 0.1 ~ 2.0，基准为 1.0)
@@ -375,20 +382,14 @@ public class CustomHyperOpenContainer extends FrameLayout {
         if (context == null) return false;
 
         // 1. 优先尝试系统界面的全局单例 HapticFeedBackImpl (SystemUI 进程)
+        //    20250121.0 / 17.03.x 使用 InterfacesImplManager.getImpl(IHapticFeedBack.class)
+        //    20240808.0 使用 MiuiDependency.get(IHapticFeedBack.class)
         try {
             ClassLoader cl = context.getClassLoader();
-            Class<?> depClass = Class.forName("com.miui.systemui.MiuiDependency", false, cl);
             Class<?> ifaceClass = Class.forName("com.miui.interfaces.IHapticFeedBack", false, cl);
-            java.lang.reflect.Method getMethod = depClass.getMethod("get", Class.class);
-            Object impl = getMethod.invoke(null, ifaceClass);
-            if (impl != null) {
-                // 原生签名：extExtHapticFeedback(int, int, String, int, Handler)
-                for (java.lang.reflect.Method m : impl.getClass().getMethods()) {
-                    if ("extExtHapticFeedback".equals(m.getName()) && m.getParameterTypes().length == 5) {
-                        m.invoke(impl, 1, -1, pattern, 0, null);
-                        return true;
-                    }
-                }
+            Object impl = resolveHapticFeedBackImpl(cl, ifaceClass);
+            if (impl != null && invokeExtHapticFeedback(impl, pattern)) {
+                return true;
             }
         } catch (Throwable ignored) {}
 
@@ -403,6 +404,57 @@ public class CustomHyperOpenContainer extends FrameLayout {
             java.lang.reflect.Method perf = utilClass.getMethod("performHapticFeedback", String.class, boolean.class);
             Object ok = perf.invoke(util, pattern, false);
             if (Boolean.TRUE.equals(ok)) {
+                return true;
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    private static Object resolveHapticFeedBackImpl(ClassLoader cl, Class<?> ifaceClass) {
+        try {
+            Class<?> mgrClass = Class.forName("com.miui.systemui.interfacesmanager.InterfacesImplManager", false, cl);
+            java.lang.reflect.Method getImpl = mgrClass.getMethod("getImpl", Class.class);
+            Object impl = getImpl.invoke(null, ifaceClass);
+            if (impl != null) {
+                return impl;
+            }
+        } catch (Throwable ignored) {}
+        try {
+            Class<?> depClass = Class.forName("com.miui.systemui.MiuiDependency", false, cl);
+            java.lang.reflect.Method getMethod = depClass.getMethod("get", Class.class);
+            return getMethod.invoke(null, ifaceClass);
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static boolean invokeExtHapticFeedback(Object impl, String pattern) {
+        java.lang.reflect.Method m4 = null;
+        java.lang.reflect.Method m5 = null;
+        for (java.lang.reflect.Method m : impl.getClass().getMethods()) {
+            if (!"extExtHapticFeedback".equals(m.getName())) continue;
+            Class<?>[] pts = m.getParameterTypes();
+            if (pts.length == 4
+                    && pts[0] == int.class
+                    && pts[1] == String.class
+                    && pts[2] == int.class
+                    && pts[3] == int.class) {
+                m4 = m;
+            } else if (pts.length == 5
+                    && pts[0] == int.class
+                    && pts[1] == int.class
+                    && pts[2] == String.class
+                    && pts[3] == int.class
+                    && "android.os.Handler".equals(pts[4].getName())) {
+                m5 = m;
+            }
+        }
+        try {
+            if (m4 != null) {
+                m4.invoke(impl, 1, pattern, -1, 0);
+                return true;
+            }
+            if (m5 != null) {
+                m5.invoke(impl, 1, -1, pattern, 0, null);
                 return true;
             }
         } catch (Throwable ignored) {}
@@ -643,14 +695,18 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 && activeItems.size() < RingSectorPacking.MAX_SECTOR_COUNT_EXCLUSIVE;
 
         // 更新底衬大小与位置：完全跟随「显示圆形区域底衬」开关（分隔虚线由全屏覆盖层独立绘制）
-        regionBackdrop.prepareForUse();
-        regionBackdrop.setVisibility(config.showRegionBg ? View.VISIBLE : View.GONE);
-        regionBackdrop.setStyle(resolvedStyle);
-        regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION));
-        regionBackdrop.setBlurRadius(config.showRegionBg
-            ? componentBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION) : 0);
-        regionBackdrop.setDimAlpha(config.showRegionBg ? config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION) : 0f);
-        regionBackdrop.updateGeometry(regionRadiusPx);
+        if (config.showRegionBg) {
+            regionBackdrop.setVisibility(View.VISIBLE);
+            regionBackdrop.prepareForUse();
+            regionBackdrop.setStyle(resolvedStyle);
+            regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION));
+            regionBackdrop.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION));
+            regionBackdrop.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION));
+            regionBackdrop.updateGeometry(regionRadiusPx);
+        } else {
+            regionBackdrop.reset();
+            regionBackdrop.setVisibility(View.GONE);
+        }
 
         ViewGroup.LayoutParams existingRLp = regionBackdrop.getLayoutParams();
         LayoutParams rLp = (existingRLp instanceof LayoutParams)
@@ -1111,6 +1167,14 @@ public class CustomHyperOpenContainer extends FrameLayout {
         currentSelectedSubBubble = null;
         if (regionBackdrop != null) {
             regionBackdrop.reset();
+        }
+        if (headerPillBackdrop != null) {
+            if (headerPill != null) {
+                headerPillBackdrop.removeFrom(headerPill);
+            } else {
+                headerPillBackdrop.release();
+            }
+            headerPillBackdrop = null;
         }
         if (sectorOverlay != null) {
             sectorOverlay.setHighlight(-1, 0, false);

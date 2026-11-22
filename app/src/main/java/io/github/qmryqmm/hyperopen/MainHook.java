@@ -3,8 +3,13 @@ package io.github.qmryqmm.hyperopen;
 import android.content.Context;
 import android.util.Log;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import io.github.qmryqmm.hyperopen.config.HyperOpenConfig;
 import io.github.qmryqmm.hyperopen.hook.HyperOpenHook;
 import io.github.qmryqmm.hyperopen.safety.SafetyGuard;
+import io.github.qmryqmm.hyperopen.util.IpcExecutor;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -18,16 +23,18 @@ public class MainHook implements IXposedHookLoadPackage {
 
     /** 是否已得出明确结论（允许安装 / 明确拒绝）。只有「未决」才允许后续重试与解锁补装 */
     private static volatile boolean concluded = false;
+    /** 严格防止 attachBaseContext / onCreate / callApplicationOnCreate / 重试并发重入 */
+    private static final AtomicBoolean deploying = new AtomicBoolean(false);
     /** 已排定一次重试，防止多个部署点重复排队 */
-    private static volatile boolean retryPending = false;
+    private static final AtomicBoolean retryPending = new AtomicBoolean(false);
     /** 重试上下文（补装需要 lpparam，而解锁广播回调里拿不到参数） */
     private static volatile XC_LoadPackage.LoadPackageParam savedLpparam;
     private static volatile Context appContext;
     /** ACTION_USER_UNLOCKED 补装监听只注册一次 */
-    private static volatile boolean unlockReceiverArmed = false;
+    private static final AtomicBoolean unlockReceiverArmed = new AtomicBoolean(false);
     /** Provider 未就绪/存储不可用时的后台重试次数上限（之后转为等解锁事件补装） */
     private static final int MAX_SAFETY_RETRY = 8;
-    private static int safetyRetry = 0;
+    private static final AtomicInteger safetyRetry = new AtomicInteger(0);
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
@@ -46,7 +53,7 @@ public class MainHook implements IXposedHookLoadPackage {
             return;
         }
 
-        if (!TARGET_PACKAGE.equals(lpparam.packageName)) {
+        if (!TARGET_PACKAGE.equals(lpparam.packageName) || !TARGET_PACKAGE.equals(lpparam.processName)) {
             return;
         }
 
@@ -68,63 +75,104 @@ public class MainHook implements IXposedHookLoadPackage {
     /**
      * 安全模式闸门：只有 SafetyGuard 判定允许，才真正安装 Hook。
      *
-     * 「未决」（Provider 不可达 / 存储暂不可用）不写结论：
-     * 后台指数退避重试 + 监听 ACTION_USER_UNLOCKED 在用户解锁后补装，
-     * 彻底解决「重启后模块不生效，必须打开 App 手动重启系统界面」的时序问题。
+     * 本地崩溃哨兵在当前线程同步安装（无 IPC），Provider 查询迁移到后台 IPC 线程，
+     * 获批后再切回主线程安装 Hook 并回溯绑定宿主单例，彻底消除主线程同步等待锁/Binder ANR。
      */
-    private static synchronized void deploy(XC_LoadPackage.LoadPackageParam lpparam, Context ctx) {
-        if (concluded) {
+    private static void deploy(final XC_LoadPackage.LoadPackageParam lpparam, Context ctx) {
+        if (concluded || lpparam == null || ctx == null) {
             return;
         }
-        savedLpparam = lpparam;
+        Context app = null;
         try {
-            Context app = ctx.getApplicationContext();
-            appContext = app != null ? app : ctx;
-        } catch (Throwable t) {
-            appContext = ctx;
-        }
+            app = ctx.getApplicationContext();
+        } catch (Throwable ignored) {}
+        final Context resolvedCtx = app != null ? app : ctx;
+
+        savedLpparam = lpparam;
+        appContext = resolvedCtx;
+
+        // 先在本地同步安装崩溃哨兵（纯本地反射，无跨进程调用）
+        try {
+            SafetyGuard.installCrashSentinel(resolvedCtx);
+        } catch (Throwable ignored) {}
+
         armUnlockReceiver();
 
-        Boolean allowed;
-        try {
-            allowed = SafetyGuard.install(ctx);
-        } catch (Throwable t) {
-            Log.e(TAG, "安全模式检查异常，为保护 SystemUI 本次不安装 Hook", t);
+        if (!deploying.compareAndSet(false, true)) {
+            return;
+        }
+        if (concluded) {
+            deploying.set(false);
             return;
         }
 
-        if (allowed == null) {
-            // 状态暂不可查：后台线程指数退避重试，绝不阻塞/占用主线程
-            scheduleRetry();
-            return;
-        }
-
-        concluded = true;
-        retryPending = false;
-
-        if (!allowed) {
-            Log.e(TAG, "安全模式已激活或 Hook 开关已关闭 → 本次启动不安装任何 Hook，SystemUI 将以原生状态运行");
-            return;
-        }
-
-        try {
-            // 注册「运行期即时停用」执行器：崩溃哨兵凑够阈值的那一刻，
-            // 由 SafetyGuard 直接回调这里，把已装好的 Hook 全部拆掉。
-            SafetyGuard.setDeactivator(new Runnable() {
-                @Override
-                public void run() {
-                    HyperOpenHook.uninstall();
+        IpcExecutor.runAsync(new Runnable() {
+            @Override
+            public void run() {
+                if (concluded) {
+                    deploying.set(false);
+                    return;
                 }
-            });
-            HyperOpenHook.hook(lpparam);
-            HyperOpenHook.reportInjectedStatus(ctx);
-            Log.i(TAG, "Hook 部署流程结束");
-        } catch (Throwable t) {
-            Log.e(TAG, "Hook 部署发生未预期异常", t);
-            try {
-                SafetyGuard.reportDeployFailure(t);
-            } catch (Throwable ignored) {}
-        }
+                Boolean allowed;
+                try {
+                    allowed = SafetyGuard.install(resolvedCtx);
+                } catch (Throwable t) {
+                    Log.e(TAG, "安全模式检查异常，为保护 SystemUI 本次不安装 Hook", t);
+                    deploying.set(false);
+                    return;
+                }
+
+                if (allowed == null) {
+                    // 状态暂不可查：后台线程指数退避重试，绝不阻塞/占用主线程
+                    deploying.set(false);
+                    scheduleRetry();
+                    return;
+                }
+
+                concluded = true;
+                retryPending.set(false);
+
+                if (!allowed) {
+                    Log.e(TAG, "安全模式已激活或 Hook 开关已关闭 → 本次启动不安装任何 Hook，SystemUI 将以原生状态运行");
+                    deploying.set(false);
+                    return;
+                }
+
+                IpcExecutor.runOnMain(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            // 注册「运行期即时停用」执行器：崩溃哨兵凑够阈值的那一刻，
+                            // 由 SafetyGuard 直接回调这里，把已装好的 Hook 全部拆掉。
+                            SafetyGuard.setDeactivator(new Runnable() {
+                                @Override
+                                public void run() {
+                                    HyperOpenHook.uninstall();
+                                }
+                            });
+                            HyperOpenHook.hook(lpparam);
+                            HyperOpenHook.ensureProcessReceivers(resolvedCtx);
+                            HyperOpenConfig.refreshAsync(resolvedCtx);
+                            HyperOpenHook.attachExistingQuickOpenView(lpparam.classLoader);
+                            HyperOpenHook.reportInjectedStatus(resolvedCtx);
+                            Log.i(TAG, "Hook 部署流程结束");
+                        } catch (Throwable t) {
+                            Log.e(TAG, "Hook 部署发生未预期异常", t);
+                            IpcExecutor.runAsync(new Runnable() {
+                                @Override
+                                public void run() {
+                                    try {
+                                        SafetyGuard.reportDeployFailure(t);
+                                    } catch (Throwable ignored) {}
+                                }
+                            });
+                        } finally {
+                            deploying.set(false);
+                        }
+                    }
+                });
+            }
+        });
     }
 
     /**
@@ -132,24 +180,25 @@ public class MainHook implements IXposedHookLoadPackage {
      * 超限后不再空转，转入等待 ACTION_USER_UNLOCKED 解锁事件补装。
      */
     private static void scheduleRetry() {
-        if (retryPending) {
+        if (!retryPending.compareAndSet(false, true)) {
             return;
         }
-        if (safetyRetry >= MAX_SAFETY_RETRY) {
+        int attempt = safetyRetry.get() + 1;
+        if (attempt > MAX_SAFETY_RETRY) {
+            retryPending.set(false);
             Log.e(TAG, "多次重试后仍无法确认安全模式状态，转入等待用户解锁事件（ACTION_USER_UNLOCKED）补装");
             return;
         }
-        retryPending = true;
-        safetyRetry++;
-        final long delay = Math.min(500L << safetyRetry, 30000L);
-        Log.w(TAG, "安全模式状态暂不可查，第 " + safetyRetry + " 次重试将在 " + delay + "ms 后进行（后台线程）");
+        safetyRetry.set(attempt);
+        final long delay = Math.min(500L << attempt, 30000L);
+        Log.w(TAG, "安全模式状态暂不可查，第 " + attempt + " 次重试将在 " + delay + "ms 后进行（后台线程）");
         try {
             // 重试走 IpcExecutor 后台线程：模块进程可能被冻结/冷启动耗时数秒，
             // 以前放主线程 postDelayed 有 SystemUI 输入 ANR 风险
-            io.github.qmryqmm.hyperopen.util.IpcExecutor.runAsyncDelayed(new Runnable() {
+            IpcExecutor.runAsyncDelayed(new Runnable() {
                 @Override
                 public void run() {
-                    retryPending = false;
+                    retryPending.set(false);
                     XC_LoadPackage.LoadPackageParam lp = savedLpparam;
                     Context c = appContext;
                     if (lp == null || c == null) {
@@ -159,7 +208,7 @@ public class MainHook implements IXposedHookLoadPackage {
                 }
             }, delay);
         } catch (Throwable t) {
-            retryPending = false;
+            retryPending.set(false);
             Log.e(TAG, "安排安全模式重试失败", t);
         }
     }
@@ -173,13 +222,13 @@ public class MainHook implements IXposedHookLoadPackage {
      * 把锁定期临时用的默认配置换成迁移后的用户真实配置。
      */
     private static void armUnlockReceiver() {
-        if (unlockReceiverArmed) {
+        if (!unlockReceiverArmed.compareAndSet(false, true)) {
             return;
         }
-        unlockReceiverArmed = true;
         try {
             final Context c = appContext;
             if (c == null) {
+                unlockReceiverArmed.set(false);
                 return;
             }
             android.content.IntentFilter filter =
@@ -189,7 +238,7 @@ public class MainHook implements IXposedHookLoadPackage {
                 public void onReceive(Context context, android.content.Intent intent) {
                     Log.i(TAG, "收到 ACTION_USER_UNLOCKED，尝试补装 Hook 并刷新配置");
                     try {
-                        io.github.qmryqmm.hyperopen.config.HyperOpenConfig.refreshAsync(c);
+                        HyperOpenConfig.refreshAsync(c);
                     } catch (Throwable ignored) {}
                     XC_LoadPackage.LoadPackageParam lp = savedLpparam;
                     if (lp != null) {
@@ -204,6 +253,7 @@ public class MainHook implements IXposedHookLoadPackage {
             }
             Log.i(TAG, "ACTION_USER_UNLOCKED 补装监听已注册");
         } catch (Throwable t) {
+            unlockReceiverArmed.set(false);
             Log.w(TAG, "注册用户解锁广播失败", t);
         }
     }

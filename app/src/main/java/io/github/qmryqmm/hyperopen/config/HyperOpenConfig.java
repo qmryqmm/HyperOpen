@@ -12,6 +12,8 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.github.qmryqmm.hyperopen.util.IpcExecutor;
@@ -585,6 +587,12 @@ public class HyperOpenConfig {
     public List<ShortcutItem> shortcuts = new ArrayList<>();
 
     private static XSharedPreferences xPrefs;
+    private static boolean xPrefsIsDe = false;
+    private static final ExecutorService SAVE_IO_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "HyperOpen-ConfigSave");
+        t.setDaemon(true);
+        return t;
+    });
 
     // ──────────────────────────────────────────────────────────────
     // SystemUI 进程内的配置缓存（异步刷新，展开路径零跨进程调用）
@@ -730,7 +738,7 @@ public class HyperOpenConfig {
                     android.net.Uri.parse("content://io.github.qmryqmm.hyperopen.provider"),
                     "get_config", null, null
                 );
-                if (bundle != null) {
+                if (bundle != null && !bundle.isEmpty()) {
                     HyperOpenConfig config = new HyperOpenConfig();
                     config.materialStyle = bundle.getInt("material_style", MATERIAL_GAUSSIAN_BLUR);
                     config.offsetY = bundle.getInt("offset_y", 100);
@@ -884,149 +892,159 @@ public class HyperOpenConfig {
      * SystemUI 进程加载配置 (XSharedPreferences 兜底)
      */
     public static synchronized HyperOpenConfig loadFromXposed() {
+        java.io.File deFile = new java.io.File(
+            "/data/user_de/0/" + PACKAGE_NAME + "/shared_prefs/" + PREF_NAME + ".xml");
+        boolean deReady = deFile.exists() && deFile.canRead();
         if (xPrefs == null) {
             // prefs 已迁 DE：优先读 /data/user_de/0/<pkg>/shared_prefs/<name>.xml，
-            // 不存在时回退旧版 CE 路径（升级后未迁移的过渡场景）
-            java.io.File deFile = new java.io.File(
-                "/data/user_de/0/" + PACKAGE_NAME + "/shared_prefs/" + PREF_NAME + ".xml");
-            xPrefs = deFile.exists()
-                ? new XSharedPreferences(deFile)
-                : new XSharedPreferences(PACKAGE_NAME, PREF_NAME);
+            // 开机早期尚不存在或暂不可读时先回退 CE，后续调用一旦 DE 就绪再热切换过去。
+            if (deReady) {
+                xPrefs = new XSharedPreferences(deFile);
+                xPrefsIsDe = true;
+            } else {
+                xPrefs = new XSharedPreferences(PACKAGE_NAME, PREF_NAME);
+                xPrefsIsDe = false;
+            }
             xPrefs.makeWorldReadable();
+        } else if (!xPrefsIsDe && deReady) {
+            xPrefs = new XSharedPreferences(deFile);
+            xPrefs.makeWorldReadable();
+            xPrefsIsDe = true;
+            Log.i(TAG, "XSharedPreferences 已从 CE 热切换至 DE: " + deFile.getAbsolutePath());
         } else {
             xPrefs.reload();
         }
 
         HyperOpenConfig config = new HyperOpenConfig();
-        config.materialStyle = xPrefs.getInt("material_style", MATERIAL_GAUSSIAN_BLUR);
-        config.offsetY = xPrefs.getInt("offset_y", 100);
-        config.regionDiameter = xPrefs.getInt("region_diameter", 220);
-        config.showRegionBg = xPrefs.getBoolean("show_region_bg", false);
-        config.showHeaderPillBg = xPrefs.getBoolean("show_header_pill_bg", false);
-        config.showHeaderPill = xPrefs.getBoolean("show_header_pill", true);
-        config.headerTopMargin = xPrefs.getInt("header_top_margin", 100);
-        config.headerTitleSize = xPrefs.getInt("header_title_size", 17);
-        config.headerSubtitleSize = xPrefs.getInt("header_subtitle_size", 11);
-        config.headerBlurRadius = xPrefs.getInt("header_blur_radius", 25);
-        config.headerTextCentered = xPrefs.getBoolean("header_text_centered", true);
-        config.iconSize = xPrefs.getInt("icon_size", 60);
-        config.maxIconCount = xPrefs.getInt("max_icon_count", 0);
-        config.layoutStyle = xPrefs.getInt("layout_style", LAYOUT_HONEYCOMB);
-        config.ringSectorMode = xPrefs.getBoolean("ring_sector_mode", true);
-        config.sectorLineColor = xPrefs.getInt("sector_line_color", 0xFFBFBFBF);
-        config.sectorLineAlpha = xPrefs.getFloat("sector_line_alpha", 0.4f);
-        config.sectorDashLength = xPrefs.getInt("sector_dash_length", 6);
-        config.sectorDashGap = xPrefs.getInt("sector_dash_gap", 5);
-        config.sectorLineWidth = xPrefs.getFloat("sector_line_width", 1.2f);
-        config.sectorHighlightEnabled = xPrefs.getBoolean("sector_highlight_enabled", true);
-        config.animDurationMs = xPrefs.getInt("anim_duration_ms", 320);
+        config.materialStyle = safeGetInt(xPrefs, "material_style", MATERIAL_GAUSSIAN_BLUR);
+        config.offsetY = safeGetInt(xPrefs, "offset_y", 100);
+        config.regionDiameter = safeGetInt(xPrefs, "region_diameter", 220);
+        config.showRegionBg = safeGetBoolean(xPrefs, "show_region_bg", false);
+        config.showHeaderPillBg = safeGetBoolean(xPrefs, "show_header_pill_bg", false);
+        config.showHeaderPill = safeGetBoolean(xPrefs, "show_header_pill", true);
+        config.headerTopMargin = safeGetInt(xPrefs, "header_top_margin", 100);
+        config.headerTitleSize = safeGetInt(xPrefs, "header_title_size", 17);
+        config.headerSubtitleSize = safeGetInt(xPrefs, "header_subtitle_size", 11);
+        config.headerBlurRadius = safeGetInt(xPrefs, "header_blur_radius", 25);
+        config.headerTextCentered = safeGetBoolean(xPrefs, "header_text_centered", true);
+        config.iconSize = safeGetInt(xPrefs, "icon_size", 60);
+        config.maxIconCount = safeGetInt(xPrefs, "max_icon_count", 0);
+        config.layoutStyle = safeGetInt(xPrefs, "layout_style", LAYOUT_HONEYCOMB);
+        config.ringSectorMode = safeGetBoolean(xPrefs, "ring_sector_mode", true);
+        config.sectorLineColor = safeGetInt(xPrefs, "sector_line_color", 0xFFBFBFBF);
+        config.sectorLineAlpha = safeGetFloat(xPrefs, "sector_line_alpha", 0.4f);
+        config.sectorDashLength = safeGetInt(xPrefs, "sector_dash_length", 6);
+        config.sectorDashGap = safeGetInt(xPrefs, "sector_dash_gap", 5);
+        config.sectorLineWidth = safeGetFloat(xPrefs, "sector_line_width", 1.2f);
+        config.sectorHighlightEnabled = safeGetBoolean(xPrefs, "sector_highlight_enabled", true);
+        config.animDurationMs = safeGetInt(xPrefs, "anim_duration_ms", 320);
         config.panelExpandAnimType = normalizePanelExpandAnimType(
-                xPrefs.getInt("panel_expand_anim_type", PANEL_EXPAND_BLOOM),
+                safeGetInt(xPrefs, "panel_expand_anim_type", PANEL_EXPAND_BLOOM),
                 config.layoutStyle,
-                xPrefs.getBoolean("stock_system_anim", true)
+                safeGetBoolean(xPrefs, "stock_system_anim", true)
         );
-        config.panelExpandStaggerMs = xPrefs.getInt("panel_expand_stagger_ms", 12);
-        config.dismissAnimEnabled = xPrefs.getBoolean("dismiss_anim_enabled", true);
-        config.panelCollapseAnimType = xPrefs.getInt("panel_collapse_anim_type", PANEL_COLLAPSE_SELECTED_POP);
-        config.panelCollapseDurationMs = xPrefs.getInt("panel_collapse_duration_ms", 120);
-        config.panelCollapseStaggerMs = xPrefs.getInt("panel_collapse_stagger_ms", 0);
-        config.panelSelectedPopScale = xPrefs.getFloat("panel_selected_pop_scale", 1.30f);
-        config.globalHintColorMode = xPrefs.getInt("global_hint_color_mode", HINT_COLOR_MODE_AUTO);
-        config.globalHintCustomColor = xPrefs.getInt("global_hint_custom_color", 0xFFFFFFFF);
-        config.defaultHintTextStroke = xPrefs.getInt("default_hint_text_stroke", 0);
-        config.defaultHintTextShadow = xPrefs.getInt("default_hint_text_shadow", 0);
-        config.defaultHintTextWeight = xPrefs.getInt("default_hint_text_weight", 3);
-        config.defaultHintTextLetterSpacing = xPrefs.getFloat("default_hint_text_letter_spacing", 0f);
-        config.defaultShowHintTitle = xPrefs.getBoolean("default_show_hint_title", true);
-        config.defaultShowHintSubtitle = xPrefs.getBoolean("default_show_hint_subtitle", true);
-        config.folderHoverDelayMs = xPrefs.getInt("folder_hover_delay_ms", 250);
-        config.stockSystemRegion = xPrefs.getBoolean("stock_system_region", true);
-        config.folderChildDisplayRangeScale = xPrefs.getFloat("folder_child_display_range_scale", 1f);
+        config.panelExpandStaggerMs = safeGetInt(xPrefs, "panel_expand_stagger_ms", 12);
+        config.dismissAnimEnabled = safeGetBoolean(xPrefs, "dismiss_anim_enabled", true);
+        config.panelCollapseAnimType = safeGetInt(xPrefs, "panel_collapse_anim_type", PANEL_COLLAPSE_SELECTED_POP);
+        config.panelCollapseDurationMs = safeGetInt(xPrefs, "panel_collapse_duration_ms", 120);
+        config.panelCollapseStaggerMs = safeGetInt(xPrefs, "panel_collapse_stagger_ms", 0);
+        config.panelSelectedPopScale = safeGetFloat(xPrefs, "panel_selected_pop_scale", 1.30f);
+        config.globalHintColorMode = safeGetInt(xPrefs, "global_hint_color_mode", HINT_COLOR_MODE_AUTO);
+        config.globalHintCustomColor = safeGetInt(xPrefs, "global_hint_custom_color", 0xFFFFFFFF);
+        config.defaultHintTextStroke = safeGetInt(xPrefs, "default_hint_text_stroke", 0);
+        config.defaultHintTextShadow = safeGetInt(xPrefs, "default_hint_text_shadow", 0);
+        config.defaultHintTextWeight = safeGetInt(xPrefs, "default_hint_text_weight", 3);
+        config.defaultHintTextLetterSpacing = safeGetFloat(xPrefs, "default_hint_text_letter_spacing", 0f);
+        config.defaultShowHintTitle = safeGetBoolean(xPrefs, "default_show_hint_title", true);
+        config.defaultShowHintSubtitle = safeGetBoolean(xPrefs, "default_show_hint_subtitle", true);
+        config.folderHoverDelayMs = safeGetInt(xPrefs, "folder_hover_delay_ms", 250);
+        config.stockSystemRegion = safeGetBoolean(xPrefs, "stock_system_region", true);
+        config.folderChildDisplayRangeScale = safeGetFloat(xPrefs, "folder_child_display_range_scale", 1f);
         config.folderChildDirectionMode = normalizeFolderChildDirectionMode(
-                xPrefs.getInt("folder_child_direction_mode", FOLDER_CHILD_DIRECTION_OUTWARD)
+                safeGetInt(xPrefs, "folder_child_direction_mode", FOLDER_CHILD_DIRECTION_OUTWARD)
         );
-        config.folderChildDirectionOffsetDeg = xPrefs.getFloat("folder_child_direction_offset_deg", 0f);
-        config.folderChildOrderMode = xPrefs.getInt("folder_child_order_mode", 0);
-        config.folderChildMinGapDp = xPrefs.getInt("folder_child_min_gap_dp", 8);
-        config.folderChildSizeScale = xPrefs.getFloat("folder_child_size_scale", 1f);
-        config.folderChildExpandAnimType = xPrefs.getInt("folder_child_expand_anim_type", FOLDER_CHILD_EXPAND_FAN_SPRING);
-        config.folderChildExpandDurationMs = xPrefs.getInt("folder_child_expand_duration_ms", 180);
-        config.folderChildExpandStaggerMs = xPrefs.getInt("folder_child_expand_stagger_ms", 15);
-        config.folderChildCollapseAnimType = xPrefs.getInt("folder_child_collapse_anim_type", FOLDER_CHILD_COLLAPSE_CENTER);
-        config.folderChildCollapseDurationMs = xPrefs.getInt("folder_child_collapse_duration_ms", 140);
-        config.folderChildCollapseStaggerMs = xPrefs.getInt("folder_child_collapse_stagger_ms", 0);
-        config.folderChildStartScale = xPrefs.getFloat("folder_child_start_scale", 0.1f);
-        config.folderChildOvershoot = xPrefs.getFloat("folder_child_overshoot", 1.2f);
-        config.maxScale = xPrefs.getFloat("max_scale", 1.60f);
-        config.influenceRadius = xPrefs.getInt("influence_radius", 70);
-        config.iconAlpha = xPrefs.getFloat("icon_alpha", 1.0f);
-        config.fisheyeZoomAlpha = xPrefs.getFloat("fisheye_zoom_alpha", 1.0f);
-        config.fisheyeOtherAlpha = xPrefs.getFloat("fisheye_other_alpha", 1.0f);
-        config.iconCornerRadius = xPrefs.getInt("icon_corner_radius", 50);
-        config.fullscreenBlurMaskAlpha = xPrefs.getFloat("fullscreen_blur_mask_alpha", 1.0f);
-        config.fullscreenDimAlpha = xPrefs.getFloat("fullscreen_dim_alpha", 0.45f);
-        config.headerDimAlpha = xPrefs.getFloat("header_dim_alpha", 0f);
-        config.regionDimAlpha = xPrefs.getFloat("region_dim_alpha", 0f);
-        config.bubbleDimAlpha = xPrefs.getFloat("bubble_dim_alpha", 0f);
-        config.showDelayMs = xPrefs.getInt("show_delay_ms", 500);
-        config.disableSystemEnterAnim = xPrefs.getBoolean("disable_system_enter_anim", false);
-        config.faceUnlockQuickOpen = xPrefs.getBoolean("face_unlock_quick_open", true);
-        config.bleUnlockQuickOpen = xPrefs.getBoolean("ble_unlock_quick_open", true);
-        config.hapticEnabled = xPrefs.getBoolean("haptic_enabled", true);
-        config.hapticStrength = xPrefs.getInt("haptic_strength", 140);
-        config.hapticDurationMs = xPrefs.getInt("haptic_duration_ms", 24);
-        config.hapticMode = xPrefs.getInt("haptic_mode", HAPTIC_MODE_STOCK);
-        config.hapticStockWaveExpand = xPrefs.getInt("haptic_stock_wave_expand", HAPTIC_STOCK_WAVE_LONG_PRESS);
-        config.hapticBrakePulse = xPrefs.getBoolean("haptic_brake_pulse", false);
-        config.hapticDoubleGapMs = xPrefs.getInt("haptic_double_gap_ms", 28);
-        config.hapticSlideEnabled = xPrefs.getBoolean("haptic_slide_enabled", true);
-        config.hapticSlideStrength = xPrefs.getInt("haptic_slide_strength", 100);
-        config.hapticSlideDurationMs = xPrefs.getInt("haptic_slide_duration_ms", 12);
-        config.hapticSlideMode = xPrefs.getInt("haptic_slide_mode", HAPTIC_MODE_STOCK);
-        config.hapticStockWaveSlide = xPrefs.getInt("haptic_stock_wave_slide", HAPTIC_STOCK_WAVE_MESH_NORMAL);
-        config.hapticSlideBrakePulse = xPrefs.getBoolean("haptic_slide_brake_pulse", false);
-        config.hapticSlideDoubleGapMs = xPrefs.getInt("haptic_slide_double_gap_ms", 28);
-        config.lastRealFodX = xPrefs.getFloat("last_real_fod_x", 0f);
-        config.lastRealFodY = xPrefs.getFloat("last_real_fod_y", 0f);
-        config.regionBlurRadius = xPrefs.getInt("region_blur_radius", 25);
-        config.iconSpacingOffset = xPrefs.getInt("icon_spacing_offset", 5);
-        config.bubblePaddingPercent = xPrefs.getInt("bubble_padding_percent", 0);
+        config.folderChildDirectionOffsetDeg = safeGetFloat(xPrefs, "folder_child_direction_offset_deg", 0f);
+        config.folderChildOrderMode = safeGetInt(xPrefs, "folder_child_order_mode", 0);
+        config.folderChildMinGapDp = safeGetInt(xPrefs, "folder_child_min_gap_dp", 8);
+        config.folderChildSizeScale = safeGetFloat(xPrefs, "folder_child_size_scale", 1f);
+        config.folderChildExpandAnimType = safeGetInt(xPrefs, "folder_child_expand_anim_type", FOLDER_CHILD_EXPAND_FAN_SPRING);
+        config.folderChildExpandDurationMs = safeGetInt(xPrefs, "folder_child_expand_duration_ms", 180);
+        config.folderChildExpandStaggerMs = safeGetInt(xPrefs, "folder_child_expand_stagger_ms", 15);
+        config.folderChildCollapseAnimType = safeGetInt(xPrefs, "folder_child_collapse_anim_type", FOLDER_CHILD_COLLAPSE_CENTER);
+        config.folderChildCollapseDurationMs = safeGetInt(xPrefs, "folder_child_collapse_duration_ms", 140);
+        config.folderChildCollapseStaggerMs = safeGetInt(xPrefs, "folder_child_collapse_stagger_ms", 0);
+        config.folderChildStartScale = safeGetFloat(xPrefs, "folder_child_start_scale", 0.1f);
+        config.folderChildOvershoot = safeGetFloat(xPrefs, "folder_child_overshoot", 1.2f);
+        config.maxScale = safeGetFloat(xPrefs, "max_scale", 1.60f);
+        config.influenceRadius = safeGetInt(xPrefs, "influence_radius", 70);
+        config.iconAlpha = safeGetFloat(xPrefs, "icon_alpha", 1.0f);
+        config.fisheyeZoomAlpha = safeGetFloat(xPrefs, "fisheye_zoom_alpha", 1.0f);
+        config.fisheyeOtherAlpha = safeGetFloat(xPrefs, "fisheye_other_alpha", 1.0f);
+        config.iconCornerRadius = safeGetInt(xPrefs, "icon_corner_radius", 50);
+        config.fullscreenBlurMaskAlpha = safeGetFloat(xPrefs, "fullscreen_blur_mask_alpha", 1.0f);
+        config.fullscreenDimAlpha = safeGetFloat(xPrefs, "fullscreen_dim_alpha", 0.45f);
+        config.headerDimAlpha = safeGetFloat(xPrefs, "header_dim_alpha", 0f);
+        config.regionDimAlpha = safeGetFloat(xPrefs, "region_dim_alpha", 0f);
+        config.bubbleDimAlpha = safeGetFloat(xPrefs, "bubble_dim_alpha", 0f);
+        config.showDelayMs = safeGetInt(xPrefs, "show_delay_ms", 500);
+        config.disableSystemEnterAnim = safeGetBoolean(xPrefs, "disable_system_enter_anim", false);
+        config.faceUnlockQuickOpen = safeGetBoolean(xPrefs, "face_unlock_quick_open", true);
+        config.bleUnlockQuickOpen = safeGetBoolean(xPrefs, "ble_unlock_quick_open", true);
+        config.hapticEnabled = safeGetBoolean(xPrefs, "haptic_enabled", true);
+        config.hapticStrength = safeGetInt(xPrefs, "haptic_strength", 140);
+        config.hapticDurationMs = safeGetInt(xPrefs, "haptic_duration_ms", 24);
+        config.hapticMode = safeGetInt(xPrefs, "haptic_mode", HAPTIC_MODE_STOCK);
+        config.hapticStockWaveExpand = safeGetInt(xPrefs, "haptic_stock_wave_expand", HAPTIC_STOCK_WAVE_LONG_PRESS);
+        config.hapticBrakePulse = safeGetBoolean(xPrefs, "haptic_brake_pulse", false);
+        config.hapticDoubleGapMs = safeGetInt(xPrefs, "haptic_double_gap_ms", 28);
+        config.hapticSlideEnabled = safeGetBoolean(xPrefs, "haptic_slide_enabled", true);
+        config.hapticSlideStrength = safeGetInt(xPrefs, "haptic_slide_strength", 100);
+        config.hapticSlideDurationMs = safeGetInt(xPrefs, "haptic_slide_duration_ms", 12);
+        config.hapticSlideMode = safeGetInt(xPrefs, "haptic_slide_mode", HAPTIC_MODE_STOCK);
+        config.hapticStockWaveSlide = safeGetInt(xPrefs, "haptic_stock_wave_slide", HAPTIC_STOCK_WAVE_MESH_NORMAL);
+        config.hapticSlideBrakePulse = safeGetBoolean(xPrefs, "haptic_slide_brake_pulse", false);
+        config.hapticSlideDoubleGapMs = safeGetInt(xPrefs, "haptic_slide_double_gap_ms", 28);
+        config.lastRealFodX = safeGetFloat(xPrefs, "last_real_fod_x", 0f);
+        config.lastRealFodY = safeGetFloat(xPrefs, "last_real_fod_y", 0f);
+        config.regionBlurRadius = safeGetInt(xPrefs, "region_blur_radius", 25);
+        config.iconSpacingOffset = safeGetInt(xPrefs, "icon_spacing_offset", 5);
+        config.bubblePaddingPercent = safeGetInt(xPrefs, "bubble_padding_percent", 0);
         config.showBubbleBg = xPrefs.contains("show_bubble_bg")
-                ? xPrefs.getBoolean("show_bubble_bg", false)
+                ? safeGetBoolean(xPrefs, "show_bubble_bg", false)
                 : (config.bubblePaddingPercent > 0);
-        config.bubbleBlurRadius = xPrefs.getInt("bubble_blur_radius", 25);
+        config.bubbleBlurRadius = safeGetInt(xPrefs, "bubble_blur_radius", 25);
         // 旧版 selected_icon_scale 折算迁移：峰值 maxScale × selectedIconScale 一次性合并进 maxScale
-        migrateLegacySelectedScale(config, xPrefs.getFloat("selected_icon_scale", 1.0f));
-        config.appIconCropMode = xPrefs.getInt("app_icon_crop_mode", CROP_ADAPTIVE_EXPAND);
-        config.glyphPadEnabled = xPrefs.getBoolean("glyph_pad_enabled", true);
-        config.glyphPadColor = xPrefs.getInt("glyph_pad_color", 0xFF2A82E4);
-        config.glyphPadMode = xPrefs.getInt("glyph_pad_mode", GLYPH_PAD_MODE_TRANSLUCENT);
+        migrateLegacySelectedScale(config, safeGetFloat(xPrefs, "selected_icon_scale", 1.0f));
+        config.appIconCropMode = safeGetInt(xPrefs, "app_icon_crop_mode", CROP_ADAPTIVE_EXPAND);
+        config.glyphPadEnabled = safeGetBoolean(xPrefs, "glyph_pad_enabled", true);
+        config.glyphPadColor = safeGetInt(xPrefs, "glyph_pad_color", 0xFF2A82E4);
+        config.glyphPadMode = safeGetInt(xPrefs, "glyph_pad_mode", GLYPH_PAD_MODE_TRANSLUCENT);
         config.iconGlowEffect = false;
 
-        config.glassPreset = xPrefs.getInt("glass_preset", GLASS_PRESET_DEFAULT);
-        config.glassRefractIor = xPrefs.getFloat("glass_refract_ior", 1.12f);
-        config.glassThickness = xPrefs.getFloat("glass_thickness", 1.5f);
-        config.glassSpecular = xPrefs.getFloat("glass_specular", 0.8f);
-        config.glassMatteAlpha = xPrefs.getFloat("glass_matte_alpha", 0.12f);
-        config.glassBorderLight = xPrefs.getFloat("glass_border_light", 0.45f);
-        config.glassBackgroundSaturation = xPrefs.getFloat("glass_background_saturation", 1.5f);
-        config.glassBackgroundBrightness = xPrefs.getFloat("glass_background_brightness", 0f);
-        config.glassBackgroundBurn = xPrefs.getFloat("glass_background_burn", 0f);
-        config.glassMatteWhiteMix = xPrefs.getFloat("glass_matte_white_mix", 0f);
-        config.glassMatteColorMix = xPrefs.getFloat("glass_matte_color_mix", 0.4f);
-        config.glassMatteColorPower = xPrefs.getFloat("glass_matte_color_power", 1.5f);
-        config.glassEdgeRange = xPrefs.getFloat("glass_edge_range", 50f);
-        config.glassEdgePower = xPrefs.getFloat("glass_edge_power", 4f);
-        config.glassReflectOffset = xPrefs.getFloat("glass_reflect_offset", 600f);
-        config.globalBlurRadius = xPrefs.getInt("global_blur_radius", 25);
-        config.globalDimAlpha = xPrefs.getFloat("global_dim_alpha", 0f);
-        config.bubbleMaterialFollowGlobal = xPrefs.getBoolean("bubble_material_follow_global", true);
-        config.regionMaterialFollowGlobal = xPrefs.getBoolean("region_material_follow_global", true);
-        config.headerMaterialFollowGlobal = xPrefs.getBoolean("header_material_follow_global", true);
-        config.bubbleGlassMatteAlpha = xPrefs.getFloat("bubble_glass_matte_alpha", 0.12f);
-        config.regionGlassMatteAlpha = xPrefs.getFloat("region_glass_matte_alpha", 0.12f);
-        config.headerGlassMatteAlpha = xPrefs.getFloat("header_glass_matte_alpha", 0.12f);
-        config.blurBaselineHealed = xPrefs.getBoolean("blur_baseline_healed", false);
+        config.glassPreset = safeGetInt(xPrefs, "glass_preset", GLASS_PRESET_DEFAULT);
+        config.glassRefractIor = safeGetFloat(xPrefs, "glass_refract_ior", 1.12f);
+        config.glassThickness = safeGetFloat(xPrefs, "glass_thickness", 1.5f);
+        config.glassSpecular = safeGetFloat(xPrefs, "glass_specular", 0.8f);
+        config.glassMatteAlpha = safeGetFloat(xPrefs, "glass_matte_alpha", 0.12f);
+        config.glassBorderLight = safeGetFloat(xPrefs, "glass_border_light", 0.45f);
+        config.glassBackgroundSaturation = safeGetFloat(xPrefs, "glass_background_saturation", 1.5f);
+        config.glassBackgroundBrightness = safeGetFloat(xPrefs, "glass_background_brightness", 0f);
+        config.glassBackgroundBurn = safeGetFloat(xPrefs, "glass_background_burn", 0f);
+        config.glassMatteWhiteMix = safeGetFloat(xPrefs, "glass_matte_white_mix", 0f);
+        config.glassMatteColorMix = safeGetFloat(xPrefs, "glass_matte_color_mix", 0.4f);
+        config.glassMatteColorPower = safeGetFloat(xPrefs, "glass_matte_color_power", 1.5f);
+        config.glassEdgeRange = safeGetFloat(xPrefs, "glass_edge_range", 50f);
+        config.glassEdgePower = safeGetFloat(xPrefs, "glass_edge_power", 4f);
+        config.glassReflectOffset = safeGetFloat(xPrefs, "glass_reflect_offset", 600f);
+        config.globalBlurRadius = safeGetInt(xPrefs, "global_blur_radius", 25);
+        config.globalDimAlpha = safeGetFloat(xPrefs, "global_dim_alpha", 0f);
+        config.bubbleMaterialFollowGlobal = safeGetBoolean(xPrefs, "bubble_material_follow_global", true);
+        config.regionMaterialFollowGlobal = safeGetBoolean(xPrefs, "region_material_follow_global", true);
+        config.headerMaterialFollowGlobal = safeGetBoolean(xPrefs, "header_material_follow_global", true);
+        config.bubbleGlassMatteAlpha = safeGetFloat(xPrefs, "bubble_glass_matte_alpha", 0.12f);
+        config.regionGlassMatteAlpha = safeGetFloat(xPrefs, "region_glass_matte_alpha", 0.12f);
+        config.headerGlassMatteAlpha = safeGetFloat(xPrefs, "header_glass_matte_alpha", 0.12f);
+        config.blurBaselineHealed = safeGetBoolean(xPrefs, "blur_baseline_healed", false);
 
         // 旧配置迁移
         if (!xPrefs.contains("global_blur_radius")) {
@@ -1035,7 +1053,7 @@ public class HyperOpenConfig {
         config.healBlurBaselineIfNeeded();
         adaptUnsupportedSoftGlass(config);
 
-        String jsonStr = xPrefs.getString("shortcuts_json", null);
+        String jsonStr = safeGetString(xPrefs, "shortcuts_json", null);
         config.shortcuts = parseShortcutsJson(jsonStr);
         return config;
     }
@@ -1047,143 +1065,143 @@ public class HyperOpenConfig {
         // Direct Boot：配置统一存 DE 存储（旧版 CE 数据由 DePrefs 一次性迁移）
         SharedPreferences sp = io.github.qmryqmm.hyperopen.util.DePrefs.get(context, PREF_NAME);
         HyperOpenConfig config = new HyperOpenConfig();
-        config.materialStyle = sp.getInt("material_style", MATERIAL_GAUSSIAN_BLUR);
-        config.uiStyle = sp.getInt("ui_style", UI_STYLE_MATERIAL);
-        config.themeMode = sp.getInt("theme_mode", THEME_FOLLOW_SYSTEM);
-        config.monetColors = sp.getBoolean("monet_colors", false);
-        config.barBlur = sp.getBoolean("bar_blur", true);
-        config.floatingNavBar = sp.getBoolean("floating_nav_bar", false);
-        config.predictiveBack = sp.getBoolean("predictive_back", true);
-        config.edgeBack = sp.getBoolean("edge_back", true);
-        config.pageSwitchGesture = sp.getInt("page_switch_gesture", PAGE_GESTURE_HORIZONTAL);
-        config.offsetY = sp.getInt("offset_y", 100);
-        config.regionDiameter = sp.getInt("region_diameter", 220);
-        config.showRegionBg = sp.getBoolean("show_region_bg", false);
-        config.showHeaderPillBg = sp.getBoolean("show_header_pill_bg", false);
-        config.showHeaderPill = sp.getBoolean("show_header_pill", true);
-        config.headerTopMargin = sp.getInt("header_top_margin", 100);
-        config.headerTitleSize = sp.getInt("header_title_size", 17);
-        config.headerSubtitleSize = sp.getInt("header_subtitle_size", 11);
-        config.headerBlurRadius = sp.getInt("header_blur_radius", 25);
-        config.headerTextCentered = sp.getBoolean("header_text_centered", true);
-        config.iconSize = sp.getInt("icon_size", 60);
-        config.maxIconCount = sp.getInt("max_icon_count", 0);
-        config.layoutStyle = sp.getInt("layout_style", LAYOUT_HONEYCOMB);
-        config.ringSectorMode = sp.getBoolean("ring_sector_mode", true);
-        config.sectorLineColor = sp.getInt("sector_line_color", 0xFFBFBFBF);
-        config.sectorLineAlpha = sp.getFloat("sector_line_alpha", 0.4f);
-        config.sectorDashLength = sp.getInt("sector_dash_length", 6);
-        config.sectorDashGap = sp.getInt("sector_dash_gap", 5);
-        config.sectorLineWidth = sp.getFloat("sector_line_width", 1.2f);
-        config.sectorHighlightEnabled = sp.getBoolean("sector_highlight_enabled", true);
-        config.animDurationMs = sp.getInt("anim_duration_ms", 320);
+        config.materialStyle = safeGetInt(sp, "material_style", MATERIAL_GAUSSIAN_BLUR);
+        config.uiStyle = safeGetInt(sp, "ui_style", UI_STYLE_MATERIAL);
+        config.themeMode = safeGetInt(sp, "theme_mode", THEME_FOLLOW_SYSTEM);
+        config.monetColors = safeGetBoolean(sp, "monet_colors", false);
+        config.barBlur = safeGetBoolean(sp, "bar_blur", true);
+        config.floatingNavBar = safeGetBoolean(sp, "floating_nav_bar", false);
+        config.predictiveBack = safeGetBoolean(sp, "predictive_back", true);
+        config.edgeBack = safeGetBoolean(sp, "edge_back", true);
+        config.pageSwitchGesture = safeGetInt(sp, "page_switch_gesture", PAGE_GESTURE_HORIZONTAL);
+        config.offsetY = safeGetInt(sp, "offset_y", 100);
+        config.regionDiameter = safeGetInt(sp, "region_diameter", 220);
+        config.showRegionBg = safeGetBoolean(sp, "show_region_bg", false);
+        config.showHeaderPillBg = safeGetBoolean(sp, "show_header_pill_bg", false);
+        config.showHeaderPill = safeGetBoolean(sp, "show_header_pill", true);
+        config.headerTopMargin = safeGetInt(sp, "header_top_margin", 100);
+        config.headerTitleSize = safeGetInt(sp, "header_title_size", 17);
+        config.headerSubtitleSize = safeGetInt(sp, "header_subtitle_size", 11);
+        config.headerBlurRadius = safeGetInt(sp, "header_blur_radius", 25);
+        config.headerTextCentered = safeGetBoolean(sp, "header_text_centered", true);
+        config.iconSize = safeGetInt(sp, "icon_size", 60);
+        config.maxIconCount = safeGetInt(sp, "max_icon_count", 0);
+        config.layoutStyle = safeGetInt(sp, "layout_style", LAYOUT_HONEYCOMB);
+        config.ringSectorMode = safeGetBoolean(sp, "ring_sector_mode", true);
+        config.sectorLineColor = safeGetInt(sp, "sector_line_color", 0xFFBFBFBF);
+        config.sectorLineAlpha = safeGetFloat(sp, "sector_line_alpha", 0.4f);
+        config.sectorDashLength = safeGetInt(sp, "sector_dash_length", 6);
+        config.sectorDashGap = safeGetInt(sp, "sector_dash_gap", 5);
+        config.sectorLineWidth = safeGetFloat(sp, "sector_line_width", 1.2f);
+        config.sectorHighlightEnabled = safeGetBoolean(sp, "sector_highlight_enabled", true);
+        config.animDurationMs = safeGetInt(sp, "anim_duration_ms", 320);
         config.panelExpandAnimType = normalizePanelExpandAnimType(
-                sp.getInt("panel_expand_anim_type", PANEL_EXPAND_BLOOM),
+                safeGetInt(sp, "panel_expand_anim_type", PANEL_EXPAND_BLOOM),
                 config.layoutStyle,
-                sp.getBoolean("stock_system_anim", true)
+                safeGetBoolean(sp, "stock_system_anim", true)
         );
-        config.panelExpandStaggerMs = sp.getInt("panel_expand_stagger_ms", 12);
-        config.dismissAnimEnabled = sp.getBoolean("dismiss_anim_enabled", true);
-        config.panelCollapseAnimType = sp.getInt("panel_collapse_anim_type", PANEL_COLLAPSE_SELECTED_POP);
-        config.panelCollapseDurationMs = sp.getInt("panel_collapse_duration_ms", 120);
-        config.panelCollapseStaggerMs = sp.getInt("panel_collapse_stagger_ms", 0);
-        config.panelSelectedPopScale = sp.getFloat("panel_selected_pop_scale", 1.30f);
-        config.globalHintColorMode = sp.getInt("global_hint_color_mode", HINT_COLOR_MODE_AUTO);
-        config.globalHintCustomColor = sp.getInt("global_hint_custom_color", 0xFFFFFFFF);
-        config.defaultHintTextStroke = sp.getInt("default_hint_text_stroke", 0);
-        config.defaultHintTextShadow = sp.getInt("default_hint_text_shadow", 0);
-        config.defaultHintTextWeight = sp.getInt("default_hint_text_weight", 3);
-        config.defaultHintTextLetterSpacing = sp.getFloat("default_hint_text_letter_spacing", 0f);
-        config.defaultShowHintTitle = sp.getBoolean("default_show_hint_title", true);
-        config.defaultShowHintSubtitle = sp.getBoolean("default_show_hint_subtitle", true);
-        config.folderHoverDelayMs = sp.getInt("folder_hover_delay_ms", 250);
-        config.stockSystemRegion = sp.getBoolean("stock_system_region", true);
-        config.folderChildDisplayRangeScale = sp.getFloat("folder_child_display_range_scale", 1f);
+        config.panelExpandStaggerMs = safeGetInt(sp, "panel_expand_stagger_ms", 12);
+        config.dismissAnimEnabled = safeGetBoolean(sp, "dismiss_anim_enabled", true);
+        config.panelCollapseAnimType = safeGetInt(sp, "panel_collapse_anim_type", PANEL_COLLAPSE_SELECTED_POP);
+        config.panelCollapseDurationMs = safeGetInt(sp, "panel_collapse_duration_ms", 120);
+        config.panelCollapseStaggerMs = safeGetInt(sp, "panel_collapse_stagger_ms", 0);
+        config.panelSelectedPopScale = safeGetFloat(sp, "panel_selected_pop_scale", 1.30f);
+        config.globalHintColorMode = safeGetInt(sp, "global_hint_color_mode", HINT_COLOR_MODE_AUTO);
+        config.globalHintCustomColor = safeGetInt(sp, "global_hint_custom_color", 0xFFFFFFFF);
+        config.defaultHintTextStroke = safeGetInt(sp, "default_hint_text_stroke", 0);
+        config.defaultHintTextShadow = safeGetInt(sp, "default_hint_text_shadow", 0);
+        config.defaultHintTextWeight = safeGetInt(sp, "default_hint_text_weight", 3);
+        config.defaultHintTextLetterSpacing = safeGetFloat(sp, "default_hint_text_letter_spacing", 0f);
+        config.defaultShowHintTitle = safeGetBoolean(sp, "default_show_hint_title", true);
+        config.defaultShowHintSubtitle = safeGetBoolean(sp, "default_show_hint_subtitle", true);
+        config.folderHoverDelayMs = safeGetInt(sp, "folder_hover_delay_ms", 250);
+        config.stockSystemRegion = safeGetBoolean(sp, "stock_system_region", true);
+        config.folderChildDisplayRangeScale = safeGetFloat(sp, "folder_child_display_range_scale", 1f);
         config.folderChildDirectionMode = normalizeFolderChildDirectionMode(
-                sp.getInt("folder_child_direction_mode", FOLDER_CHILD_DIRECTION_OUTWARD)
+                safeGetInt(sp, "folder_child_direction_mode", FOLDER_CHILD_DIRECTION_OUTWARD)
         );
-        config.folderChildDirectionOffsetDeg = sp.getFloat("folder_child_direction_offset_deg", 0f);
-        config.folderChildOrderMode = sp.getInt("folder_child_order_mode", 0);
-        config.folderChildMinGapDp = sp.getInt("folder_child_min_gap_dp", 8);
-        config.folderChildSizeScale = sp.getFloat("folder_child_size_scale", 1f);
-        config.folderChildExpandAnimType = sp.getInt("folder_child_expand_anim_type", FOLDER_CHILD_EXPAND_FAN_SPRING);
-        config.folderChildExpandDurationMs = sp.getInt("folder_child_expand_duration_ms", 180);
-        config.folderChildExpandStaggerMs = sp.getInt("folder_child_expand_stagger_ms", 15);
-        config.folderChildCollapseAnimType = sp.getInt("folder_child_collapse_anim_type", FOLDER_CHILD_COLLAPSE_CENTER);
-        config.folderChildCollapseDurationMs = sp.getInt("folder_child_collapse_duration_ms", 140);
-        config.folderChildCollapseStaggerMs = sp.getInt("folder_child_collapse_stagger_ms", 0);
-        config.folderChildStartScale = sp.getFloat("folder_child_start_scale", 0.1f);
-        config.folderChildOvershoot = sp.getFloat("folder_child_overshoot", 1.2f);
-        config.maxScale = sp.getFloat("max_scale", 1.60f);
-        config.influenceRadius = sp.getInt("influence_radius", 70);
-        config.iconAlpha = sp.getFloat("icon_alpha", 1.0f);
-        config.fisheyeZoomAlpha = sp.getFloat("fisheye_zoom_alpha", 1.0f);
-        config.fisheyeOtherAlpha = sp.getFloat("fisheye_other_alpha", 1.0f);
-        config.iconCornerRadius = sp.getInt("icon_corner_radius", 50);
-        config.fullscreenBlurMaskAlpha = sp.getFloat("fullscreen_blur_mask_alpha", 1.0f);
-        config.fullscreenDimAlpha = sp.getFloat("fullscreen_dim_alpha", 0.45f);
-        config.headerDimAlpha = sp.getFloat("header_dim_alpha", 0f);
-        config.regionDimAlpha = sp.getFloat("region_dim_alpha", 0f);
-        config.bubbleDimAlpha = sp.getFloat("bubble_dim_alpha", 0f);
-        config.showDelayMs = sp.getInt("show_delay_ms", 500);
-        config.disableSystemEnterAnim = sp.getBoolean("disable_system_enter_anim", false);
-        config.faceUnlockQuickOpen = sp.getBoolean("face_unlock_quick_open", true);
-        config.bleUnlockQuickOpen = sp.getBoolean("ble_unlock_quick_open", true);
-        config.hapticEnabled = sp.getBoolean("haptic_enabled", true);
-        config.hapticStrength = sp.getInt("haptic_strength", 140);
-        config.hapticDurationMs = sp.getInt("haptic_duration_ms", 24);
-        config.hapticMode = sp.getInt("haptic_mode", HAPTIC_MODE_STOCK);
-        config.hapticStockWaveExpand = sp.getInt("haptic_stock_wave_expand", HAPTIC_STOCK_WAVE_LONG_PRESS);
-        config.hapticBrakePulse = sp.getBoolean("haptic_brake_pulse", false);
-        config.hapticDoubleGapMs = sp.getInt("haptic_double_gap_ms", 28);
-        config.hapticSlideEnabled = sp.getBoolean("haptic_slide_enabled", true);
-        config.hapticSlideStrength = sp.getInt("haptic_slide_strength", 100);
-        config.hapticSlideDurationMs = sp.getInt("haptic_slide_duration_ms", 12);
-        config.hapticSlideMode = sp.getInt("haptic_slide_mode", HAPTIC_MODE_STOCK);
-        config.hapticStockWaveSlide = sp.getInt("haptic_stock_wave_slide", HAPTIC_STOCK_WAVE_MESH_NORMAL);
-        config.hapticSlideBrakePulse = sp.getBoolean("haptic_slide_brake_pulse", false);
-        config.hapticSlideDoubleGapMs = sp.getInt("haptic_slide_double_gap_ms", 28);
-        config.lastRealFodX = sp.getFloat("last_real_fod_x", 0f);
-        config.lastRealFodY = sp.getFloat("last_real_fod_y", 0f);
-        config.regionBlurRadius = sp.getInt("region_blur_radius", 25);
-        config.iconSpacingOffset = sp.getInt("icon_spacing_offset", 5);
-        config.bubblePaddingPercent = sp.getInt("bubble_padding_percent", 0);
+        config.folderChildDirectionOffsetDeg = safeGetFloat(sp, "folder_child_direction_offset_deg", 0f);
+        config.folderChildOrderMode = safeGetInt(sp, "folder_child_order_mode", 0);
+        config.folderChildMinGapDp = safeGetInt(sp, "folder_child_min_gap_dp", 8);
+        config.folderChildSizeScale = safeGetFloat(sp, "folder_child_size_scale", 1f);
+        config.folderChildExpandAnimType = safeGetInt(sp, "folder_child_expand_anim_type", FOLDER_CHILD_EXPAND_FAN_SPRING);
+        config.folderChildExpandDurationMs = safeGetInt(sp, "folder_child_expand_duration_ms", 180);
+        config.folderChildExpandStaggerMs = safeGetInt(sp, "folder_child_expand_stagger_ms", 15);
+        config.folderChildCollapseAnimType = safeGetInt(sp, "folder_child_collapse_anim_type", FOLDER_CHILD_COLLAPSE_CENTER);
+        config.folderChildCollapseDurationMs = safeGetInt(sp, "folder_child_collapse_duration_ms", 140);
+        config.folderChildCollapseStaggerMs = safeGetInt(sp, "folder_child_collapse_stagger_ms", 0);
+        config.folderChildStartScale = safeGetFloat(sp, "folder_child_start_scale", 0.1f);
+        config.folderChildOvershoot = safeGetFloat(sp, "folder_child_overshoot", 1.2f);
+        config.maxScale = safeGetFloat(sp, "max_scale", 1.60f);
+        config.influenceRadius = safeGetInt(sp, "influence_radius", 70);
+        config.iconAlpha = safeGetFloat(sp, "icon_alpha", 1.0f);
+        config.fisheyeZoomAlpha = safeGetFloat(sp, "fisheye_zoom_alpha", 1.0f);
+        config.fisheyeOtherAlpha = safeGetFloat(sp, "fisheye_other_alpha", 1.0f);
+        config.iconCornerRadius = safeGetInt(sp, "icon_corner_radius", 50);
+        config.fullscreenBlurMaskAlpha = safeGetFloat(sp, "fullscreen_blur_mask_alpha", 1.0f);
+        config.fullscreenDimAlpha = safeGetFloat(sp, "fullscreen_dim_alpha", 0.45f);
+        config.headerDimAlpha = safeGetFloat(sp, "header_dim_alpha", 0f);
+        config.regionDimAlpha = safeGetFloat(sp, "region_dim_alpha", 0f);
+        config.bubbleDimAlpha = safeGetFloat(sp, "bubble_dim_alpha", 0f);
+        config.showDelayMs = safeGetInt(sp, "show_delay_ms", 500);
+        config.disableSystemEnterAnim = safeGetBoolean(sp, "disable_system_enter_anim", false);
+        config.faceUnlockQuickOpen = safeGetBoolean(sp, "face_unlock_quick_open", true);
+        config.bleUnlockQuickOpen = safeGetBoolean(sp, "ble_unlock_quick_open", true);
+        config.hapticEnabled = safeGetBoolean(sp, "haptic_enabled", true);
+        config.hapticStrength = safeGetInt(sp, "haptic_strength", 140);
+        config.hapticDurationMs = safeGetInt(sp, "haptic_duration_ms", 24);
+        config.hapticMode = safeGetInt(sp, "haptic_mode", HAPTIC_MODE_STOCK);
+        config.hapticStockWaveExpand = safeGetInt(sp, "haptic_stock_wave_expand", HAPTIC_STOCK_WAVE_LONG_PRESS);
+        config.hapticBrakePulse = safeGetBoolean(sp, "haptic_brake_pulse", false);
+        config.hapticDoubleGapMs = safeGetInt(sp, "haptic_double_gap_ms", 28);
+        config.hapticSlideEnabled = safeGetBoolean(sp, "haptic_slide_enabled", true);
+        config.hapticSlideStrength = safeGetInt(sp, "haptic_slide_strength", 100);
+        config.hapticSlideDurationMs = safeGetInt(sp, "haptic_slide_duration_ms", 12);
+        config.hapticSlideMode = safeGetInt(sp, "haptic_slide_mode", HAPTIC_MODE_STOCK);
+        config.hapticStockWaveSlide = safeGetInt(sp, "haptic_stock_wave_slide", HAPTIC_STOCK_WAVE_MESH_NORMAL);
+        config.hapticSlideBrakePulse = safeGetBoolean(sp, "haptic_slide_brake_pulse", false);
+        config.hapticSlideDoubleGapMs = safeGetInt(sp, "haptic_slide_double_gap_ms", 28);
+        config.lastRealFodX = safeGetFloat(sp, "last_real_fod_x", 0f);
+        config.lastRealFodY = safeGetFloat(sp, "last_real_fod_y", 0f);
+        config.regionBlurRadius = safeGetInt(sp, "region_blur_radius", 25);
+        config.iconSpacingOffset = safeGetInt(sp, "icon_spacing_offset", 5);
+        config.bubblePaddingPercent = safeGetInt(sp, "bubble_padding_percent", 0);
         config.showBubbleBg = sp.contains("show_bubble_bg")
-                ? sp.getBoolean("show_bubble_bg", false)
+                ? safeGetBoolean(sp, "show_bubble_bg", false)
                 : (config.bubblePaddingPercent > 0);
-        config.bubbleBlurRadius = sp.getInt("bubble_blur_radius", 25);
+        config.bubbleBlurRadius = safeGetInt(sp, "bubble_blur_radius", 25);
         // 旧版 selected_icon_scale 折算迁移：峰值 maxScale × selectedIconScale 一次性合并进 maxScale
-        migrateLegacySelectedScale(config, sp.getFloat("selected_icon_scale", 1.0f));
-        config.appIconCropMode = sp.getInt("app_icon_crop_mode", CROP_ADAPTIVE_EXPAND);
-        config.glyphPadEnabled = sp.getBoolean("glyph_pad_enabled", true);
-        config.glyphPadColor = sp.getInt("glyph_pad_color", 0xFF2A82E4);
-        config.glyphPadMode = sp.getInt("glyph_pad_mode", GLYPH_PAD_MODE_TRANSLUCENT);
+        migrateLegacySelectedScale(config, safeGetFloat(sp, "selected_icon_scale", 1.0f));
+        config.appIconCropMode = safeGetInt(sp, "app_icon_crop_mode", CROP_ADAPTIVE_EXPAND);
+        config.glyphPadEnabled = safeGetBoolean(sp, "glyph_pad_enabled", true);
+        config.glyphPadColor = safeGetInt(sp, "glyph_pad_color", 0xFF2A82E4);
+        config.glyphPadMode = safeGetInt(sp, "glyph_pad_mode", GLYPH_PAD_MODE_TRANSLUCENT);
         config.iconGlowEffect = false;
 
-        config.glassPreset = sp.getInt("glass_preset", GLASS_PRESET_DEFAULT);
-        config.glassRefractIor = sp.getFloat("glass_refract_ior", 1.12f);
-        config.glassThickness = sp.getFloat("glass_thickness", 1.5f);
-        config.glassSpecular = sp.getFloat("glass_specular", 0.8f);
-        config.glassMatteAlpha = sp.getFloat("glass_matte_alpha", 0.12f);
-        config.glassBorderLight = sp.getFloat("glass_border_light", 0.45f);
-        config.glassBackgroundSaturation = sp.getFloat("glass_background_saturation", 1.5f);
-        config.glassBackgroundBrightness = sp.getFloat("glass_background_brightness", 0f);
-        config.glassBackgroundBurn = sp.getFloat("glass_background_burn", 0f);
-        config.glassMatteWhiteMix = sp.getFloat("glass_matte_white_mix", 0f);
-        config.glassMatteColorMix = sp.getFloat("glass_matte_color_mix", 0.4f);
-        config.glassMatteColorPower = sp.getFloat("glass_matte_color_power", 1.5f);
-        config.glassEdgeRange = sp.getFloat("glass_edge_range", 50f);
-        config.glassEdgePower = sp.getFloat("glass_edge_power", 4f);
-        config.glassReflectOffset = sp.getFloat("glass_reflect_offset", 600f);
-        config.globalBlurRadius = sp.getInt("global_blur_radius", 25);
-        config.globalDimAlpha = sp.getFloat("global_dim_alpha", 0f);
-        config.bubbleMaterialFollowGlobal = sp.getBoolean("bubble_material_follow_global", true);
-        config.regionMaterialFollowGlobal = sp.getBoolean("region_material_follow_global", true);
-        config.headerMaterialFollowGlobal = sp.getBoolean("header_material_follow_global", true);
-        config.bubbleGlassMatteAlpha = sp.getFloat("bubble_glass_matte_alpha", 0.12f);
-        config.regionGlassMatteAlpha = sp.getFloat("region_glass_matte_alpha", 0.12f);
-        config.headerGlassMatteAlpha = sp.getFloat("header_glass_matte_alpha", 0.12f);
-        config.blurBaselineHealed = sp.getBoolean("blur_baseline_healed", false);
+        config.glassPreset = safeGetInt(sp, "glass_preset", GLASS_PRESET_DEFAULT);
+        config.glassRefractIor = safeGetFloat(sp, "glass_refract_ior", 1.12f);
+        config.glassThickness = safeGetFloat(sp, "glass_thickness", 1.5f);
+        config.glassSpecular = safeGetFloat(sp, "glass_specular", 0.8f);
+        config.glassMatteAlpha = safeGetFloat(sp, "glass_matte_alpha", 0.12f);
+        config.glassBorderLight = safeGetFloat(sp, "glass_border_light", 0.45f);
+        config.glassBackgroundSaturation = safeGetFloat(sp, "glass_background_saturation", 1.5f);
+        config.glassBackgroundBrightness = safeGetFloat(sp, "glass_background_brightness", 0f);
+        config.glassBackgroundBurn = safeGetFloat(sp, "glass_background_burn", 0f);
+        config.glassMatteWhiteMix = safeGetFloat(sp, "glass_matte_white_mix", 0f);
+        config.glassMatteColorMix = safeGetFloat(sp, "glass_matte_color_mix", 0.4f);
+        config.glassMatteColorPower = safeGetFloat(sp, "glass_matte_color_power", 1.5f);
+        config.glassEdgeRange = safeGetFloat(sp, "glass_edge_range", 50f);
+        config.glassEdgePower = safeGetFloat(sp, "glass_edge_power", 4f);
+        config.glassReflectOffset = safeGetFloat(sp, "glass_reflect_offset", 600f);
+        config.globalBlurRadius = safeGetInt(sp, "global_blur_radius", 25);
+        config.globalDimAlpha = safeGetFloat(sp, "global_dim_alpha", 0f);
+        config.bubbleMaterialFollowGlobal = safeGetBoolean(sp, "bubble_material_follow_global", true);
+        config.regionMaterialFollowGlobal = safeGetBoolean(sp, "region_material_follow_global", true);
+        config.headerMaterialFollowGlobal = safeGetBoolean(sp, "header_material_follow_global", true);
+        config.bubbleGlassMatteAlpha = safeGetFloat(sp, "bubble_glass_matte_alpha", 0.12f);
+        config.regionGlassMatteAlpha = safeGetFloat(sp, "region_glass_matte_alpha", 0.12f);
+        config.headerGlassMatteAlpha = safeGetFloat(sp, "header_glass_matte_alpha", 0.12f);
+        config.blurBaselineHealed = safeGetBoolean(sp, "blur_baseline_healed", false);
 
         // 旧配置迁移：global_blur_radius key 不存在 = v0.50 时代旧配置
         if (!sp.contains("global_blur_radius")) {
@@ -1192,9 +1210,60 @@ public class HyperOpenConfig {
         config.healBlurBaselineIfNeeded();
         adaptUnsupportedSoftGlass(config);
 
-        String jsonStr = sp.getString("shortcuts_json", null);
+        String jsonStr = safeGetString(sp, "shortcuts_json", null);
         config.shortcuts = parseShortcutsJson(jsonStr);
         return config;
+    }
+
+    private static int safeGetInt(SharedPreferences sp, String key, int def) {
+        try {
+            return sp.getInt(key, def);
+        } catch (ClassCastException e) {
+            Log.w(TAG, "读取整型配置类型不匹配，回退默认值: key=" + key, e);
+            return def;
+        }
+    }
+
+    private static float safeGetFloat(SharedPreferences sp, String key, float def) {
+        try {
+            float v = sp.getFloat(key, def);
+            if (Float.isNaN(v) || Float.isInfinite(v)) {
+                Log.w(TAG, "读取浮点配置出现非法值(NaN/Inf)，回退默认值: key=" + key);
+                return def;
+            }
+            return v;
+        } catch (ClassCastException e) {
+            Log.w(TAG, "读取浮点配置类型不匹配，回退默认值: key=" + key, e);
+            return def;
+        }
+    }
+
+    private static boolean safeGetBoolean(SharedPreferences sp, String key, boolean def) {
+        try {
+            return sp.getBoolean(key, def);
+        } catch (ClassCastException e) {
+            Log.w(TAG, "读取布尔配置类型不匹配，回退默认值: key=" + key, e);
+            return def;
+        }
+    }
+
+    @SuppressWarnings("unused")
+    private static long safeGetLong(SharedPreferences sp, String key, long def) {
+        try {
+            return sp.getLong(key, def);
+        } catch (ClassCastException e) {
+            Log.w(TAG, "读取长整型配置类型不匹配，回退默认值: key=" + key, e);
+            return def;
+        }
+    }
+
+    private static String safeGetString(SharedPreferences sp, String key, String def) {
+        try {
+            return sp.getString(key, def);
+        } catch (ClassCastException e) {
+            Log.w(TAG, "读取字符串配置类型不匹配，回退默认值: key=" + key, e);
+            return def;
+        }
     }
 
     /**
@@ -1525,8 +1594,13 @@ public class HyperOpenConfig {
      * 保存配置 (支持全局只读分享给 SystemUI + 实时广播通知)
      */
     public void save(Context context) {
+        if (context == null) {
+            return;
+        }
         // Direct Boot：配置统一存 DE 存储
-        SharedPreferences sp = io.github.qmryqmm.hyperopen.util.DePrefs.get(context, PREF_NAME);
+        final Context appCtx = context.getApplicationContext() != null
+                ? context.getApplicationContext() : context;
+        final SharedPreferences sp = io.github.qmryqmm.hyperopen.util.DePrefs.get(appCtx, PREF_NAME);
         sp.edit()
             .putInt("material_style", materialStyle)
             .putInt("ui_style", uiStyle)
@@ -1662,15 +1736,19 @@ public class HyperOpenConfig {
             .putString("shortcuts_json", serializeShortcutsJson(shortcuts))
             .apply();
 
-        // 开放 DE 目录与文件可读权限，为 XSharedPreferences 回退提供支持
-        io.github.qmryqmm.hyperopen.util.DePrefs.applyWorldReadable(context, PREF_NAME);
-
-        // 发送广播通知 SystemUI 实时热重载配置
-        try {
-            android.content.Intent intent = new android.content.Intent(ACTION_CONFIG_CHANGED);
-            intent.setPackage("com.android.systemui");
-            context.sendBroadcast(intent);
-        } catch (Throwable ignored) {}
+        // 在后台单线程串行执行器上等待 SharedPreferencesImpl 完成写盘（经写锁屏障），
+        // 再恢复 DE 只读权限并通知 SystemUI，避免 apply() 异步落盘把文件权重置回 0660。
+        SAVE_IO_EXECUTOR.execute(() -> {
+            try {
+                sp.edit().commit();
+                io.github.qmryqmm.hyperopen.util.DePrefs.applyWorldReadable(appCtx, PREF_NAME);
+                android.content.Intent intent = new android.content.Intent(ACTION_CONFIG_CHANGED);
+                intent.setPackage("com.android.systemui");
+                appCtx.sendBroadcast(intent);
+            } catch (Throwable t) {
+                Log.w(TAG, "异步落盘或广播配置失败", t);
+            }
+        });
     }
 
     public static List<ShortcutItem> parseShortcutsJson(String jsonStr) {

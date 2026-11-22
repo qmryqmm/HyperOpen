@@ -392,9 +392,8 @@ public class HyperOSMaterialFactory {
             return null;
         }
 
-        private static void ensureInit() {
+        private static synchronized void ensureInit() {
             if (sInitialized) return;
-            sInitialized = true;
             try {
                 Class<?> viewClass = View.class;
                 sSetMiGlassMethod = findMethod(viewClass, "setMiGlass", float[].class);
@@ -420,11 +419,11 @@ public class HyperOSMaterialFactory {
                     sRemoveTextureViewMethod = findMethod(viewRootClass, "removeTextureView", View.class);
                 }
 
-                boolean bionicProp = true;
+                boolean bionicProp = false;
                 try {
                     Class<?> spClass = Class.forName("android.os.SystemProperties");
                     Method getBool = spClass.getMethod("getBoolean", String.class, boolean.class);
-                    bionicProp = Boolean.TRUE.equals(getBool.invoke(null, "persist.sys.bionic_material_supported", true));
+                    bionicProp = Boolean.TRUE.equals(getBool.invoke(null, "persist.sys.bionic_material_supported", false));
                 } catch (Throwable ignored) {}
 
                 sSupported = sSetMiGlassMethod != null
@@ -439,6 +438,8 @@ public class HyperOSMaterialFactory {
                     && bionicProp;
             } catch (Throwable t) {
                 sSupported = false;
+            } finally {
+                sInitialized = true;
             }
         }
 

@@ -1,24 +1,31 @@
 package io.github.qmryqmm.hyperopen.model;
 
+import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.LauncherActivityInfo;
+import android.content.pm.LauncherApps;
 import android.graphics.Color;
+import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.UserHandle;
 import android.util.Log;
 import android.widget.Toast;
 
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.DataOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import io.github.qmryqmm.hyperopen.util.IpcExecutor;
 
@@ -372,7 +379,7 @@ public class ShortcutItem {
     public void executeAsync(final Context context) {
         if (context == null) return;
         final Context appCtx = context.getApplicationContext() != null ? context.getApplicationContext() : context;
-        IpcExecutor.runAsync(new Runnable() {
+        IpcExecutor.runShortcutAsync(new Runnable() {
             @Override
             public void run() {
                 execute(appCtx);
@@ -388,7 +395,12 @@ public class ShortcutItem {
         try {
             switch (actionType) {
                 case ACTION_APP: {
-                    Intent intent = context.getPackageManager().getLaunchIntentForPackage(actionPayload);
+                    String pkg = actionPayload != null ? actionPayload.trim() : "";
+                    if (pkg.isEmpty()) {
+                        showToast(context, "未指定目标应用包名");
+                        break;
+                    }
+                    Intent intent = context.getPackageManager().getLaunchIntentForPackage(pkg);
                     if (intent != null) {
                         if (userId > 0) {
                             // 编辑界面「启动用户」指定了跨用户（如 999 应用双开/分身）
@@ -397,12 +409,18 @@ public class ShortcutItem {
                         }
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
                         context.startActivity(intent);
+                    } else if (userId > 0) {
+                        launchDualAppFallback(context, pkg, userId);
                     } else {
                         showToast(context, "未找到目标应用: " + actionPayload);
                     }
                     break;
                 }
                 case ACTION_INTENT_URI: {
+                    if (actionPayload == null || actionPayload.trim().isEmpty()) {
+                        showToast(context, "Intent URI 为空");
+                        break;
+                    }
                     // 最终目标用户提到 try 外：失败兜底时要据此禁止回落主空间应用
                     int targetUser = userId > 0 ? userId : -1;
                     try {
@@ -463,10 +481,13 @@ public class ShortcutItem {
                             break;
                         }
                         String cmd = "am start " + (userId > 0 ? "--user " + userId + " " : "")
-                                + "-n " + cn.flattenToString();
+                                + "-n " + quoteForSh(cn.flattenToString());
                         runRootCommand(context, cmd);
                     } else {
                         Intent intent = spec.buildIntent();
+                        if (!(context instanceof Activity)) {
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        }
                         if (userId > 0) {
                             launchAsUser(context, intent, userId);
                         } else {
@@ -696,12 +717,7 @@ public class ShortcutItem {
      * 仅限 ownApp 调用——SystemUI 进程 su 授权弹窗不可见会挂起，那里必须走异步桥接。
      */
     private static boolean runRootCommandSync(String cmd, long timeoutMs) {
-        // 先尝试 su -mm，若不支持或执行失败则降级到普通 su
-        boolean ok = executeShellProcess("su -mm", cmd, timeoutMs);
-        if (!ok) {
-            ok = executeShellProcess("su", cmd, timeoutMs);
-        }
-        return ok;
+        return executeShellProcess(resolveSuBinary(), cmd, timeoutMs);
     }
 
     /** 读取当前勿扰过滤器；被权限拒绝等异常时返回 -1 */
@@ -755,6 +771,7 @@ public class ShortcutItem {
 
     private static volatile boolean isFlashlightOn = false;
     private static volatile boolean torchCallbackRegistered = false;
+    private static volatile String targetTorchCameraId;
 
     private static synchronized void ensureTorchCallback(CameraManager cm) {
         if (torchCallbackRegistered || cm == null) return;
@@ -762,11 +779,19 @@ public class ShortcutItem {
             cm.registerTorchCallback(new CameraManager.TorchCallback() {
                 @Override
                 public void onTorchModeChanged(String cameraId, boolean enabled) {
+                    String target = targetTorchCameraId;
+                    if (target != null && !target.equals(cameraId)) {
+                        return;
+                    }
                     isFlashlightOn = enabled;
                 }
 
                 @Override
                 public void onTorchModeUnavailable(String cameraId) {
+                    String target = targetTorchCameraId;
+                    if (target != null && !target.equals(cameraId)) {
+                        return;
+                    }
                     isFlashlightOn = false;
                 }
             }, new Handler(Looper.getMainLooper()));
@@ -776,14 +801,44 @@ public class ShortcutItem {
         }
     }
 
+    private static String resolveTorchCameraId(CameraManager cm) {
+        try {
+            String[] cameraIdList = cm.getCameraIdList();
+            if (cameraIdList == null || cameraIdList.length == 0) {
+                return null;
+            }
+            String anyFlashCamera = null;
+            for (String id : cameraIdList) {
+                try {
+                    CameraCharacteristics chars = cm.getCameraCharacteristics(id);
+                    Boolean hasFlash = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                    if (!Boolean.TRUE.equals(hasFlash)) {
+                        continue;
+                    }
+                    if (anyFlashCamera == null) {
+                        anyFlashCamera = id;
+                    }
+                    Integer facing = chars.get(CameraCharacteristics.LENS_FACING);
+                    if (facing != null && facing == CameraCharacteristics.LENS_FACING_BACK) {
+                        return id;
+                    }
+                } catch (Throwable ignored) {}
+            }
+            return anyFlashCamera != null ? anyFlashCamera : cameraIdList[0];
+        } catch (Throwable t) {
+            Log.w(TAG, "解析手电筒目标镜头失败", t);
+            return null;
+        }
+    }
+
     private static void toggleFlashlight(Context context) {
         try {
             CameraManager cm = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
             if (cm != null) {
-                ensureTorchCallback(cm);
-                String[] cameraIdList = cm.getCameraIdList();
-                if (cameraIdList.length > 0) {
-                    String cameraId = cameraIdList[0];
+                String cameraId = resolveTorchCameraId(cm);
+                if (cameraId != null) {
+                    targetTorchCameraId = cameraId;
+                    ensureTorchCallback(cm);
                     boolean nextState = !isFlashlightOn;
                     cm.setTorchMode(cameraId, nextState);
                     isFlashlightOn = nextState;
@@ -792,6 +847,45 @@ public class ShortcutItem {
         } catch (Throwable t) {
             Log.e(TAG, "切换手电筒状态失败", t);
         }
+    }
+
+    private static void launchDualAppFallback(Context context, String pkg, int userId) {
+        if (android.os.Build.VERSION.SDK_INT >= 21) {
+            try {
+                LauncherApps la = (LauncherApps) context.getSystemService(Context.LAUNCHER_APPS_SERVICE);
+                if (la != null) {
+                    UserHandle target = UserHandle.getUserHandleForUid(userId * 100000);
+                    List<LauncherActivityInfo> activities = la.getActivityList(pkg, target);
+                    if (activities != null && !activities.isEmpty()) {
+                        ComponentName comp = activities.get(0).getComponentName();
+                        try {
+                            la.startMainActivity(comp, target, null, null);
+                            return;
+                        } catch (Throwable t) {
+                            Log.w(TAG, "LauncherApps.startMainActivity 启动双开失败，改走 launchAsUser: " + comp, t);
+                        }
+                        Intent fallbackIntent = new Intent(Intent.ACTION_MAIN);
+                        fallbackIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+                        fallbackIntent.setComponent(comp);
+                        fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                        launchAsUser(context, fallbackIntent, userId);
+                        return;
+                    }
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "LauncherApps 解析双开应用失败: pkg=" + pkg + ", user=" + userId, t);
+            }
+        }
+        String quotedPkg = quoteForSh(pkg);
+        String cmd = "comp=$(cmd package resolve-activity --user " + userId
+                + " --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "
+                + quotedPkg + " 2>/dev/null | tail -n 1); "
+                + "if [ -n \"$comp\" ] && [ \"$comp\" != \"No activity found\" ]; then "
+                + "am start --user " + userId + " -n \"$comp\"; "
+                + "else am start --user " + userId
+                + " -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "
+                + quotedPkg + "; fi";
+        runRootCommand(context, cmd);
     }
 
     /**
@@ -880,9 +974,10 @@ public class ShortcutItem {
         }
     }
 
-    /** 用双引号包裹并转义，避免 Intent URI 中的分号被 sh 截断识别为命令分隔符 */
+    /** POSIX 单引号安全转义：包裹为 '...' 并转义内部单引号 */
     private static String quoteForSh(String s) {
-        return "\"" + s.replace("\"", "\\\"") + "\"";
+        if (s == null) return "''";
+        return "'" + s.replace("'", "'\\''") + "'";
     }
 
     private static void runRootAmStart(Context context, String payload) {
@@ -949,16 +1044,56 @@ public class ShortcutItem {
         }
     }
 
+    private static volatile String cachedSuBinary;
+
+    private static String resolveSuBinary() {
+        String cached = cachedSuBinary;
+        if (cached != null) {
+            return cached;
+        }
+        synchronized (ShortcutItem.class) {
+            if (cachedSuBinary != null) {
+                return cachedSuBinary;
+            }
+            boolean mmSupported = probeSuMountMaster();
+            cachedSuBinary = mmSupported ? "su -mm" : "su";
+            Log.i(TAG, "su 探测完成，选定入口: " + cachedSuBinary);
+            return cachedSuBinary;
+        }
+    }
+
+    private static boolean probeSuMountMaster() {
+        Process p = null;
+        try {
+            p = Runtime.getRuntime().exec(new String[]{"su", "-mm", "-c", "true"});
+            final InputStream in = p.getInputStream();
+            final InputStream err = p.getErrorStream();
+            Thread drainIn = new Thread(() -> drainStream(in), "HyperOpen-SuProbeIn");
+            Thread drainErr = new Thread(() -> drainStream(err), "HyperOpen-SuProbeErr");
+            drainIn.setDaemon(true);
+            drainErr.setDaemon(true);
+            drainIn.start();
+            drainErr.start();
+            if (!p.waitFor(3000L, TimeUnit.MILLISECONDS)) {
+                p.destroyForcibly();
+                return false;
+            }
+            return p.exitValue() == 0;
+        } catch (Throwable ignored) {
+            return false;
+        } finally {
+            if (p != null) {
+                try { p.destroy(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
     private static void runShellBinary(String shell, String cmd) {
         // 走独立的守护线程执行，绝不霸占 IpcExecutor 单线程 HandlerThread 造成 SystemUI IPC 阻塞
         Thread runner = new Thread(() -> {
             try {
                 if ("su".equals(shell)) {
-                    // 优化执行：对于 root 命令，优先以 su -mm 执行，失败则无缝降级到普通 su
-                    boolean ok = executeShellProcess("su -mm", cmd, 15000L);
-                    if (!ok) {
-                        executeShellProcess("su", cmd, 15000L);
-                    }
+                    executeShellProcess(resolveSuBinary(), cmd, 15000L);
                 } else {
                     executeShellProcess(shell, cmd, 15000L);
                 }
@@ -972,7 +1107,7 @@ public class ShortcutItem {
 
     private static boolean executeShellProcess(String shellBin, String cmd, long timeoutMs) {
         Process p = null;
-        DataOutputStream os = null;
+        OutputStream os = null;
         try {
             p = Runtime.getRuntime().exec(shellBin);
             final InputStream in = p.getInputStream();
@@ -984,13 +1119,13 @@ public class ShortcutItem {
             drainIn.start();
             drainErr.start();
 
-            os = new DataOutputStream(p.getOutputStream());
-            os.writeBytes(cmd + "\nexit\n");
+            os = p.getOutputStream();
+            os.write((cmd + "\nexit\n").getBytes(StandardCharsets.UTF_8));
             os.flush();
             os.close();
             os = null;
 
-            boolean finished = p.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+            boolean finished = p.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
             if (!finished) {
                 Log.w(TAG, shellBin + " 命令执行超时(" + timeoutMs + "ms): " + cmd);
                 p.destroyForcibly();

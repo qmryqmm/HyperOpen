@@ -45,9 +45,6 @@ public class HyperOpenHook {
     /** 宿主 View 上的附加字段：attach 状态监听器（卸载时摘除） */
     private static final String FIELD_ATTACH_LISTENER = "hyperOpenAttachListener";
 
-    /** MiuiGxzwQuickOpenView$1 (mShowRunnable) 上的附加字段：标记「这是展开面板的 Runnable」 */
-    private static final String FIELD_SHOW_RUNNABLE = "hyperOpenShowRunnable";
-
     /** 本模块在展开时为窗口追加的 flag */
     private static final int OUR_WINDOW_FLAGS =
         WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_BLUR_BEHIND;
@@ -85,17 +82,6 @@ public class HyperOpenHook {
 
     /** 缓存 MiuiGxzwUtils Class 引用，避免每次展开反射查找 */
     private static volatile Class<?> cachedGxzwUtilsClass;
-
-    /**
-     * 缓存「系统快捷面板弹出 Runnable」(MiuiGxzwQuickOpenView$1, $r8$classId=0) 的 Class 引用。
-     *
-     * 系统机制（逆向自系统界面_17.03.260226.r.apk 的 MiuiGxzwManager#dismissGxzwView）：
-     *   指纹解锁成功后松手，若满足 fod_quick_open 开关等条件，会执行
-     *   {@code mHandler.postDelayed(mShowRunnable, 500L | 1000L)} 再唤出快捷面板。
-     *   本模块 Hook android.os.Handler#postDelayed，动态替换该 Runnable 的延迟，
-     *   从而实现「指纹解锁后进入快捷方式的等待时间」可调。
-     */
-    private static volatile Class<?> cachedShowRunnableClass;
 
     /**
      * 缓存 BlurUtils#applyBlur 的跨版本兼容解析结果。
@@ -161,37 +147,9 @@ public class HyperOpenHook {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     if (!active) return;
-                    FrameLayout view = (FrameLayout) param.thisObject;
-                    Context context = view.getContext();
-
-                    // 仅读进程内缓存（首轮以 XSharedPreferences 本地文件兜底），不做跨进程调用；
-                    // 最新配置由后台线程异步拉取后再推送进来。
-                    HyperOpenConfig config = HyperOpenConfig.getCached();
-                    final CustomHyperOpenContainer container = new CustomHyperOpenContainer(context, config, cl);
-                    container.setTag(CONTAINER_TAG);
-                    container.setVisibility(View.GONE);
-
-                    FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
-                    );
-                    view.addView(container, lp);
-                    XposedHelpers.setAdditionalInstanceField(view, "customContainer", container);
-                    rememberHost(view);
-
-                    // 标记系统 mShowRunnable，供 Handler#postDelayed 拦截器精准识别展开任务
-                    markShowRunnable(view);
-
-                    // 宿主窗口被移除（息屏、锁屏重建、指纹图层销毁等）时立刻复位，
-                    // 绝不让 VISIBLE 容器 / 追加的窗口 flag 残留到下一次 attach。
-                    armDetachReset(view);
-
-                    // 注册配置实时更新与息屏复位广播监听（进程级，只注册一次）
-                    ensureProcessReceivers(context);
-
-                    // 后台异步预取最新配置
-                    HyperOpenConfig.refreshAsync(context);
-
-                    Log.i(TAG, "已成功向 MiuiGxzwQuickOpenView 注入 CustomHyperOpenContainer！");
+                    if (param.thisObject instanceof FrameLayout) {
+                        attachToHostViewIfNeeded((FrameLayout) param.thisObject, cl);
+                    }
                 }
             }));
 
@@ -395,17 +353,6 @@ public class HyperOpenHook {
                 record(XposedHelpers.findAndHookMethod(quickOpenViewClass, "dismiss", dismissResetHook));
             }
 
-            // Hook onConfigurationChanged：当系统主题、深浅色模式或显示缩放变化时，及时清空图标缓存
-            try {
-                record(XposedHelpers.findAndHookMethod(quickOpenViewClass, "onConfigurationChanged",
-                    android.content.res.Configuration.class, new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                            io.github.qmryqmm.hyperopen.view.IconGlyphFactory.clearCache();
-                        }
-                    }));
-            } catch (Throwable ignored) {}
-
             Log.i(TAG, "已成功安装 MiuiGxzwQuickOpenView 核心生命周期接管 Hook！");
 
         } catch (Throwable t) {
@@ -504,58 +451,75 @@ public class HyperOpenHook {
             Log.e(TAG, "Hook MiuiGxzwIconView$2 失败", t);
         }
 
-        // 5. Hook android.os.Handler#postDelayed：
-        //    拦截系统在指纹解锁后调度 mShowRunnable 唤出快捷面板的延迟，替换为用户设定的等待阈值
+        // 5. Hook com.miui.keyguard.biometrics.fod.MiuiGxzwManager#dismissGxzwView()：
+        //    局部接管 mShowRunnable 的调度延迟（避免全局 Hook android.os.Handler#postDelayed 带来全进程性能开销）。
+        //    仅当本次 dismissGxzwView() 使 mShowed 由 false 变为 true 且用户设置了非默认 500ms 延迟时，
+        //    重新调度 QuickOpenView.mHandler 上的 mShowRunnable。
         try {
+            Class<?> gxzwManagerForDelayClass = XposedHelpers.findClass(
+                "com.miui.keyguard.biometrics.fod.MiuiGxzwManager", cl
+            );
             record(XposedHelpers.findAndHookMethod(
-                android.os.Handler.class, "postDelayed",
-                Runnable.class, long.class, new XC_MethodHook() {
+                gxzwManagerForDelayClass, "dismissGxzwView", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         if (!active) return;
-                        Runnable r = (Runnable) param.args[0];
-                        long delay = (Long) param.args[1];
-                        if (r == null || delay <= 0L) return;
+                        try {
+                            Object iconView = tryGetField(param.thisObject, "mMiuiGxzwIconView");
+                            Object quickOpenView = iconView != null
+                                ? tryGetField(iconView, "mMiuiGxzwQuickOpenView")
+                                : null;
+                            if (quickOpenView == null) return;
+                            boolean wasShowed = XposedHelpers.getBooleanField(quickOpenView, "mShowed");
+                            param.setObjectExtra("hyperopen_qov", quickOpenView);
+                            param.setObjectExtra("hyperopen_was_showed", wasShowed);
+                        } catch (Throwable ignored) {}
+                    }
 
-                        // 跳过 Android 内部类（如 Invalidation/Elastic 等系统低频延迟任务），
-                        // 只拦截 MiuiGxzwQuickOpenView$1 的展开 Runnable。
-                        Class<?> showRunnableClass = cachedShowRunnableClass;
-                        if (showRunnableClass == null) {
-                            try {
-                                showRunnableClass = XposedHelpers.findClass(
-                                    "com.miui.keyguard.biometrics.fod.MiuiGxzwQuickOpenView$1", cl
-                                );
-                                cachedShowRunnableClass = showRunnableClass;
-                            } catch (Throwable ignore) {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (!active) return;
+                        try {
+                            Object quickOpenView = param.getObjectExtra("hyperopen_qov");
+                            Object wasShowedObj = param.getObjectExtra("hyperopen_was_showed");
+                            if (quickOpenView == null || Boolean.TRUE.equals(wasShowedObj)) {
                                 return;
                             }
+                            boolean nowShowed = XposedHelpers.getBooleanField(quickOpenView, "mShowed");
+                            if (!nowShowed) {
+                                return;
+                            }
+                            HyperOpenConfig cfg = HyperOpenConfig.getCached();
+                            int userDelay = cfg != null ? Math.max(0, cfg.showDelayMs) : 500;
+                            if (userDelay == 500) {
+                                return;
+                            }
+                            Object handlerObj = tryGetField(quickOpenView, "mHandler");
+                            Object runnableObj = tryGetField(quickOpenView, "mShowRunnable");
+                            if (!(handlerObj instanceof android.os.Handler) || !(runnableObj instanceof Runnable)) {
+                                return;
+                            }
+                            android.os.Handler handler = (android.os.Handler) handlerObj;
+                            Runnable showRunnable = (Runnable) runnableObj;
+                            if (!handler.hasCallbacks(showRunnable)) {
+                                return;
+                            }
+                            handler.removeCallbacks(showRunnable);
+                            if (userDelay == 0) {
+                                handler.post(showRunnable);
+                            } else {
+                                handler.postDelayed(showRunnable, userDelay);
+                            }
+                            Log.i(TAG, "快捷面板展开：dismissGxzwView 重调度等待阈值 → " + userDelay + "ms");
+                        } catch (Throwable t) {
+                            Log.w(TAG, "dismissGxzwView 重调度 mShowRunnable 失败", t);
                         }
-                        if (!showRunnableClass.isInstance(r)) {
-                            return;
-                        }
-
-                        // 该内类被 R8 复用为多种 Runnable，只有 classId=0 的实例才是「展开面板」任务：
-                        // classId=1 是写入 fod_auth_fingerprint，classId=2 是设置 closeView 无障碍描述，
-                        // 两者都不能被替换延迟。故还须读取本模块注入到内类上的标记字段做精准判定。
-                        if (!isShowRunnableMarked(r)) {
-                            return;
-                        }
-
-                        HyperOpenConfig cfg = HyperOpenConfig.getCached();
-                        int userDelay = cfg != null ? Math.max(0, cfg.showDelayMs) : 500;
-                        if (userDelay == 500) {
-                            // 500ms = 系统默认：不干预，保持系统原生 delay（普通 500ms / 无障碍 1000ms）
-                            Log.i(TAG, "快捷面板展开：系统默认，不干预原生延迟 " + delay + "ms");
-                            return;
-                        }
-                        Log.i(TAG, "快捷面板展开：等待阈值 " + delay + "ms → " + userDelay + "ms");
-                        param.args[1] = (long) userDelay;
                     }
                 }
             ));
-            Log.i(TAG, "已成功安装 Handler#postDelayed 指纹快捷等待阈值拦截 Hook！");
+            Log.i(TAG, "已成功安装 MiuiGxzwManager#dismissGxzwView 等待阈值局部拦截 Hook！");
         } catch (Throwable t) {
-            Log.e(TAG, "Hook Handler#postDelayed 失败", t);
+            Log.e(TAG, "Hook MiuiGxzwManager#dismissGxzwView 失败", t);
         }
 
         // 6. Hook MiuiGxzwManager.isUnlockByGxzw() 与 KeyguardUpdateMonitorInjector.isFingerprintUnlock()：
@@ -872,28 +836,68 @@ public class HyperOpenHook {
     }
 
     /**
-     * 在 MiuiGxzwQuickOpenView 构造时，给其 mShowRunnable（$r8$classId=0 的 MiuiGxzwQuickOpenView$1）
-     * 实例打上附加字段标记，供 postDelayed 拦截器精准识别。这样无需依赖被 R8 重排的字段布局，
-     * 且能从根本上区分同被 R8 复用的 classId=1 / classId=2 两个长得一模一样的 Runnable。
+     * 向指定的 MiuiGxzwQuickOpenView 实例注入 CustomHyperOpenContainer（幂等）。
+     * 供构造函数 Hook 与异步延迟部署后对已存在单例的回溯挂载共用。
      */
-    private static void markShowRunnable(FrameLayout quickOpenView) {
-        if (quickOpenView == null) return;
-        try {
-            Object runnable = XposedHelpers.getObjectField(quickOpenView, "mShowRunnable");
-            if (runnable instanceof Runnable) {
-                XposedHelpers.setAdditionalInstanceField(runnable, FIELD_SHOW_RUNNABLE, Boolean.TRUE);
-            }
-        } catch (Throwable t) {
-            Log.w(TAG, "标记系统展开 Runnable 失败", t);
+    private static void attachToHostViewIfNeeded(FrameLayout view, ClassLoader cl) {
+        if (!active || view == null || cl == null) return;
+        if (getContainer(view) != null || view.findViewWithTag(CONTAINER_TAG) != null) {
+            rememberHost(view);
+            return;
         }
+        Context context = view.getContext();
+        // 仅读进程内缓存（首轮以 XSharedPreferences 本地文件兜底），不做跨进程调用；
+        // 最新配置由后台线程异步拉取后再推送进来。
+        HyperOpenConfig config = HyperOpenConfig.getCached();
+        final CustomHyperOpenContainer container = new CustomHyperOpenContainer(context, config, cl);
+        container.setTag(CONTAINER_TAG);
+        container.setVisibility(View.GONE);
+
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+        );
+        view.addView(container, lp);
+        XposedHelpers.setAdditionalInstanceField(view, "customContainer", container);
+        rememberHost(view);
+
+        // 宿主窗口被移除（息屏、锁屏重建、指纹图层销毁等）时立刻复位，
+        // 绝不让 VISIBLE 容器 / 追加的窗口 flag 残留到下一次 attach。
+        armDetachReset(view);
+
+        // 注册配置实时更新与息屏复位广播监听（进程级，只注册一次）
+        ensureProcessReceivers(context);
+
+        // 后台异步预取最新配置
+        HyperOpenConfig.refreshAsync(context);
+
+        Log.i(TAG, "已成功向 MiuiGxzwQuickOpenView 注入 CustomHyperOpenContainer！");
     }
 
-    private static boolean isShowRunnableMarked(Runnable r) {
+    /**
+     * Hook 安装完成后，经 MiuiFingerPrintFactory 反射链回溯查找进程内已先期构造的
+     * MiuiGxzwQuickOpenView 单例并补挂载容器，防止异步安全门放行前宿主已完成构造。
+     */
+    public static void attachExistingQuickOpenView(final ClassLoader cl) {
+        if (!active || cl == null) return;
         try {
-            Object mark = XposedHelpers.getAdditionalInstanceField(r, FIELD_SHOW_RUNNABLE);
-            return Boolean.TRUE.equals(mark);
+            Class<?> factoryClass = XposedHelpers.findClass(
+                "com.miui.keyguard.biometrics.fod.MiuiFingerPrintFactory", cl
+            );
+            Object mgr = XposedHelpers.callStaticMethod(factoryClass, "getFingerPrintManager");
+            if (mgr == null) return;
+            Object iconView = tryGetField(mgr, "mMiuiGxzwIconView");
+            Object quickOpenView = iconView != null ? tryGetField(iconView, "mMiuiGxzwQuickOpenView") : null;
+            if (quickOpenView instanceof FrameLayout) {
+                final FrameLayout host = (FrameLayout) quickOpenView;
+                io.github.qmryqmm.hyperopen.util.IpcExecutor.runOnMain(new Runnable() {
+                    @Override
+                    public void run() {
+                        attachToHostViewIfNeeded(host, cl);
+                    }
+                });
+            }
         } catch (Throwable t) {
-            return false;
+            Log.d(TAG, "回溯绑定已有 MiuiGxzwQuickOpenView 跳过或未就绪: " + t.getMessage());
         }
     }
 
@@ -1407,12 +1411,13 @@ public class HyperOpenHook {
             }
         }
 
+        try {
+            view.setBackground(null);
+        } catch (Throwable ignored) {}
+
         // 原生 removeQuickView() 在移除窗口时已经调用过 applyBlur(vri, 0)；
         // 仅当宿主仍附着在窗口上时才补充清零全屏模糊，避免冗余跨线程/渲染调用。
         if (view.isAttachedToWindow()) {
-            try {
-                view.setBackground(null);
-            } catch (Throwable ignored) {}
             try {
                 Object blurUtils = resolveBlurUtils(view);
                 if (blurUtils != null) {
@@ -1510,7 +1515,7 @@ public class HyperOpenHook {
      *   - 配置变更：仅触发后台异步拉取，主线程不做任何跨进程调用；
      *   - 息屏：复位所有宿主，杜绝预览状态直接锁屏后的残留。
      */
-    private static synchronized void ensureProcessReceivers(Context context) {
+    public static synchronized void ensureProcessReceivers(Context context) {
         if (configReceiver != null || context == null) return;
         Context app = context.getApplicationContext();
         final Context ctx = app != null ? app : context;
@@ -1525,9 +1530,14 @@ public class HyperOpenHook {
                     return;
                 }
                 Log.i(TAG, "收到模块配置变更广播，后台异步热重载！");
-                try {
-                    io.github.qmryqmm.hyperopen.safety.SafetyGuard.refresh();
-                } catch (Throwable ignored) {}
+                io.github.qmryqmm.hyperopen.util.IpcExecutor.runAsync(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            io.github.qmryqmm.hyperopen.safety.SafetyGuard.refresh();
+                        } catch (Throwable ignored) {}
+                    }
+                });
                 HyperOpenConfig.refreshAsync(c);
                 reportInjectedStatus(c);
             }
@@ -1656,6 +1666,7 @@ public class HyperOpenHook {
         Log.e(TAG, "!!! 安全模式触发：正在即时停用全部 Hook !!!");
 
         HyperOpenConfig.setOnConfigUpdatedListener(null);
+        final Context ctx = receiverContext;
         releaseProcessReceivers();
 
         // 2. 拆除视图树上已注入的自定义容器
@@ -1706,7 +1717,7 @@ public class HyperOpenHook {
         }
 
         Log.e(TAG, "安全模式已停用全部 Hook，共卸载 " + removed + " 个回调，SystemUI 已恢复原生行为");
-        reportInjectedStatus(receiverContext);
+        reportInjectedStatus(ctx);
         return removed;
     }
 

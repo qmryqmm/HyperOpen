@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -29,6 +30,7 @@ import java.util.Map;
 import java.util.Set;
 
 import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory;
+import io.github.qmryqmm.hyperopen.model.ActivityLaunchSpec;
 import io.github.qmryqmm.hyperopen.model.ShortcutItem;
 import io.github.qmryqmm.hyperopen.util.DePrefs;
 
@@ -85,6 +87,134 @@ public final class ConfigBackup {
             "page_switch_gesture"
     ));
 
+    /** 导入白名单：仅允许写入已定义的面板参数键与 6 个旧版兼容键，并强制校验预期值类型。 */
+    private static final Map<String, String> ALLOWED_KEY_TYPES;
+
+    static {
+        Map<String, String> m = new HashMap<>();
+        m.put("material_style", "i");
+        m.put("offset_y", "i");
+        m.put("region_diameter", "i");
+        m.put("show_region_bg", "b");
+        m.put("show_header_pill_bg", "b");
+        m.put("show_header_pill", "b");
+        m.put("header_top_margin", "i");
+        m.put("header_title_size", "i");
+        m.put("header_subtitle_size", "i");
+        m.put("header_blur_radius", "i");
+        m.put("header_text_centered", "b");
+        m.put("icon_size", "i");
+        m.put("max_icon_count", "i");
+        m.put("layout_style", "i");
+        m.put("stock_system_region", "b");
+        m.put("ring_sector_mode", "b");
+        m.put("sector_line_color", "i");
+        m.put("sector_line_alpha", "f");
+        m.put("sector_dash_length", "i");
+        m.put("sector_dash_gap", "i");
+        m.put("sector_line_width", "f");
+        m.put("sector_highlight_enabled", "b");
+        m.put("anim_duration_ms", "i");
+        m.put("panel_expand_anim_type", "i");
+        m.put("panel_expand_stagger_ms", "i");
+        m.put("dismiss_anim_enabled", "b");
+        m.put("panel_collapse_anim_type", "i");
+        m.put("panel_collapse_duration_ms", "i");
+        m.put("panel_collapse_stagger_ms", "i");
+        m.put("panel_selected_pop_scale", "f");
+        m.put("global_hint_color_mode", "i");
+        m.put("global_hint_custom_color", "i");
+        m.put("default_hint_text_stroke", "i");
+        m.put("default_hint_text_shadow", "i");
+        m.put("default_hint_text_weight", "i");
+        m.put("default_hint_text_letter_spacing", "f");
+        m.put("default_show_hint_title", "b");
+        m.put("default_show_hint_subtitle", "b");
+        m.put("folder_hover_delay_ms", "i");
+        m.put("folder_child_display_range_scale", "f");
+        m.put("folder_child_direction_mode", "i");
+        m.put("folder_child_direction_offset_deg", "f");
+        m.put("folder_child_order_mode", "i");
+        m.put("folder_child_min_gap_dp", "i");
+        m.put("folder_child_size_scale", "f");
+        m.put("folder_child_expand_anim_type", "i");
+        m.put("folder_child_expand_duration_ms", "i");
+        m.put("folder_child_expand_stagger_ms", "i");
+        m.put("folder_child_collapse_anim_type", "i");
+        m.put("folder_child_collapse_duration_ms", "i");
+        m.put("folder_child_collapse_stagger_ms", "i");
+        m.put("folder_child_start_scale", "f");
+        m.put("folder_child_overshoot", "f");
+        m.put("max_scale", "f");
+        m.put("influence_radius", "i");
+        m.put("icon_alpha", "f");
+        m.put("fisheye_zoom_alpha", "f");
+        m.put("fisheye_other_alpha", "f");
+        m.put("icon_corner_radius", "i");
+        m.put("fullscreen_blur_mask_alpha", "f");
+        m.put("fullscreen_dim_alpha", "f");
+        m.put("header_dim_alpha", "f");
+        m.put("region_dim_alpha", "f");
+        m.put("bubble_dim_alpha", "f");
+        m.put("show_delay_ms", "i");
+        m.put("disable_system_enter_anim", "b");
+        m.put("face_unlock_quick_open", "b");
+        m.put("ble_unlock_quick_open", "b");
+        m.put("haptic_enabled", "b");
+        m.put("haptic_strength", "i");
+        m.put("haptic_duration_ms", "i");
+        m.put("haptic_mode", "i");
+        m.put("haptic_stock_wave_expand", "i");
+        m.put("haptic_brake_pulse", "b");
+        m.put("haptic_double_gap_ms", "i");
+        m.put("haptic_slide_enabled", "b");
+        m.put("haptic_slide_strength", "i");
+        m.put("haptic_slide_duration_ms", "i");
+        m.put("haptic_slide_mode", "i");
+        m.put("haptic_stock_wave_slide", "i");
+        m.put("haptic_slide_brake_pulse", "b");
+        m.put("haptic_slide_double_gap_ms", "i");
+        m.put("region_blur_radius", "i");
+        m.put("icon_spacing_offset", "i");
+        m.put("show_bubble_bg", "b");
+        m.put("bubble_padding_percent", "i");
+        m.put("bubble_blur_radius", "i");
+        m.put("app_icon_crop_mode", "i");
+        m.put("glyph_pad_enabled", "b");
+        m.put("glyph_pad_color", "i");
+        m.put("glass_preset", "i");
+        m.put("glass_refract_ior", "f");
+        m.put("glass_thickness", "f");
+        m.put("glass_specular", "f");
+        m.put("glass_matte_alpha", "f");
+        m.put("glass_border_light", "f");
+        m.put("glass_background_saturation", "f");
+        m.put("glass_background_brightness", "f");
+        m.put("glass_background_burn", "f");
+        m.put("glass_matte_white_mix", "f");
+        m.put("glass_matte_color_mix", "f");
+        m.put("glass_matte_color_power", "f");
+        m.put("glass_edge_range", "f");
+        m.put("glass_edge_power", "f");
+        m.put("glass_reflect_offset", "f");
+        m.put("global_blur_radius", "i");
+        m.put("global_dim_alpha", "f");
+        m.put("bubble_material_follow_global", "b");
+        m.put("region_material_follow_global", "b");
+        m.put("header_material_follow_global", "b");
+        m.put("bubble_glass_matte_alpha", "f");
+        m.put("region_glass_matte_alpha", "f");
+        m.put("header_glass_matte_alpha", "f");
+        // 6 个旧版兼容键
+        m.put("stock_system_anim", "b");
+        m.put("selected_icon_scale", "f");
+        m.put("shortcuts_json", "s");
+        m.put("blur_baseline_healed", "b");
+        m.put("glyph_pad_mode", "i");
+        m.put("icon_glow_effect", "b");
+        ALLOWED_KEY_TYPES = Collections.unmodifiableMap(m);
+    }
+
     private ConfigBackup() {
     }
 
@@ -98,6 +228,8 @@ public final class ConfigBackup {
         public final boolean hasShortcuts;
         public final int layoutStyle;
         public final int materialStyle;
+        public final int skippedKeyCount;
+        public final List<String> highRiskShortcuts;
 
         Result(
                 boolean ok,
@@ -109,6 +241,22 @@ public final class ConfigBackup {
                 int layoutStyle,
                 int materialStyle
         ) {
+            this(ok, message, keyCount, shortcutCount, appVersion, hasShortcuts, layoutStyle, materialStyle,
+                    0, Collections.emptyList());
+        }
+
+        Result(
+                boolean ok,
+                String message,
+                int keyCount,
+                int shortcutCount,
+                String appVersion,
+                boolean hasShortcuts,
+                int layoutStyle,
+                int materialStyle,
+                int skippedKeyCount,
+                List<String> highRiskShortcuts
+        ) {
             this.ok = ok;
             this.message = message;
             this.keyCount = keyCount;
@@ -117,6 +265,10 @@ public final class ConfigBackup {
             this.hasShortcuts = hasShortcuts;
             this.layoutStyle = layoutStyle;
             this.materialStyle = materialStyle;
+            this.skippedKeyCount = skippedKeyCount;
+            this.highRiskShortcuts = highRiskShortcuts == null
+                    ? Collections.emptyList()
+                    : Collections.unmodifiableList(new ArrayList<>(highRiskShortcuts));
         }
 
         public static Result fail(String message) {
@@ -128,7 +280,9 @@ public final class ConfigBackup {
                     null,
                     false,
                     HyperOpenConfig.LAYOUT_HONEYCOMB,
-                    HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR
+                    HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR,
+                    0,
+                    Collections.emptyList()
             );
         }
     }
@@ -255,48 +409,87 @@ public final class ConfigBackup {
                 return Result.fail("配置文件缺少 values 字段");
             }
             int count = 0;
+            int skippedKeyCount = 0;
             for (Iterator<String> it = values.keys(); it.hasNext(); ) {
                 String k = it.next();
                 if (isSkipped(k) || KEY_SHORTCUTS.equals(k)) continue;
-                if (values.optJSONObject(k) != null) count++;
+                JSONObject item = values.optJSONObject(k);
+                if (parseValidatedPref(k, item) != null) {
+                    count++;
+                } else {
+                    skippedKeyCount++;
+                }
             }
 
             boolean hasShortcuts = false;
             int shortcutCount = 0;
+            List<ShortcutItem> parsedShortcuts = new ArrayList<>();
             JSONArray shortcuts = root.optJSONArray("shortcuts");
             if (shortcuts != null) {
                 hasShortcuts = true;
                 for (int i = 0; i < shortcuts.length(); i++) {
-                    if (shortcuts.optJSONObject(i) != null) shortcutCount++;
+                    JSONObject obj = shortcuts.optJSONObject(i);
+                    if (obj != null) {
+                        shortcutCount++;
+                        parsedShortcuts.add(ShortcutItem.fromJson(obj));
+                    }
                 }
             } else {
                 // 兼容手写 / 早期格式：values 里直接带 shortcuts_json 字符串
                 JSONObject sj = values.optJSONObject(KEY_SHORTCUTS);
                 if (sj != null) {
-                    hasShortcuts = true;
-                    try {
-                        JSONArray arr = new JSONArray(sj.optString("v", ""));
-                        for (int i = 0; i < arr.length(); i++) {
-                            if (arr.optJSONObject(i) != null) shortcutCount++;
+                    Object validatedSj = parseValidatedPref(KEY_SHORTCUTS, sj);
+                    if (validatedSj instanceof String) {
+                        hasShortcuts = true;
+                        String rawShortcuts = ((String) validatedSj).trim();
+                        if (!rawShortcuts.isEmpty()) {
+                            try {
+                                JSONArray arr = new JSONArray(rawShortcuts);
+                                for (int i = 0; i < arr.length(); i++) {
+                                    JSONObject obj = arr.optJSONObject(i);
+                                    if (obj != null) {
+                                        shortcutCount++;
+                                        parsedShortcuts.add(ShortcutItem.fromJson(obj));
+                                    }
+                                }
+                            } catch (Throwable ignored) {
+                            }
                         }
-                    } catch (Throwable ignored) {
+                    } else {
+                        skippedKeyCount++;
                     }
                 }
             }
 
+            List<String> highRiskShortcuts = new ArrayList<>();
+            if (!parsedShortcuts.isEmpty()) {
+                collectHighRiskShortcuts(parsedShortcuts, "", 0, highRiskShortcuts);
+            }
+
             int layoutStyle = HyperOpenConfig.LAYOUT_HONEYCOMB;
-            JSONObject layoutObj = values.optJSONObject("layout_style");
-            if (layoutObj != null) {
-                layoutStyle = layoutObj.optInt("v", HyperOpenConfig.LAYOUT_HONEYCOMB);
+            Object parsedLayout = parseValidatedPref("layout_style", values.optJSONObject("layout_style"));
+            if (parsedLayout instanceof Integer) {
+                layoutStyle = (Integer) parsedLayout;
             }
             int materialStyle = HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR;
-            JSONObject materialObj = values.optJSONObject("material_style");
-            if (materialObj != null) {
-                materialStyle = materialObj.optInt("v", HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR);
+            Object parsedMaterial = parseValidatedPref("material_style", values.optJSONObject("material_style"));
+            if (parsedMaterial instanceof Integer) {
+                materialStyle = (Integer) parsedMaterial;
             }
 
             String appVersion = root.isNull("appVersion") ? "?" : root.optString("appVersion", "?");
-            return new Result(true, "可导入", count, shortcutCount, appVersion, hasShortcuts, layoutStyle, materialStyle);
+            return new Result(
+                    true,
+                    "可导入",
+                    count,
+                    shortcutCount,
+                    appVersion,
+                    hasShortcuts,
+                    layoutStyle,
+                    materialStyle,
+                    skippedKeyCount,
+                    highRiskShortcuts
+            );
         } catch (Throwable t) {
             Log.w(TAG, "解析配置失败", t);
             return Result.fail("文件解析失败：" + t.getMessage());
@@ -342,6 +535,7 @@ public final class ConfigBackup {
             SharedPreferences.Editor editor = sp.edit();
 
             int count = 0;
+            int skippedKeyCount = 0;
             int shortcutCount = 0;
 
             if (applyParams) {
@@ -358,8 +552,10 @@ public final class ConfigBackup {
                     if (isSkipped(k)) continue;
                     if (KEY_SHORTCUTS.equals(k) && !willApplyShortcuts) continue;
                     JSONObject item = values.optJSONObject(k);
-                    if (item == null) continue;
-                    if (!writeTypedPref(editor, k, item)) continue;
+                    if (!writeTypedPref(editor, k, item)) {
+                        skippedKeyCount++;
+                        continue;
+                    }
                     if (KEY_SHORTCUTS.equals(k)) {
                         shortcutCount = pre.shortcutCount;
                     } else {
@@ -408,8 +604,19 @@ public final class ConfigBackup {
             } catch (Throwable ignored) {
             }
 
-            Log.i(TAG, "配置应用完成: " + count + " 项参数, " + shortcutCount + " 个快捷方式");
-            return new Result(true, "应用完成", count, shortcutCount, pre.appVersion, pre.hasShortcuts, pre.layoutStyle, pre.materialStyle);
+            Log.i(TAG, "配置应用完成: " + count + " 项参数, " + shortcutCount + " 个快捷方式, 跳过=" + skippedKeyCount);
+            return new Result(
+                    true,
+                    "应用完成",
+                    count,
+                    shortcutCount,
+                    pre.appVersion,
+                    pre.hasShortcuts,
+                    pre.layoutStyle,
+                    pre.materialStyle,
+                    skippedKeyCount,
+                    pre.highRiskShortcuts
+            );
         } catch (Throwable t) {
             Log.e(TAG, "应用配置失败", t);
             return Result.fail("应用失败：" + t.getMessage());
@@ -595,40 +802,311 @@ public final class ConfigBackup {
                 || APP_UI_SKIP_KEYS.contains(key);
     }
 
-    private static boolean writeTypedPref(SharedPreferences.Editor editor, String k, JSONObject item) {
+    private static Object parseValidatedPref(String k, JSONObject item) {
+        if (k == null || isSkipped(k) || item == null) {
+            return null;
+        }
+        String expectedType = ALLOWED_KEY_TYPES.get(k);
+        if (expectedType == null) {
+            Log.w(TAG, "忽略非白名单配置键: " + k);
+            return null;
+        }
         String type = item.optString("t", "");
+        if (!expectedType.equals(type)) {
+            Log.w(TAG, "配置项类型与白名单不符，跳过: " + k + " expected=" + expectedType + " actual=" + type);
+            return null;
+        }
+        if (!item.has("v")) {
+            Log.w(TAG, "配置项缺少值字段，跳过: " + k);
+            return null;
+        }
         Object raw = item.opt("v");
-        switch (type) {
+        switch (expectedType) {
             case "b":
-                editor.putBoolean(k, item.optBoolean("v"));
-                return true;
-            case "i":
-                editor.putInt(k, item.optInt("v"));
-                return true;
-            case "f":
-                editor.putFloat(k, (float) item.optDouble("v"));
-                return true;
-            case "l":
-                editor.putLong(k, item.optLong("v"));
-                return true;
+                if (!(raw instanceof Boolean)) {
+                    Log.w(TAG, "布尔配置项值类型非法，跳过: " + k);
+                    return null;
+                }
+                return raw;
+            case "i": {
+                if (!(raw instanceof Number) || (raw instanceof Boolean)) {
+                    Log.w(TAG, "整型配置项值类型非法，跳过: " + k);
+                    return null;
+                }
+                double d = ((Number) raw).doubleValue();
+                if (!Double.isFinite(d) || d < Integer.MIN_VALUE || d > Integer.MAX_VALUE) {
+                    Log.w(TAG, "整型配置项数值非法或越界，跳过: " + k);
+                    return null;
+                }
+                return clampInt(k, ((Number) raw).intValue());
+            }
+            case "f": {
+                if (!(raw instanceof Number) || (raw instanceof Boolean)) {
+                    Log.w(TAG, "浮点配置项值类型非法，跳过: " + k);
+                    return null;
+                }
+                double d = ((Number) raw).doubleValue();
+                if (!Double.isFinite(d)) {
+                    Log.w(TAG, "浮点配置项出现 NaN/Infinity，跳过: " + k);
+                    return null;
+                }
+                float f = (float) d;
+                if (!Float.isFinite(f)) {
+                    Log.w(TAG, "浮点配置项超出 float 表示范围，跳过: " + k);
+                    return null;
+                }
+                return clampFloat(k, f);
+            }
+            case "l": {
+                if (!(raw instanceof Number) || (raw instanceof Boolean)) {
+                    Log.w(TAG, "长整型配置项值类型非法，跳过: " + k);
+                    return null;
+                }
+                double d = ((Number) raw).doubleValue();
+                if (!Double.isFinite(d)) {
+                    Log.w(TAG, "长整型配置项出现非法值，跳过: " + k);
+                    return null;
+                }
+                return ((Number) raw).longValue();
+            }
             case "s":
-                editor.putString(k, raw == null || raw == JSONObject.NULL ? "" : String.valueOf(raw));
-                return true;
+                if (raw == null || raw == JSONObject.NULL) {
+                    return "";
+                }
+                if (!(raw instanceof String)) {
+                    Log.w(TAG, "字符串配置项值类型非法，跳过: " + k);
+                    return null;
+                }
+                return raw;
             case "ss": {
-                JSONArray arr = item.optJSONArray("v");
+                if (!(raw instanceof JSONArray)) {
+                    Log.w(TAG, "字符串集合配置项值类型非法，跳过: " + k);
+                    return null;
+                }
+                JSONArray arr = (JSONArray) raw;
                 Set<String> set = new HashSet<>();
-                if (arr != null) {
-                    for (int i = 0; i < arr.length(); i++) {
-                        set.add(arr.optString(i));
+                for (int i = 0; i < arr.length(); i++) {
+                    Object elem = arr.opt(i);
+                    if (elem != null && elem != JSONObject.NULL) {
+                        set.add(String.valueOf(elem));
                     }
                 }
-                editor.putStringSet(k, set);
-                return true;
+                return set;
             }
             default:
-                Log.w(TAG, "未知的配置项类型标记，跳过: " + k + " t=" + type);
+                return null;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean writeTypedPref(SharedPreferences.Editor editor, String k, JSONObject item) {
+        Object validated = parseValidatedPref(k, item);
+        if (validated == null) {
+            return false;
+        }
+        String expectedType = ALLOWED_KEY_TYPES.get(k);
+        if (expectedType == null) {
+            return false;
+        }
+        switch (expectedType) {
+            case "b":
+                editor.putBoolean(k, (Boolean) validated);
+                return true;
+            case "i":
+                editor.putInt(k, (Integer) validated);
+                return true;
+            case "f":
+                editor.putFloat(k, (Float) validated);
+                return true;
+            case "l":
+                editor.putLong(k, (Long) validated);
+                return true;
+            case "s":
+                editor.putString(k, (String) validated);
+                return true;
+            case "ss":
+                editor.putStringSet(k, (Set<String>) validated);
+                return true;
+            default:
                 return false;
         }
+    }
+
+    private static int clampInt(String key, int value) {
+        switch (key) {
+            case "icon_size":
+                return clamp(value, 20, 200);
+            case "max_icon_count":
+                return clamp(value, 0, 64);
+            case "region_diameter":
+                return clamp(value, 60, 1200);
+            case "offset_y":
+                return clamp(value, -500, 1000);
+            case "header_top_margin":
+                return clamp(value, 0, 1000);
+            case "header_title_size":
+                return clamp(value, 8, 72);
+            case "header_subtitle_size":
+                return clamp(value, 6, 60);
+            case "header_blur_radius":
+            case "region_blur_radius":
+            case "bubble_blur_radius":
+            case "global_blur_radius":
+                return clamp(value, 0, 200);
+            case "icon_corner_radius":
+                return clamp(value, 0, 50);
+            case "bubble_padding_percent":
+                return clamp(value, 0, 80);
+            case "icon_spacing_offset":
+            case "folder_child_min_gap_dp":
+                return clamp(value, -50, 100);
+            case "influence_radius":
+                return clamp(value, 0, 1000);
+            case "show_delay_ms":
+                return clamp(value, 0, 10000);
+            case "anim_duration_ms":
+            case "panel_collapse_duration_ms":
+            case "folder_child_expand_duration_ms":
+            case "folder_child_collapse_duration_ms":
+            case "folder_hover_delay_ms":
+                return clamp(value, 0, 5000);
+            case "panel_expand_stagger_ms":
+            case "panel_collapse_stagger_ms":
+            case "folder_child_expand_stagger_ms":
+            case "folder_child_collapse_stagger_ms":
+                return clamp(value, 0, 1000);
+            case "haptic_strength":
+            case "haptic_slide_strength":
+                return clamp(value, 1, 255);
+            case "haptic_duration_ms":
+            case "haptic_slide_duration_ms":
+                return clamp(value, 1, 1000);
+            case "haptic_double_gap_ms":
+            case "haptic_slide_double_gap_ms":
+                return clamp(value, 0, 1000);
+            case "sector_dash_length":
+            case "sector_dash_gap":
+                return clamp(value, 0, 200);
+            case "default_hint_text_stroke":
+                return clamp(value, 0, 20);
+            case "default_hint_text_shadow":
+                return clamp(value, 0, 200);
+            case "default_hint_text_weight":
+                return clamp(value, 0, 3);
+            default:
+                return value;
+        }
+    }
+
+    private static float clampFloat(String key, float value) {
+        switch (key) {
+            case "max_scale":
+            case "selected_icon_scale":
+            case "panel_selected_pop_scale":
+            case "folder_child_overshoot":
+                return clamp(value, 0.1f, 5.0f);
+            case "folder_child_display_range_scale":
+            case "folder_child_size_scale":
+            case "folder_child_start_scale":
+                return clamp(value, 0.05f, 5.0f);
+            case "folder_child_direction_offset_deg":
+                return clamp(value, -360f, 360f);
+            case "sector_line_alpha":
+            case "icon_alpha":
+            case "fisheye_zoom_alpha":
+            case "fisheye_other_alpha":
+            case "fullscreen_blur_mask_alpha":
+            case "fullscreen_dim_alpha":
+            case "header_dim_alpha":
+            case "region_dim_alpha":
+            case "bubble_dim_alpha":
+            case "global_dim_alpha":
+            case "glass_matte_alpha":
+            case "bubble_glass_matte_alpha":
+            case "region_glass_matte_alpha":
+            case "header_glass_matte_alpha":
+            case "glass_border_light":
+            case "glass_background_burn":
+            case "glass_matte_white_mix":
+            case "glass_matte_color_mix":
+                return clamp(value, 0f, 1f);
+            case "sector_line_width":
+                return clamp(value, 0.1f, 20f);
+            case "default_hint_text_letter_spacing":
+                return clamp(value, -10f, 20f);
+            case "glass_refract_ior":
+                return clamp(value, 0.5f, 4.0f);
+            case "glass_thickness":
+                return clamp(value, 0f, 20f);
+            case "glass_specular":
+            case "glass_background_saturation":
+                return clamp(value, 0f, 10f);
+            case "glass_background_brightness":
+                return clamp(value, -1f, 1f);
+            case "glass_matte_color_power":
+            case "glass_edge_power":
+                return clamp(value, 0.1f, 20f);
+            case "glass_edge_range":
+                return clamp(value, 0f, 500f);
+            case "glass_reflect_offset":
+                return clamp(value, 0f, 5000f);
+            default:
+                return value;
+        }
+    }
+
+    private static int clamp(int v, int min, int max) {
+        return Math.max(min, Math.min(max, v));
+    }
+
+    private static float clamp(float v, float min, float max) {
+        return Math.max(min, Math.min(max, v));
+    }
+
+    private static void collectHighRiskShortcuts(
+            List<ShortcutItem> items,
+            String pathPrefix,
+            int depth,
+            List<String> out
+    ) {
+        if (items == null || depth > 4) {
+            return;
+        }
+        for (ShortcutItem item : items) {
+            if (item == null) {
+                continue;
+            }
+            String title = item.title != null && !item.title.trim().isEmpty()
+                    ? item.title.trim()
+                    : "未命名快捷方式";
+            String displayName = pathPrefix.isEmpty() ? title : pathPrefix + " > " + title;
+            String riskReason = describeHighRiskReason(item);
+            if (riskReason != null) {
+                out.add(displayName + "（" + riskReason + "）");
+            }
+            if (ShortcutItem.ACTION_FOLDER.equals(item.actionType)) {
+                collectHighRiskShortcuts(item.parseFolderChildren(), displayName, depth + 1, out);
+            }
+        }
+    }
+
+    private static String describeHighRiskReason(ShortcutItem item) {
+        if (ShortcutItem.ACTION_SHELL.equals(item.actionType)) {
+            return item.shellUseRoot ? "Shell Root 命令" : "Shell 命令";
+        }
+        if (ShortcutItem.ACTION_BROADCAST.equals(item.actionType)) {
+            return item.shellUseRoot ? "自定义广播 + Root" : "自定义广播";
+        }
+        if (ShortcutItem.ACTION_ACTIVITY.equals(item.actionType)) {
+            ActivityLaunchSpec spec = ActivityLaunchSpec.fromJson(item.actionPayload);
+            if (spec.useRoot || item.shellUseRoot) {
+                return "Activity Root 启动";
+            }
+        }
+        if (item.shellUseRoot) {
+            return "Root 权限";
+        }
+        return null;
     }
 
     private static String versionName(Context ctx) {

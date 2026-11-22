@@ -1978,6 +1978,8 @@ private fun ImportPreviewDialog(
     var applyImmediately by remember(preview) { mutableStateOf(false) }
     val hasUnsupportedSoftGlass =
         !softGlassSupported && preview.candidates.any { it.materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS }
+    val skippedKeyCount = remember(preview) { preview.totalSkippedKeyCount() }
+    val highRiskShortcuts = remember(preview) { preview.collectHighRiskShortcuts() }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -2116,6 +2118,61 @@ private fun ImportPreviewDialog(
                             "检测到此配置为柔光玻璃材质，当前设备不支持；导入仍会完整保留原方案参数，应用时将自动转为高斯模糊并补偿模糊半径。"
                         },
                     )
+                }
+
+                if (skippedKeyCount > 0) {
+                    Spacer(Modifier.height(10.dp))
+                    SoftGlassNoticeBanner(
+                        "检测到 $skippedKeyCount 项未知、类型不匹配或异常数值参数，导入时已自动安全跳过。",
+                    )
+                }
+
+                if (highRiskShortcuts.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    if (includeShortcuts) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0x1FE53935))
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                        ) {
+                            Text(
+                                text = "高危动作警示：包含 ${highRiskShortcuts.size} 个高权限快捷项",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFFE53935),
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "以下条目涉及 Shell 命令、Root 提权或自定义广播，请确认配置来源可信后再导入：",
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp,
+                                color = Color(0xFFE53935),
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 120.dp)
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(3.dp),
+                            ) {
+                                highRiskShortcuts.forEach { entry ->
+                                    Text(
+                                        text = "• $entry",
+                                        fontSize = 11.sp,
+                                        lineHeight = 16.sp,
+                                        color = MiuixTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        SoftGlassNoticeBanner(
+                            "备份内含 ${highRiskShortcuts.size} 个高危快捷项（Shell / Root / 广播），当前已关闭「包含快捷项目」，导入时将自动忽略。",
+                        )
+                    }
                 }
 
                 Spacer(Modifier.height(12.dp))

@@ -652,7 +652,13 @@ class HyperOpenPreviewView(
             topHeaderContainer.visibility = if (visible) View.VISIBLE else View.GONE
         }
         if (::regionBackdrop.isInitialized) {
-            regionBackdrop.visibility = if (visible && config.showRegionBg) View.VISIBLE else View.GONE
+            if (visible && config.showRegionBg) {
+                regionBackdrop.visibility = View.VISIBLE
+                regionBackdrop.prepareForUse()
+            } else {
+                regionBackdrop.reset()
+                regionBackdrop.visibility = View.GONE
+            }
         }
         if (::sectorOverlay.isInitialized) {
             sectorOverlay.visibility = if (visible) View.VISIBLE else View.GONE

@@ -23,7 +23,24 @@ public final class ViewMaterialController {
     private float dimAlpha;
     private boolean systemBlurEnabled = true;
     private boolean released;
+    private boolean pendingApply = false;
     private View.OnAttachStateChangeListener attachListener;
+    private View.OnLayoutChangeListener layoutChangeListener;
+    private final ViewOutlineProvider outlineProvider = new ViewOutlineProvider() {
+        @Override
+        public void getOutline(@NonNull View target, @NonNull Outline outline) {
+            int width = target.getWidth();
+            int height = target.getHeight();
+            if (width <= 0 || height <= 0) return;
+            float radius = cornerRadiusPx(width, height);
+            if (shape == HyperOSMaterialFactory.SHAPE_CIRCLE) {
+                outline.setOval(0, 0, width, height);
+            } else {
+                outline.setRoundRect(0, 0, width, height, radius);
+            }
+            outline.setAlpha(0f);
+        }
+    };
 
     public ViewMaterialController(
         int shape,
@@ -46,12 +63,13 @@ public final class ViewMaterialController {
     }
 
     public void attach(@NonNull View host) {
-        if (this.host == host) {
+        if (this.host == host && !released) {
             apply();
             return;
         }
         release();
         released = false;
+        pendingApply = false;
         this.host = host;
         attachListener = new View.OnAttachStateChangeListener() {
             @Override
@@ -69,8 +87,24 @@ public final class ViewMaterialController {
                 blurSession.release();
             }
         };
+        layoutChangeListener = (view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (released || ViewMaterialController.this.host != view) {
+                return;
+            }
+            int w = right - left;
+            int h = bottom - top;
+            int oldW = oldRight - oldLeft;
+            int oldH = oldBottom - oldTop;
+            if (w > 0 && h > 0 && view.getVisibility() == View.VISIBLE
+                    && (pendingApply || w != oldW || h != oldH)) {
+                pendingApply = false;
+                apply();
+            }
+        };
+        host.setOutlineProvider(outlineProvider);
+        host.setClipToOutline(true);
         host.addOnAttachStateChangeListener(attachListener);
-        applyOutline(host);
+        host.addOnLayoutChangeListener(layoutChangeListener);
         apply();
     }
 
@@ -94,12 +128,18 @@ public final class ViewMaterialController {
 
     public void apply() {
         View view = host;
-        if (view == null || released) return;
-        applyOutline(view);
-        if (view.getWidth() <= 0 || view.getHeight() <= 0) {
-            view.post(this::apply);
+        if (view == null || released) {
             return;
         }
+        if (!view.isAttachedToWindow()
+                || view.getVisibility() != View.VISIBLE
+                || view.getWidth() <= 0
+                || view.getHeight() <= 0) {
+            pendingApply = true;
+            return;
+        }
+        pendingApply = false;
+        view.invalidateOutline();
 
         int resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(view.getContext(), style);
         decoration.setStyle(resolvedStyle);
@@ -136,13 +176,18 @@ public final class ViewMaterialController {
 
     public void release() {
         released = true;
+        pendingApply = false;
         if (host != null) {
             clearLayers(host);
             if (attachListener != null) {
                 host.removeOnAttachStateChangeListener(attachListener);
             }
+            if (layoutChangeListener != null) {
+                host.removeOnLayoutChangeListener(layoutChangeListener);
+            }
         }
         attachListener = null;
+        layoutChangeListener = null;
         blurSession.release();
         host = null;
     }
@@ -156,25 +201,6 @@ public final class ViewMaterialController {
         if (view.getBackground() != null) {
             view.setBackground(null);
         }
-    }
-
-    private void applyOutline(@NonNull View view) {
-        view.setOutlineProvider(new ViewOutlineProvider() {
-            @Override
-            public void getOutline(@NonNull View target, @NonNull Outline outline) {
-                int width = target.getWidth();
-                int height = target.getHeight();
-                if (width <= 0 || height <= 0) return;
-                float radius = cornerRadiusPx(width, height);
-                if (shape == HyperOSMaterialFactory.SHAPE_CIRCLE) {
-                    outline.setOval(0, 0, width, height);
-                } else {
-                    outline.setRoundRect(0, 0, width, height, radius);
-                }
-                outline.setAlpha(0f);
-            }
-        });
-        view.setClipToOutline(true);
     }
 
     private float cornerRadiusPx(int width, int height) {
