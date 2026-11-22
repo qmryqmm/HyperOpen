@@ -1103,6 +1103,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
             CircularBubbleView b = bubbles.get(i);
             b.setSelectedState(false);
             b.applyScale(1.0f);
+            b.resetFolderDim();
             b.setIconAlpha(config != null ? config.iconAlpha : 1.0f);
             b.resetBlur();
         }
@@ -1127,6 +1128,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
         // 先把文件夹图标完全放大到鱼眼峰值（maxScale），放大动画播完后再展开子项：
         // 避免「边放大边展开」导致子项起点位置与文件夹最终位置错位、观感突兀
         folderBubble.animate().cancel();
+        folderBubble.animateFolderDim(false, 120L);
         folderBubble.animate()
             .scaleX(config != null ? config.maxScale : 1.5f)
             .scaleY(config != null ? config.maxScale : 1.5f)
@@ -1153,7 +1155,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
         ghostLayer.setExcludedSource(folderBubble);
         triggerSlideHaptic();
 
-        // 其余一级气泡：线性恢复原本大小（鱼眼放大收回 1.0），仅保留变暗弱化
+        // 其余一级气泡：线性恢复原本大小（鱼眼放大收回 1.0），并在子项展开时长内同步渐变弱化
+        long dimDuration = Math.max(0L, config != null ? config.folderChildExpandDurationMs : 180L);
         for (CircularBubbleView b : bubbles) {
             if (b != folderBubble) {
                 b.animate().cancel();
@@ -1165,7 +1168,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
                     .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
                     .withEndAction(() -> { b.applyScale(1.0f); b.ensureBlurAndRefreshBackground(); })
                     .start();
-                b.setIconAlpha(0.25f);
+                b.animateFolderDim(true, dimDuration, folderBubble::syncGhost);
+            } else {
+                b.animateFolderDim(false, dimDuration);
             }
         }
 
@@ -1328,15 +1333,16 @@ public class CustomHyperOpenContainer extends FrameLayout {
         }
 
         // 恢复一级气泡大小与透明度（含文件夹图标）：
-        // 有动画的关闭走线性过渡（与收拢动画同步），立即关闭保持瞬态复位
+        // 有动画的关闭走平滑过渡（与收拢动画同步），立即关闭保持瞬态复位
+        long collapseDuration = Math.max(0L, config != null ? config.folderChildCollapseDurationMs : 140L);
+        float targetAlpha = config != null ? config.iconAlpha : 1.0f;
         for (CircularBubbleView b : bubbles) {
             b.animate().cancel();
-            float targetAlpha = config != null ? config.iconAlpha : 1.0f;
             if (animated) {
                 b.animate()
                     .scaleX(1.0f)
                     .scaleY(1.0f)
-                    .setDuration(Math.max(0, config != null ? config.folderChildCollapseDurationMs : 140))
+                    .setDuration(collapseDuration)
                     .setInterpolator(new android.view.animation.LinearInterpolator())
                     .setUpdateListener(anim -> {
                         b.syncBlurCornerRadiusWithViewScale();
@@ -1348,12 +1354,14 @@ public class CustomHyperOpenContainer extends FrameLayout {
                         b.clearGhost();
                     })
                     .start();
+                b.animateFolderRestore(targetAlpha, collapseDuration);
             } else {
                 b.applyScale(1.0f);
                 b.ensureBlurAndRefreshBackground();
                 b.clearGhost();
+                b.resetFolderDim();
+                b.setIconAlpha(targetAlpha);
             }
-            b.setIconAlpha(targetAlpha);
         }
     }
 

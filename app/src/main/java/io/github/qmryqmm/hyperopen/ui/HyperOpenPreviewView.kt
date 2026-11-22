@@ -1717,6 +1717,7 @@ class HyperOpenPreviewView(
         // 所有气泡进入统一排版微放状态，清除单点悬停缩放
         for (b in bubbleViews) {
             b.setSelectedState(false)
+            b.resetFolderDim()
             b.setIconAlpha(config.iconAlpha)
             b.applyScale(1.05f)
         }
@@ -2188,6 +2189,7 @@ class HyperOpenPreviewView(
         currentSelectedBubble = null
         for (b in bubbleViews) {
             b.applyScale(1.0f)
+            b.resetFolderDim()
             b.setIconAlpha(config.iconAlpha)
         }
         HintTextStyler.reset(headerTitle, true, config)
@@ -2204,6 +2206,7 @@ class HyperOpenPreviewView(
         // 先把文件夹图标完全放大到鱼眼峰值（maxScale），放大动画播完后再展开子项：
         // 避免「边放大边展开」导致子项起点位置与文件夹最终位置错位、观感突兀
         folderBubble.animate().cancel()
+        folderBubble.animateFolderDim(false, 120L)
         folderBubble.animate()
             .scaleX(config.maxScale)
             .scaleY(config.maxScale)
@@ -2223,15 +2226,16 @@ class HyperOpenPreviewView(
             .start()
     }
 
-    /** 文件夹图标完全放大后的实际展开：其余普通图标恢复原大小（保持变暗），子项从文件夹中心扇形展开 */
+    /** 文件夹图标完全放大后的实际展开：其余普通图标恢复原大小（在展开时长内同步渐变变暗），子项从文件夹中心扇形展开 */
     private fun performFolderExpansion(folderBubble: CircularBubbleView, children: List<ShortcutItem>) {
         dismissFolderSubBubbles()
         activeFolderBubble = folderBubble
         triggerSlideHaptic()
 
+        val dimDuration = config.folderChildExpandDurationMs.coerceAtLeast(0).toLong()
         for (b in bubbleViews) {
             if (b != folderBubble) {
-                // 其余普通图标：线性恢复原本大小（鱼眼放大收回 1.0），仅保留变暗弱化
+                // 其余普通图标：线性恢复原本大小（鱼眼放大收回 1.0），并在子项展开时长内同步渐变弱化
                 b.animate().cancel()
                 b.animate()
                     .scaleX(1.0f)
@@ -2241,7 +2245,9 @@ class HyperOpenPreviewView(
                     .setUpdateListener { b.syncBlurCornerRadiusWithViewScale() }
                     .withEndAction { b.applyScale(1.0f); b.ensureBlurAndRefreshBackground() }
                     .start()
-                b.setIconAlpha(0.25f)
+                b.animateFolderDim(true, dimDuration) { folderBubble.syncGhost() }
+            } else {
+                b.animateFolderDim(false, dimDuration)
             }
         }
 
@@ -2400,15 +2406,16 @@ class HyperOpenPreviewView(
             }
         }
 
+        val collapseDuration = config.folderChildCollapseDurationMs.coerceAtLeast(0).toLong()
         for (b in bubbleViews) {
             // 收起时一级气泡（含文件夹图标）恢复原大小与原透明度：
-            // 有动画的关闭走线性过渡（与收拢动画同步），立即关闭保持瞬态复位
+            // 有动画的关闭走平滑过渡（与收拢动画同步），立即关闭保持瞬态复位
             b.animate().cancel()
             if (animated) {
                 b.animate()
                     .scaleX(1.0f)
                     .scaleY(1.0f)
-                    .setDuration(config.folderChildCollapseDurationMs.coerceAtLeast(0).toLong())
+                    .setDuration(collapseDuration)
                     .setInterpolator(android.view.animation.LinearInterpolator())
                     .setUpdateListener {
                         b.syncBlurCornerRadiusWithViewScale()
@@ -2420,12 +2427,14 @@ class HyperOpenPreviewView(
                         b.clearGhost()
                     }
                     .start()
+                b.animateFolderRestore(config.iconAlpha, collapseDuration)
             } else {
                 b.applyScale(1.0f)
                 b.ensureBlurAndRefreshBackground()
                 b.clearGhost()
+                b.resetFolderDim()
+                b.setIconAlpha(config.iconAlpha)
             }
-            b.setIconAlpha(config.iconAlpha)
         }
     }
 

@@ -1,5 +1,8 @@
 package io.github.qmryqmm.hyperopen.view;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Outline;
@@ -14,6 +17,7 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewOutlineProvider;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 
@@ -28,11 +32,17 @@ import io.github.qmryqmm.hyperopen.util.BubbleBlurSpec;
 
 public class CircularBubbleView extends FrameLayout {
 
+    private static final float FOLDER_DIM_RATIO = 0.25f;
+
     public final ShortcutItem item;
     public float targetX;
     public float targetY;
     public float currentScale = 1.0f;
     private float fisheyeScale = 1.0f;
+    private float baseIconAlpha = 1.0f;
+    private float folderDimProgress = 0f;
+    @Nullable
+    private ValueAnimator folderDimAnimator;
     private boolean isSelected = false;
 
     private int activeStyle;
@@ -157,9 +167,11 @@ public class CircularBubbleView extends FrameLayout {
         addView(iconView, iconLp);
 
         // 应用图标透明度
-        float initAlpha = config != null ? config.iconAlpha : 1.0f;
+        float initAlpha = Math.max(0f, Math.min(1f, config != null ? config.iconAlpha : 1.0f));
+        this.baseIconAlpha = initAlpha;
+        this.folderDimProgress = 0f;
         iconView.setAlpha(initAlpha);
-        opticDrawable.setAlpha(Math.round(Math.max(0f, Math.min(1f, initAlpha)) * 255f));
+        opticDrawable.setAlpha(Math.round(initAlpha * 255f));
 
         // 绑定图标 (优先从包名解析应用图标，或使用默认彩色矢量图形)
         loadItemIcon();
@@ -262,6 +274,7 @@ public class CircularBubbleView extends FrameLayout {
 
     @Override
     protected void onDetachedFromWindow() {
+        cancelFolderDimAnimator();
         if (opticView != null) {
             HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(opticView);
         }
@@ -493,6 +506,7 @@ public class CircularBubbleView extends FrameLayout {
 
     public void resetBlur() {
         animate().cancel();
+        resetFolderDim();
         this.isSelected = false;
         this.fisheyeScale = 1.0f;
         this.currentScale = 1.0f;
@@ -516,16 +530,119 @@ public class CircularBubbleView extends FrameLayout {
     }
 
     public void setIconAlpha(float alpha) {
-        float clamped = Math.max(0f, Math.min(1f, alpha));
-        if (iconView != null && Math.abs(iconView.getAlpha() - clamped) > 0.002f) {
-            iconView.setAlpha(clamped);
-            opticDrawable.setAlpha(Math.round(clamped * 255f));
+        this.baseIconAlpha = Math.max(0f, Math.min(1f, alpha));
+        applyEffectiveIconAlpha();
+    }
+
+    public float getIconAlpha() {
+        return iconView != null ? iconView.getAlpha() : computeEffectiveIconAlpha();
+    }
+
+    private float computeFolderDimTargetAlpha() {
+        float neutralAlpha = config != null ? Math.max(0f, Math.min(1f, config.iconAlpha)) : 1.0f;
+        return Math.max(0f, Math.min(1f, neutralAlpha * FOLDER_DIM_RATIO));
+    }
+
+    private float computeEffectiveIconAlpha() {
+        if (folderDimProgress <= 0.0005f) {
+            return baseIconAlpha;
+        }
+        float dimTarget = computeFolderDimTargetAlpha();
+        return Math.max(0f, Math.min(1f, baseIconAlpha + (dimTarget - baseIconAlpha) * folderDimProgress));
+    }
+
+    private void applyEffectiveIconAlpha() {
+        float effective = computeEffectiveIconAlpha();
+        if (iconView != null && Math.abs(iconView.getAlpha() - effective) > 0.001f) {
+            iconView.setAlpha(effective);
+            opticDrawable.setAlpha(Math.round(effective * 255f));
             opticDrawable.invalidateSelf();
         }
     }
 
-    public float getIconAlpha() {
-        return iconView != null ? iconView.getAlpha() : 1.0f;
+    private void cancelFolderDimAnimator() {
+        ValueAnimator animator = folderDimAnimator;
+        folderDimAnimator = null;
+        if (animator != null) {
+            animator.cancel();
+        }
+    }
+
+    private void startFolderDimAnimator(float from, float to, long durationMs, @Nullable Runnable onFrame) {
+        final ValueAnimator animator = ValueAnimator.ofFloat(from, to);
+        long actualDuration = Math.max(1L, Math.round(durationMs * Math.abs(to - from)));
+        animator.setDuration(actualDuration);
+        animator.setInterpolator(new DecelerateInterpolator());
+        animator.addUpdateListener(animation -> {
+            folderDimProgress = (Float) animation.getAnimatedValue();
+            applyEffectiveIconAlpha();
+            if (onFrame != null) {
+                onFrame.run();
+            }
+        });
+        animator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                if (folderDimAnimator == animator) {
+                    folderDimAnimator = null;
+                }
+            }
+        });
+        folderDimAnimator = animator;
+        animator.start();
+    }
+
+    /** 文件夹展开/关闭时驱动独立压暗进度 (0f..1f)，避免与每帧鱼眼 baseIconAlpha 互相覆写。 */
+    public void animateFolderDim(boolean dimmed, long durationMs) {
+        animateFolderDim(dimmed, durationMs, null);
+    }
+
+    public void animateFolderDim(boolean dimmed, long durationMs, @Nullable Runnable onFrame) {
+        float targetProgress = dimmed ? 1f : 0f;
+        cancelFolderDimAnimator();
+        if (durationMs <= 0L || Math.abs(folderDimProgress - targetProgress) <= 0.001f) {
+            folderDimProgress = targetProgress;
+            applyEffectiveIconAlpha();
+            if (onFrame != null) {
+                onFrame.run();
+            }
+            return;
+        }
+        startFolderDimAnimator(folderDimProgress, targetProgress, durationMs, onFrame);
+    }
+
+    /** 关闭恢复时从当前有效透明度反解连续起点，确保改写 baseIconAlpha 或打断展开时零跳变。 */
+    public void animateFolderRestore(float targetBaseAlpha, long durationMs) {
+        float prevEffective = computeEffectiveIconAlpha();
+        this.baseIconAlpha = Math.max(0f, Math.min(1f, targetBaseAlpha));
+        cancelFolderDimAnimator();
+        if (durationMs <= 0L) {
+            folderDimProgress = 0f;
+            applyEffectiveIconAlpha();
+            return;
+        }
+        float dimTarget = computeFolderDimTargetAlpha();
+        float denom = baseIconAlpha - dimTarget;
+        float startProgress = Math.abs(denom) > 0.001f
+            ? Math.max(0f, Math.min(1f, (baseIconAlpha - prevEffective) / denom))
+            : 0f;
+        folderDimProgress = startProgress;
+        applyEffectiveIconAlpha();
+        if (startProgress <= 0.001f) {
+            folderDimProgress = 0f;
+            applyEffectiveIconAlpha();
+            return;
+        }
+        startFolderDimAnimator(startProgress, 0f, durationMs, null);
+    }
+
+    /** 立即取消压暗动画并归零 folderDimProgress，恢复至当前 baseIconAlpha。 */
+    public void resetFolderDim() {
+        cancelFolderDimAnimator();
+        if (folderDimProgress != 0f) {
+            folderDimProgress = 0f;
+            applyEffectiveIconAlpha();
+        }
     }
 
     /**
