@@ -40,6 +40,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
@@ -66,6 +67,7 @@ import androidx.compose.ui.zIndex
 import io.github.qmryqmm.hyperopen.config.ConfigProfile
 import io.github.qmryqmm.hyperopen.config.ConfigProfileStore
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
+import io.github.qmryqmm.hyperopen.model.ShortcutItem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import top.yukonga.miuix.kmp.basic.BasicComponent
@@ -1313,6 +1315,18 @@ private fun ProfileActionDialog(
     val shortcutItems = remember(profile.id, profile.updatedAt, showShortcuts) {
         if (showShortcuts && profile.hasShortcuts) profile.parseShortcuts() else emptyList()
     }
+    val folderChildrenByKey = remember(shortcutItems) {
+        buildMap<String, List<ShortcutItem>> {
+            shortcutItems.forEachIndexed { idx, item ->
+                if (item.actionType == ShortcutItem.ACTION_FOLDER) {
+                    put("${item.id}#$idx", item.parseFolderChildren())
+                }
+            }
+        }
+    }
+    val expandedFolders = remember(profile.id, profile.updatedAt) {
+        mutableStateMapOf<String, Boolean>()
+    }
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -1397,40 +1411,11 @@ private fun ProfileActionDialog(
                         )
                     }
                     if (showShortcuts) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 22.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            shortcutItems.forEach { item ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = item.title.ifBlank { "未命名项目" },
-                                        fontSize = 13.sp,
-                                        color = MiuixTheme.colorScheme.onSurface,
-                                        modifier = Modifier.weight(1f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(
-                                        text = if (item.enabled) "启用" else "停用",
-                                        fontSize = 11.sp,
-                                        color = if (item.enabled) {
-                                            MiuixTheme.colorScheme.primary
-                                        } else {
-                                            MiuixTheme.colorScheme.onSurfaceVariantSummary
-                                        },
-                                    )
-                                }
-                            }
-                        }
+                        ProfileShortcutListPreview(
+                            shortcutItems = shortcutItems,
+                            folderChildrenByKey = folderChildrenByKey,
+                            expandedFolders = expandedFolders,
+                        )
                         Spacer(Modifier.height(6.dp))
                     }
                 }
@@ -1488,6 +1473,210 @@ private fun ProfileActionDialog(
             }
         }
     }
+}
+
+/**
+ * 配置详情内的只读快捷项目清单：支持聚合文件夹折叠摘要与点击展开树形子项。
+ */
+@Composable
+private fun ProfileShortcutListPreview(
+    shortcutItems: List<ShortcutItem>,
+    folderChildrenByKey: Map<String, List<ShortcutItem>>,
+    expandedFolders: MutableMap<String, Boolean>,
+) {
+    val primary = MiuixTheme.colorScheme.primary
+    val onSurface = MiuixTheme.colorScheme.onSurface
+    val summaryColor = MiuixTheme.colorScheme.onSurfaceVariantSummary
+    val guideColor = primary.copy(alpha = 0.28f)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 22.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (shortcutItems.isEmpty()) {
+            Text(
+                text = "暂无可预览的快捷项目",
+                fontSize = 12.sp,
+                color = summaryColor,
+            )
+        } else {
+            shortcutItems.forEachIndexed { idx, item ->
+                if (item.actionType != ShortcutItem.ACTION_FOLDER) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = item.title.ifBlank { "未命名项目" },
+                            fontSize = 13.sp,
+                            color = onSurface,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        ShortcutEnabledLabel(item.enabled)
+                    }
+                } else {
+                    val folderKey = "${item.id}#$idx"
+                    val children = folderChildrenByKey[folderKey].orEmpty()
+                    val hasChildren = children.isNotEmpty()
+                    val isExpanded = hasChildren && (expandedFolders[folderKey] == true)
+
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .then(
+                                    if (hasChildren) {
+                                        Modifier.clickable { expandedFolders[folderKey] = !isExpanded }
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                                .padding(vertical = 2.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = item.title.ifBlank { "未命名文件夹" },
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(5.dp))
+                                            .background(
+                                                if (hasChildren) primary.copy(alpha = 0.12f)
+                                                else onSurface.copy(alpha = 0.08f)
+                                            )
+                                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                                    ) {
+                                        Text(
+                                            text = if (hasChildren) "文件夹 · ${children.size}项" else "空文件夹",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = if (hasChildren) primary else summaryColor,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                if (hasChildren) {
+                                    Icon(
+                                        imageVector = if (isExpanded) MiuixIcons.ExpandLess else MiuixIcons.ExpandMore,
+                                        contentDescription = if (isExpanded) "收起文件夹子项" else "展开文件夹子项",
+                                        tint = summaryColor,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                }
+                                ShortcutEnabledLabel(item.enabled)
+                            }
+
+                            if (hasChildren && !isExpanded) {
+                                val summaryText = children.joinToString(" · ") {
+                                    it.title.ifBlank { "未命名项目" }
+                                }
+                                Text(
+                                    text = summaryText,
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp,
+                                    color = summaryColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
+                        }
+
+                        if (isExpanded) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp, bottom = 2.dp)
+                                    .alpha(if (item.enabled) 1f else 0.52f),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                children.forEachIndexed { childIdx, child ->
+                                    val isLastChild = childIdx == children.lastIndex
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .drawBehind {
+                                                val gap = 4.dp.toPx()
+                                                val topY = if (childIdx == 0) (-2).dp.toPx() else -gap
+                                                val lineX = 6.dp.toPx()
+                                                val endX = 12.dp.toPx()
+                                                val stroke = 1.25.dp.toPx()
+                                                val midY = size.height / 2f
+                                                drawLine(
+                                                    color = guideColor,
+                                                    start = Offset(lineX, topY),
+                                                    end = Offset(lineX, if (isLastChild) midY else size.height + gap),
+                                                    strokeWidth = stroke,
+                                                )
+                                                drawLine(
+                                                    color = guideColor,
+                                                    start = Offset(lineX, midY),
+                                                    end = Offset(endX, midY),
+                                                    strokeWidth = stroke,
+                                                )
+                                            }
+                                            .padding(start = 16.dp, top = 1.dp, bottom = 1.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = child.title.ifBlank { "未命名项目" },
+                                            fontSize = 12.sp,
+                                            color = onSurface.copy(alpha = 0.9f),
+                                            modifier = Modifier.weight(1f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        ShortcutEnabledLabel(child.enabled)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShortcutEnabledLabel(enabled: Boolean) {
+    Text(
+        text = if (enabled) "启用" else "停用",
+        fontSize = 11.sp,
+        color = if (enabled) {
+            MiuixTheme.colorScheme.primary
+        } else {
+            MiuixTheme.colorScheme.onSurfaceVariantSummary
+        },
+    )
 }
 
 @Composable
