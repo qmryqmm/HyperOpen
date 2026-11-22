@@ -268,7 +268,10 @@ public class SettingsProvider extends ContentProvider {
                 bundle.putFloat("last_real_fod_y", sp.getFloat("last_real_fod_y", 0f));
                 bundle.putInt("region_blur_radius", sp.getInt("region_blur_radius", 25));
                 bundle.putInt("icon_spacing_offset", sp.getInt("icon_spacing_offset", 5));
-                bundle.putInt("bubble_padding_percent", sp.getInt("bubble_padding_percent", 0));
+                int bubblePad = sp.getInt("bubble_padding_percent", 0);
+                bundle.putInt("bubble_padding_percent", bubblePad);
+                bundle.putBoolean("show_bubble_bg",
+                        sp.contains("show_bubble_bg") ? sp.getBoolean("show_bubble_bg", false) : (bubblePad > 0));
                 bundle.putInt("bubble_blur_radius", sp.getInt("bubble_blur_radius", 25));
                 // 旧版 selected_icon_scale：仅作迁移折算用途传给 SystemUI 侧合并进 max_scale（已废弃的独立参数）
                 bundle.putFloat("selected_icon_scale", sp.getFloat("selected_icon_scale", 1.0f));

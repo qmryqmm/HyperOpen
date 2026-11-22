@@ -220,6 +220,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 b.setMaterialStyle(resolvedStyle);
                 b.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
                 b.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE));
+                b.setBubbleBgEnabled(config.showBubbleBg);
                 b.setBubblePaddingPercent(config.bubblePaddingPercent);
                 b.setCornerRadiusPercent(config.iconCornerRadius);
                 b.setIconAlpha(config.iconAlpha);
@@ -770,6 +771,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 bubble.setMaterialStyle(resolvedStyle);
                 bubble.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
                 bubble.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE));
+                bubble.setBubbleBgEnabled(config.showBubbleBg);
                 bubble.setBubblePaddingPercent(config.bubblePaddingPercent);
                 bubble.setCornerRadiusPercent(config.iconCornerRadius);
                 bubble.setIconAlpha(config.iconAlpha);

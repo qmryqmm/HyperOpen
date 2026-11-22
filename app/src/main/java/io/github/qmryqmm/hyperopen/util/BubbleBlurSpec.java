@@ -3,7 +3,7 @@ package io.github.qmryqmm.hyperopen.util;
 /**
  * 气泡毛玻璃模糊规格单一数据源（纯数学，零系统依赖）。
  * <ul>
- *   <li>开关：{@link #isEnabled}（留白 0% = 气泡整体关闭，模糊跟随停用）；</li>
+ *   <li>开关：{@link #isEnabled}（由 {@code showBubbleBg} 独立控制，与留白比例解耦）；</li>
  *   <li>圆角：{@link #cornerRadiusOfHalfSize} / {@link #cornerRadiusPx}——
  *       图标气泡 OutlineProvider、光学层圆角、图标位图裁切、字形底垫与
  *       blur region 圆角全部经由此处换算，禁止任何一侧再抄散装公式。</li>
@@ -23,13 +23,13 @@ public final class BubbleBlurSpec {
     }
 
     /**
-     * 气泡模糊是否启用：模糊半径与气泡留白均有效（留白 0% = 气泡关闭，模糊跟随停用）。
+     * 气泡模糊是否启用：模糊半径有效且图标气泡材质开关开启（与留白比例解耦，0% 留白时贴合图标本体生效）。
      *
-     * @param blurRadiusDp   气泡留白区域模糊半径 (dp)
-     * @param paddingPercent 气泡内部留白比例 (0 ~ 40)
+     * @param blurRadiusDp    气泡区域模糊半径 (dp)
+     * @param bubbleBgEnabled 是否启用图标气泡材质
      */
-    public static boolean isEnabled(float blurRadiusDp, int paddingPercent) {
-        return blurRadiusDp > 0f && paddingPercent > 0;
+    public static boolean isEnabled(float blurRadiusDp, boolean bubbleBgEnabled) {
+        return blurRadiusDp > 0f && bubbleBgEnabled;
     }
 
     /**

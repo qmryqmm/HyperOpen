@@ -150,6 +150,107 @@ data class FolderMotionSettings(
     val onOvershoot: (Float) -> Unit,
 )
 
+data class MaterialSurfaceSettings(
+    val materialStyle: Int,
+    val onMaterialStyle: (Int) -> Unit,
+    val onOpenSoftGlassPage: () -> Unit = {},
+    val onOpenBlurMaterialPage: () -> Unit = {},
+    val bubbleMaterialFollowGlobal: Boolean,
+    val onBubbleMaterialFollowGlobal: (Boolean) -> Unit,
+    val regionMaterialFollowGlobal: Boolean,
+    val onRegionMaterialFollowGlobal: (Boolean) -> Unit,
+    val headerMaterialFollowGlobal: Boolean,
+    val onHeaderMaterialFollowGlobal: (Boolean) -> Unit,
+    val bubbleGlassMatteAlpha: Float,
+    val onBubbleGlassMatteAlpha: (Float) -> Unit,
+    val regionGlassMatteAlpha: Float,
+    val onRegionGlassMatteAlpha: (Float) -> Unit,
+    val headerGlassMatteAlpha: Float,
+    val onHeaderGlassMatteAlpha: (Float) -> Unit,
+    val fullscreenBlurMaskAlpha: Float,
+    val onFullscreenBlurMaskAlpha: (Float) -> Unit,
+    val fullscreenDimAlpha: Float,
+    val onFullscreenDimAlpha: (Float) -> Unit,
+    val headerDimAlpha: Float,
+    val onHeaderDimAlpha: (Float) -> Unit,
+    val regionDimAlpha: Float,
+    val onRegionDimAlpha: (Float) -> Unit,
+    val bubbleDimAlpha: Float,
+    val onBubbleDimAlpha: (Float) -> Unit,
+    val regionBlurRadius: Float,
+    val onRegionBlurRadius: (Float) -> Unit,
+    val showBubbleBg: Boolean,
+    val onShowBubbleBg: (Boolean) -> Unit,
+    val bubblePaddingPercent: Float,
+    val onBubblePaddingPercent: (Float) -> Unit,
+    val bubbleBlurRadius: Float,
+    val onBubbleBlurRadius: (Float) -> Unit,
+)
+
+data class HeaderHintSettings(
+    val showHeaderPill: Boolean,
+    val onShowHeaderPill: (Boolean) -> Unit,
+    val showHeaderPillBg: Boolean,
+    val onShowHeaderPillBg: (Boolean) -> Unit,
+    val headerTopMargin: Float,
+    val onHeaderTopMargin: (Float) -> Unit,
+    val headerTitleSize: Float,
+    val onHeaderTitleSize: (Float) -> Unit,
+    val headerSubtitleSize: Float,
+    val onHeaderSubtitleSize: (Float) -> Unit,
+    val headerBlurRadius: Float,
+    val onHeaderBlurRadius: (Float) -> Unit,
+    val headerTextCentered: Boolean,
+    val onHeaderTextCentered: (Boolean) -> Unit,
+    val globalHintColorMode: Int,
+    val onGlobalHintColorMode: (Int) -> Unit,
+    val globalHintCustomColor: Int,
+    val onGlobalHintCustomColor: (Int) -> Unit,
+    val defaultHintTextStroke: Float,
+    val onDefaultHintTextStroke: (Float) -> Unit,
+    val defaultHintTextShadow: Float,
+    val onDefaultHintTextShadow: (Float) -> Unit,
+    val defaultHintTextWeight: Int,
+    val onDefaultHintTextWeight: (Int) -> Unit,
+    val defaultHintTextLetterSpacing: Float,
+    val onDefaultHintTextLetterSpacing: (Float) -> Unit,
+    val defaultShowHintTitle: Boolean,
+    val onDefaultShowHintTitle: (Boolean) -> Unit,
+    val defaultShowHintSubtitle: Boolean,
+    val onDefaultShowHintSubtitle: (Boolean) -> Unit,
+)
+
+data class HapticSettings(
+    val hapticEnabled: Boolean,
+    val onHapticEnabled: (Boolean) -> Unit,
+    val hapticStrength: Float,
+    val onHapticStrength: (Float) -> Unit,
+    val hapticDurationMs: Float,
+    val onHapticDurationMs: (Float) -> Unit,
+    val hapticMode: Int,
+    val onHapticMode: (Int) -> Unit,
+    val hapticSlideEnabled: Boolean,
+    val onHapticSlideEnabled: (Boolean) -> Unit,
+    val hapticSlideStrength: Float,
+    val onHapticSlideStrength: (Float) -> Unit,
+    val hapticSlideDurationMs: Float,
+    val onHapticSlideDurationMs: (Float) -> Unit,
+    val hapticSlideMode: Int,
+    val onHapticSlideMode: (Int) -> Unit,
+    val hapticStockWaveExpand: Int,
+    val onHapticStockWaveExpand: (Int) -> Unit,
+    val hapticStockWaveSlide: Int,
+    val onHapticStockWaveSlide: (Int) -> Unit,
+    val hapticBrakePulse: Boolean,
+    val onHapticBrakePulse: (Boolean) -> Unit,
+    val hapticDoubleGapMs: Float,
+    val onHapticDoubleGapMs: (Float) -> Unit,
+    val hapticSlideBrakePulse: Boolean,
+    val onHapticSlideBrakePulse: (Boolean) -> Unit,
+    val hapticSlideDoubleGapMs: Float,
+    val onHapticSlideDoubleGapMs: (Float) -> Unit,
+)
+
 /**
  * 参数配置页面（Tab 0），按 5 页 Tab 分页：布局 / 动效 / 外观 / 图标 / 震动。
  * 集中管理指纹快捷方式的材质风格（液态玻璃 / 高斯模糊）、几何排布（蜂窝 / 空心圆环 / 扇区 / 系统扇形）、
@@ -163,19 +264,13 @@ fun ParamsPage(
     panelMotion: PanelMotionSettings,
     folderLayout: FolderLayoutSettings,
     folderMotion: FolderMotionSettings,
-    materialStyle: Int, onMaterialStyle: (Int) -> Unit,
-    onOpenSoftGlassPage: () -> Unit = {},
+    materialSurface: MaterialSurfaceSettings,
+    headerHint: HeaderHintSettings,
+    haptic: HapticSettings,
     offsetY: Float, onOffsetY: (Float) -> Unit,
     regionDiameter: Float, onRegionDiameter: (Float) -> Unit,
     iconSpacingOffset: Float, onIconSpacingOffset: (Float) -> Unit,
     showRegionBg: Boolean, onShowRegionBg: (Boolean) -> Unit,
-    showHeaderPill: Boolean, onShowHeaderPill: (Boolean) -> Unit,
-    showHeaderPillBg: Boolean, onShowHeaderPillBg: (Boolean) -> Unit,
-    headerTopMargin: Float, onHeaderTopMargin: (Float) -> Unit,
-    headerTitleSize: Float, onHeaderTitleSize: (Float) -> Unit,
-    headerSubtitleSize: Float, onHeaderSubtitleSize: (Float) -> Unit,
-    headerBlurRadius: Float, onHeaderBlurRadius: (Float) -> Unit,
-    headerTextCentered: Boolean, onHeaderTextCentered: (Boolean) -> Unit,
     maxIconCount: Float, onMaxIconCount: (Float) -> Unit,
     iconCapacity: Int, enabledShortcutsCount: Int,
     layoutStyle: Int, onLayoutStyle: (Int) -> Unit,
@@ -187,54 +282,16 @@ fun ParamsPage(
     sectorDashGap: Float, onSectorDashGap: (Float) -> Unit,
     sectorLineWidth: Float, onSectorLineWidth: (Float) -> Unit,
     sectorHighlightEnabled: Boolean, onSectorHighlightEnabled: (Boolean) -> Unit,
-    globalHintColorMode: Int, onGlobalHintColorMode: (Int) -> Unit,
-    globalHintCustomColor: Int, onGlobalHintCustomColor: (Int) -> Unit,
-    defaultHintTextStroke: Float, onDefaultHintTextStroke: (Float) -> Unit,
-    defaultHintTextShadow: Float, onDefaultHintTextShadow: (Float) -> Unit,
-    defaultHintTextWeight: Int, onDefaultHintTextWeight: (Int) -> Unit,
-    defaultHintTextLetterSpacing: Float, onDefaultHintTextLetterSpacing: (Float) -> Unit,
-    defaultShowHintTitle: Boolean, onDefaultShowHintTitle: (Boolean) -> Unit,
-    defaultShowHintSubtitle: Boolean, onDefaultShowHintSubtitle: (Boolean) -> Unit,
     maxScale: Float, onMaxScale: (Float) -> Unit,
     influenceRadius: Float, onInfluenceRadius: (Float) -> Unit,
     iconAlpha: Float, onIconAlpha: (Float) -> Unit,
     fisheyeZoomAlpha: Float, onFisheyeZoomAlpha: (Float) -> Unit,
     fisheyeOtherAlpha: Float, onFisheyeOtherAlpha: (Float) -> Unit,
     iconCornerRadius: Float, onIconCornerRadius: (Float) -> Unit,
-    fullscreenBlurMaskAlpha: Float, onFullscreenBlurMaskAlpha: (Float) -> Unit,
-    fullscreenDimAlpha: Float, onFullscreenDimAlpha: (Float) -> Unit,
-    headerDimAlpha: Float, onHeaderDimAlpha: (Float) -> Unit,
-    regionDimAlpha: Float, onRegionDimAlpha: (Float) -> Unit,
-    bubbleDimAlpha: Float, onBubbleDimAlpha: (Float) -> Unit,
     showDelayMs: Float, onShowDelayMs: (Float) -> Unit,
     disableSystemEnterAnim: Boolean, onDisableSystemEnterAnim: (Boolean) -> Unit,
     faceUnlockQuickOpen: Boolean, onFaceUnlockQuickOpen: (Boolean) -> Unit,
     bleUnlockQuickOpen: Boolean, onBleUnlockQuickOpen: (Boolean) -> Unit,
-    hapticEnabled: Boolean, onHapticEnabled: (Boolean) -> Unit,
-    hapticStrength: Float, onHapticStrength: (Float) -> Unit,
-    hapticDurationMs: Float, onHapticDurationMs: (Float) -> Unit,
-    hapticMode: Int, onHapticMode: (Int) -> Unit,
-    hapticSlideEnabled: Boolean, onHapticSlideEnabled: (Boolean) -> Unit,
-    hapticSlideStrength: Float, onHapticSlideStrength: (Float) -> Unit,
-    hapticSlideDurationMs: Float, onHapticSlideDurationMs: (Float) -> Unit,
-    hapticSlideMode: Int, onHapticSlideMode: (Int) -> Unit,
-    hapticStockWaveExpand: Int, onHapticStockWaveExpand: (Int) -> Unit,
-    hapticStockWaveSlide: Int, onHapticStockWaveSlide: (Int) -> Unit,
-    hapticBrakePulse: Boolean, onHapticBrakePulse: (Boolean) -> Unit,
-    hapticDoubleGapMs: Float, onHapticDoubleGapMs: (Float) -> Unit,
-    hapticSlideBrakePulse: Boolean, onHapticSlideBrakePulse: (Boolean) -> Unit,
-    hapticSlideDoubleGapMs: Float, onHapticSlideDoubleGapMs: (Float) -> Unit,
-    regionBlurRadius: Float, onRegionBlurRadius: (Float) -> Unit,
-    bubblePaddingPercent: Float, onBubblePaddingPercent: (Float) -> Unit,
-    bubbleBlurRadius: Float, onBubbleBlurRadius: (Float) -> Unit,
-    // ── 全局模糊材质 / 跟随全局开关 / per-component matteAlpha ──
-    onOpenBlurMaterialPage: () -> Unit = {},
-    bubbleMaterialFollowGlobal: Boolean, onBubbleMaterialFollowGlobal: (Boolean) -> Unit,
-    regionMaterialFollowGlobal: Boolean, onRegionMaterialFollowGlobal: (Boolean) -> Unit,
-    headerMaterialFollowGlobal: Boolean, onHeaderMaterialFollowGlobal: (Boolean) -> Unit,
-    bubbleGlassMatteAlpha: Float, onBubbleGlassMatteAlpha: (Float) -> Unit,
-    regionGlassMatteAlpha: Float, onRegionGlassMatteAlpha: (Float) -> Unit,
-    headerGlassMatteAlpha: Float, onHeaderGlassMatteAlpha: (Float) -> Unit,
 ) {
     val ctx = LocalContext.current
     val view = androidx.compose.ui.platform.LocalView.current
@@ -288,6 +345,101 @@ fun ParamsPage(
     val onFolderChildStartScale: (Float) -> Unit = { folderMotion.onStartScale(it) }
     val folderChildOvershoot = folderMotion.overshoot
     val onFolderChildOvershoot: (Float) -> Unit = { folderMotion.onOvershoot(it) }
+
+    val materialStyle = materialSurface.materialStyle
+    val onMaterialStyle = materialSurface.onMaterialStyle
+    val onOpenSoftGlassPage = materialSurface.onOpenSoftGlassPage
+    val onOpenBlurMaterialPage = materialSurface.onOpenBlurMaterialPage
+    val bubbleMaterialFollowGlobal = materialSurface.bubbleMaterialFollowGlobal
+    val onBubbleMaterialFollowGlobal = materialSurface.onBubbleMaterialFollowGlobal
+    val regionMaterialFollowGlobal = materialSurface.regionMaterialFollowGlobal
+    val onRegionMaterialFollowGlobal = materialSurface.onRegionMaterialFollowGlobal
+    val headerMaterialFollowGlobal = materialSurface.headerMaterialFollowGlobal
+    val onHeaderMaterialFollowGlobal = materialSurface.onHeaderMaterialFollowGlobal
+    val bubbleGlassMatteAlpha = materialSurface.bubbleGlassMatteAlpha
+    val onBubbleGlassMatteAlpha = materialSurface.onBubbleGlassMatteAlpha
+    val regionGlassMatteAlpha = materialSurface.regionGlassMatteAlpha
+    val onRegionGlassMatteAlpha = materialSurface.onRegionGlassMatteAlpha
+    val headerGlassMatteAlpha = materialSurface.headerGlassMatteAlpha
+    val onHeaderGlassMatteAlpha = materialSurface.onHeaderGlassMatteAlpha
+    val fullscreenBlurMaskAlpha = materialSurface.fullscreenBlurMaskAlpha
+    val onFullscreenBlurMaskAlpha = materialSurface.onFullscreenBlurMaskAlpha
+    val fullscreenDimAlpha = materialSurface.fullscreenDimAlpha
+    val onFullscreenDimAlpha = materialSurface.onFullscreenDimAlpha
+    val headerDimAlpha = materialSurface.headerDimAlpha
+    val onHeaderDimAlpha = materialSurface.onHeaderDimAlpha
+    val regionDimAlpha = materialSurface.regionDimAlpha
+    val onRegionDimAlpha = materialSurface.onRegionDimAlpha
+    val bubbleDimAlpha = materialSurface.bubbleDimAlpha
+    val onBubbleDimAlpha = materialSurface.onBubbleDimAlpha
+    val regionBlurRadius = materialSurface.regionBlurRadius
+    val onRegionBlurRadius = materialSurface.onRegionBlurRadius
+    val showBubbleBg = materialSurface.showBubbleBg
+    val onShowBubbleBg = materialSurface.onShowBubbleBg
+    val bubblePaddingPercent = materialSurface.bubblePaddingPercent
+    val onBubblePaddingPercent = materialSurface.onBubblePaddingPercent
+    val bubbleBlurRadius = materialSurface.bubbleBlurRadius
+    val onBubbleBlurRadius = materialSurface.onBubbleBlurRadius
+
+    val showHeaderPill = headerHint.showHeaderPill
+    val onShowHeaderPill = headerHint.onShowHeaderPill
+    val showHeaderPillBg = headerHint.showHeaderPillBg
+    val onShowHeaderPillBg = headerHint.onShowHeaderPillBg
+    val headerTopMargin = headerHint.headerTopMargin
+    val onHeaderTopMargin = headerHint.onHeaderTopMargin
+    val headerTitleSize = headerHint.headerTitleSize
+    val onHeaderTitleSize = headerHint.onHeaderTitleSize
+    val headerSubtitleSize = headerHint.headerSubtitleSize
+    val onHeaderSubtitleSize = headerHint.onHeaderSubtitleSize
+    val headerBlurRadius = headerHint.headerBlurRadius
+    val onHeaderBlurRadius = headerHint.onHeaderBlurRadius
+    val headerTextCentered = headerHint.headerTextCentered
+    val onHeaderTextCentered = headerHint.onHeaderTextCentered
+    val globalHintColorMode = headerHint.globalHintColorMode
+    val onGlobalHintColorMode = headerHint.onGlobalHintColorMode
+    val globalHintCustomColor = headerHint.globalHintCustomColor
+    val onGlobalHintCustomColor = headerHint.onGlobalHintCustomColor
+    val defaultHintTextStroke = headerHint.defaultHintTextStroke
+    val onDefaultHintTextStroke = headerHint.onDefaultHintTextStroke
+    val defaultHintTextShadow = headerHint.defaultHintTextShadow
+    val onDefaultHintTextShadow = headerHint.onDefaultHintTextShadow
+    val defaultHintTextWeight = headerHint.defaultHintTextWeight
+    val onDefaultHintTextWeight = headerHint.onDefaultHintTextWeight
+    val defaultHintTextLetterSpacing = headerHint.defaultHintTextLetterSpacing
+    val onDefaultHintTextLetterSpacing = headerHint.onDefaultHintTextLetterSpacing
+    val defaultShowHintTitle = headerHint.defaultShowHintTitle
+    val onDefaultShowHintTitle = headerHint.onDefaultShowHintTitle
+    val defaultShowHintSubtitle = headerHint.defaultShowHintSubtitle
+    val onDefaultShowHintSubtitle = headerHint.onDefaultShowHintSubtitle
+
+    val hapticEnabled = haptic.hapticEnabled
+    val onHapticEnabled = haptic.onHapticEnabled
+    val hapticStrength = haptic.hapticStrength
+    val onHapticStrength = haptic.onHapticStrength
+    val hapticDurationMs = haptic.hapticDurationMs
+    val onHapticDurationMs = haptic.onHapticDurationMs
+    val hapticMode = haptic.hapticMode
+    val onHapticMode = haptic.onHapticMode
+    val hapticSlideEnabled = haptic.hapticSlideEnabled
+    val onHapticSlideEnabled = haptic.onHapticSlideEnabled
+    val hapticSlideStrength = haptic.hapticSlideStrength
+    val onHapticSlideStrength = haptic.onHapticSlideStrength
+    val hapticSlideDurationMs = haptic.hapticSlideDurationMs
+    val onHapticSlideDurationMs = haptic.onHapticSlideDurationMs
+    val hapticSlideMode = haptic.hapticSlideMode
+    val onHapticSlideMode = haptic.onHapticSlideMode
+    val hapticStockWaveExpand = haptic.hapticStockWaveExpand
+    val onHapticStockWaveExpand = haptic.onHapticStockWaveExpand
+    val hapticStockWaveSlide = haptic.hapticStockWaveSlide
+    val onHapticStockWaveSlide = haptic.onHapticStockWaveSlide
+    val hapticBrakePulse = haptic.hapticBrakePulse
+    val onHapticBrakePulse = haptic.onHapticBrakePulse
+    val hapticDoubleGapMs = haptic.hapticDoubleGapMs
+    val onHapticDoubleGapMs = haptic.onHapticDoubleGapMs
+    val hapticSlideBrakePulse = haptic.hapticSlideBrakePulse
+    val onHapticSlideBrakePulse = haptic.onHapticSlideBrakePulse
+    val hapticSlideDoubleGapMs = haptic.hapticSlideDoubleGapMs
+    val onHapticSlideDoubleGapMs = haptic.onHapticSlideDoubleGapMs
 
     // 各分区折叠状态（key → 是否已收起），通过 SharedPreferences 记忆持久化
     val uiPrefs = remember { ctx.getSharedPreferences("hyperopen_ui_state", android.content.Context.MODE_PRIVATE) }
@@ -1442,10 +1594,16 @@ fun ParamsPage(
                     title = "气泡与动效",
                     expanded = isOpen("bubble"),
                     onToggle = { toggle("bubble") },
-                    summary = if (bubblePaddingPercent <= 0) {
-                        "留白 0% · 气泡已关闭（模糊与压暗随之停用）"
+                    summary = if (!showBubbleBg) {
+                        "已关闭（仅显示图标）"
                     } else {
-                        "留白 ${bubblePaddingPercent.toInt()}% · 模糊 ${bubbleBlurRadius.toInt()} dp · 压暗 ${(bubbleDimAlpha * 100).toInt()}%"
+                        val padDesc = if (bubblePaddingPercent.toInt() <= 0) "贴合图标 (0%)" else "留白 ${bubblePaddingPercent.toInt()}%"
+                        when {
+                            bubbleMaterialFollowGlobal -> "$padDesc · 跟随全局材质"
+                            materialStyle == HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR ->
+                                "$padDesc · 模糊 ${bubbleBlurRadius.toInt()} dp · 压暗 ${(bubbleDimAlpha * 100).toInt()}%"
+                            else -> "$padDesc · 磨砂 ${(bubbleGlassMatteAlpha * 100).toInt()}%"
+                        }
                     },
                 )
             }
@@ -1455,55 +1613,58 @@ fun ParamsPage(
                         .padding(horizontal = 12.dp)
                         .fillMaxWidth(),
                 ) {
-                    SliderPreference(
-                        title = "气泡内部留白比例",
-                        summary = "图标与气泡边缘的空隙；0% 时直接关闭气泡：底衬、模糊与压暗一并停用，仅显示图标",
-                        valueText = "${bubblePaddingPercent.toInt()} %",
-                        value = bubblePaddingPercent,
-                        valueRange = 0f..40f,
-                        onValueChange = onBubblePaddingPercent,
-                    )
                     SwitchPreference(
-                        title = "跟随全局材质",
-                        summary = if (bubbleMaterialFollowGlobal) "使用全局模糊/压暗参数" else "使用本组件独立参数",
-                        checked = bubbleMaterialFollowGlobal,
-                        onCheckedChange = onBubbleMaterialFollowGlobal,
+                        title = "启用图标气泡材质",
+                        summary = if (showBubbleBg)
+                            "为图标渲染柔光玻璃 / 高斯模糊与光学边框；留白 0% 时直接贴合图标本体"
+                        else
+                            "已关闭底衬、模糊与压暗，仅显示图标",
+                        checked = showBubbleBg,
+                        onCheckedChange = onShowBubbleBg,
                     )
-                    if (!bubbleMaterialFollowGlobal) {
-                        if (materialStyle == HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR) {
-                            SliderPreference(
-                                title = "气泡留白区域模糊半径",
-                                summary = "与图标显示区域底衬统一的高斯模糊毛玻璃样式",
-                                valueText = when {
-                                    bubblePaddingPercent <= 0 -> "已随气泡关闭"
-                                    bubbleBlurRadius.toInt() == 0 -> "已关闭模糊"
-                                    else -> "${bubbleBlurRadius.toInt()} dp"
-                                },
-                                value = bubbleBlurRadius,
-                                valueRange = 0f..50f,
-                                onValueChange = onBubbleBlurRadius,
-                            )
-                            SliderPreference(
-                                title = "气泡留白区域压暗程度",
-                                summary = "在每个图标气泡的毛玻璃底衬之上叠加黑色压暗",
-                                valueText = when {
-                                    bubblePaddingPercent <= 0 -> "已随气泡关闭"
-                                    kotlin.math.round(bubbleDimAlpha * 100f) <= 0.5f -> "不压暗"
-                                    else -> "${kotlin.math.round(bubbleDimAlpha * 100f).toInt()} %"
-                                },
-                                value = bubbleDimAlpha * 100f,
-                                valueRange = 0f..100f,
-                                onValueChange = { onBubbleDimAlpha(it / 100f) },
-                            )
-                        } else {
-                            SliderPreference(
-                                title = "气泡柔光磨砂浓度",
-                                summary = "控制本组件柔光玻璃的磨砂强度（同时影响模糊半径）",
-                                valueText = "${(bubbleGlassMatteAlpha * 100).toInt()}%",
-                                value = bubbleGlassMatteAlpha * 100f,
-                                valueRange = 5f..40f,
-                                onValueChange = { onBubbleGlassMatteAlpha(it / 100f) },
-                            )
+                    if (showBubbleBg) {
+                        SliderPreference(
+                            title = "气泡内部留白比例",
+                            summary = "图标与材质边缘的空隙；0% 时无外圈留白，材质直接贴合图标本体",
+                            valueText = "${bubblePaddingPercent.toInt()} %",
+                            value = bubblePaddingPercent,
+                            valueRange = 0f..40f,
+                            onValueChange = onBubblePaddingPercent,
+                        )
+                        SwitchPreference(
+                            title = "跟随全局材质",
+                            summary = if (bubbleMaterialFollowGlobal) "使用全局模糊/压暗参数" else "使用本组件独立参数",
+                            checked = bubbleMaterialFollowGlobal,
+                            onCheckedChange = onBubbleMaterialFollowGlobal,
+                        )
+                        if (!bubbleMaterialFollowGlobal) {
+                            if (materialStyle == HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR) {
+                                SliderPreference(
+                                    title = "气泡背景模糊半径",
+                                    summary = "与图标显示区域底衬统一的高斯模糊毛玻璃样式",
+                                    valueText = if (bubbleBlurRadius.toInt() == 0) "已关闭模糊" else "${bubbleBlurRadius.toInt()} dp",
+                                    value = bubbleBlurRadius,
+                                    valueRange = 0f..50f,
+                                    onValueChange = onBubbleBlurRadius,
+                                )
+                                SliderPreference(
+                                    title = "气泡背景压暗程度",
+                                    summary = "在每个图标气泡的毛玻璃底衬之上叠加黑色压暗",
+                                    valueText = if (kotlin.math.round(bubbleDimAlpha * 100f) <= 0.5f) "不压暗" else "${kotlin.math.round(bubbleDimAlpha * 100f).toInt()} %",
+                                    value = bubbleDimAlpha * 100f,
+                                    valueRange = 0f..100f,
+                                    onValueChange = { onBubbleDimAlpha(it / 100f) },
+                                )
+                            } else {
+                                SliderPreference(
+                                    title = "气泡柔光磨砂浓度",
+                                    summary = "控制本组件柔光玻璃的磨砂强度（同时影响模糊半径）",
+                                    valueText = "${(bubbleGlassMatteAlpha * 100).toInt()}%",
+                                    value = bubbleGlassMatteAlpha * 100f,
+                                    valueRange = 5f..40f,
+                                    onValueChange = { onBubbleGlassMatteAlpha(it / 100f) },
+                                )
+                            }
                         }
                     }
                 }

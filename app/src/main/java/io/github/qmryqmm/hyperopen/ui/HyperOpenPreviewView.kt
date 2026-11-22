@@ -1020,6 +1020,7 @@ class HyperOpenPreviewView(
             old.iconSize != newConfig.iconSize ||
             old.iconSpacingOffset != newConfig.iconSpacingOffset ||
             old.materialStyle != newConfig.materialStyle ||
+            old.showBubbleBg != newConfig.showBubbleBg ||
             old.bubblePaddingPercent != newConfig.bubblePaddingPercent ||
             old.bubbleBlurRadius != newConfig.bubbleBlurRadius ||
             old.appIconCropMode != newConfig.appIconCropMode ||
@@ -1089,6 +1090,7 @@ class HyperOpenPreviewView(
             b.updateConfig(config)
             b.setMaterialStyle(resolvedStyle)
             b.setBlurRadius(stackedBlurDp(HyperOpenConfig.COMPONENT_BUBBLE))
+            b.setBubbleBgEnabled(config.showBubbleBg)
             b.setBubblePaddingPercent(config.bubblePaddingPercent)
             b.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE))
             b.setCornerRadiusPercent(config.iconCornerRadius)

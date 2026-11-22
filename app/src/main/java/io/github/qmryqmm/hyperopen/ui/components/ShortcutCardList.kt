@@ -945,6 +945,7 @@ fun ShortcutBubbleIcon(
                 v.setMaterialStyle(resolvedStyle)
                 v.setBlurRadius(cfg.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE).toFloat())
                 v.setDimAlpha(cfg.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE))
+                v.setBubbleBgEnabled(cfg.showBubbleBg)
                 v.setBubblePaddingPercent(cfg.bubblePaddingPercent)
                 v.setCornerRadiusPercent(cfg.iconCornerRadius)
                 v.setIconAlpha(cfg.iconAlpha)

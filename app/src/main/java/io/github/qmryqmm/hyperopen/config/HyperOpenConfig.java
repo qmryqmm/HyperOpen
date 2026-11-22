@@ -289,12 +289,13 @@ public class HyperOpenConfig {
 
     /** 面板图标分布紧凑程度微调 (-10dp ~ 20dp，默认 5dp，负值更紧凑，正值更松散；仅对面板图标生效) */
     public int iconSpacingOffset = 5;
-    /** 气泡内部图标留白比例 (0% ~ 40%，默认 0%)；0% 图标满铺并直接关闭气泡：底衬、模糊与压暗一并停用 */
     /**
-     * 气泡内部留白比例 (0 ~ 40%)：同时是气泡整体开关——0% 时气泡底衬/模糊/压暗全部关闭，
-     * 仅显示图标。
+     * 气泡内部留白比例 (0 ~ 40%)：0% 时无外圈留白、材质直接贴合图标本体；
+     * 气泡底衬/模糊/压暗开关由 {@link #showBubbleBg} 独立控制。
      */
     public int bubblePaddingPercent = 0;
+    /** 是否启用图标气泡/背景材质（柔光玻璃或高斯模糊、光学边框与压暗）；开启且留白 0% 时材质直接贴合图标本体 */
+    public boolean showBubbleBg = false;
     /** 图标气泡留白区域高斯模糊半径 (0 ~ 50 dp，默认 25 dp，0 为关闭模糊，样式与圆形视界底衬一致) */
     public int bubbleBlurRadius = 25;
 
@@ -824,6 +825,9 @@ public class HyperOpenConfig {
                     config.regionBlurRadius = bundle.getInt("region_blur_radius", 25);
                     config.iconSpacingOffset = bundle.getInt("icon_spacing_offset", 5);
                     config.bubblePaddingPercent = bundle.getInt("bubble_padding_percent", 0);
+                    config.showBubbleBg = bundle.containsKey("show_bubble_bg")
+                            ? bundle.getBoolean("show_bubble_bg", false)
+                            : (config.bubblePaddingPercent > 0);
                     config.bubbleBlurRadius = bundle.getInt("bubble_blur_radius", 25);
                     // 旧版 selected_icon_scale 折算迁移：峰值 maxScale × selectedIconScale 一次性合并进 maxScale
                     migrateLegacySelectedScale(config, bundle.getFloat("selected_icon_scale", 1.0f));
@@ -987,6 +991,9 @@ public class HyperOpenConfig {
         config.regionBlurRadius = xPrefs.getInt("region_blur_radius", 25);
         config.iconSpacingOffset = xPrefs.getInt("icon_spacing_offset", 5);
         config.bubblePaddingPercent = xPrefs.getInt("bubble_padding_percent", 0);
+        config.showBubbleBg = xPrefs.contains("show_bubble_bg")
+                ? xPrefs.getBoolean("show_bubble_bg", false)
+                : (config.bubblePaddingPercent > 0);
         config.bubbleBlurRadius = xPrefs.getInt("bubble_blur_radius", 25);
         // 旧版 selected_icon_scale 折算迁移：峰值 maxScale × selectedIconScale 一次性合并进 maxScale
         migrateLegacySelectedScale(config, xPrefs.getFloat("selected_icon_scale", 1.0f));
@@ -1141,6 +1148,9 @@ public class HyperOpenConfig {
         config.regionBlurRadius = sp.getInt("region_blur_radius", 25);
         config.iconSpacingOffset = sp.getInt("icon_spacing_offset", 5);
         config.bubblePaddingPercent = sp.getInt("bubble_padding_percent", 0);
+        config.showBubbleBg = sp.contains("show_bubble_bg")
+                ? sp.getBoolean("show_bubble_bg", false)
+                : (config.bubblePaddingPercent > 0);
         config.bubbleBlurRadius = sp.getInt("bubble_blur_radius", 25);
         // 旧版 selected_icon_scale 折算迁移：峰值 maxScale × selectedIconScale 一次性合并进 maxScale
         migrateLegacySelectedScale(config, sp.getFloat("selected_icon_scale", 1.0f));
@@ -1284,6 +1294,9 @@ public class HyperOpenConfig {
         config.regionBlurRadius = readInt(values, "region_blur_radius", 25);
         config.iconSpacingOffset = readInt(values, "icon_spacing_offset", 5);
         config.bubblePaddingPercent = readInt(values, "bubble_padding_percent", 0);
+        config.showBubbleBg = (values != null && values.has("show_bubble_bg"))
+                ? readBoolean(values, "show_bubble_bg", false)
+                : (config.bubblePaddingPercent > 0);
         config.bubbleBlurRadius = readInt(values, "bubble_blur_radius", 25);
         migrateLegacySelectedScale(config, readFloat(values, "selected_icon_scale", 1.0f));
         config.appIconCropMode = readInt(values, "app_icon_crop_mode", CROP_ADAPTIVE_EXPAND);
@@ -1413,6 +1426,7 @@ public class HyperOpenConfig {
                 && hapticSlideDoubleGapMs == other.hapticSlideDoubleGapMs
                 && regionBlurRadius == other.regionBlurRadius
                 && iconSpacingOffset == other.iconSpacingOffset
+                && showBubbleBg == other.showBubbleBg
                 && bubblePaddingPercent == other.bubblePaddingPercent
                 && bubbleBlurRadius == other.bubbleBlurRadius
                 && appIconCropMode == other.appIconCropMode
@@ -1606,6 +1620,7 @@ public class HyperOpenConfig {
             .putInt("haptic_slide_double_gap_ms", hapticSlideDoubleGapMs)
             .putInt("region_blur_radius", regionBlurRadius)
             .putInt("icon_spacing_offset", iconSpacingOffset)
+            .putBoolean("show_bubble_bg", showBubbleBg)
             .putInt("bubble_padding_percent", bubblePaddingPercent)
             .putInt("bubble_blur_radius", bubbleBlurRadius)
             // 旧版选中强调倍率已废弃：命中图标最终倍率统一为 max_scale 单值，写入时清掉遗留键

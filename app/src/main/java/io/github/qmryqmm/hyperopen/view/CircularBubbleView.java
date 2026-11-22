@@ -38,8 +38,9 @@ public class CircularBubbleView extends FrameLayout {
     private int activeStyle;
     private final int sizePx;
     private float blurRadiusDp;
+    private boolean bubbleBgEnabled;
     private int paddingPercent;
-    /** 气泡留白区域压暗原始值（气泡关闭时实际应用为 0） */
+    /** 气泡区域压暗原始值（气泡材质关闭时实际应用为 0） */
     private float dimAlpha;
     private int cornerRadiusPercent;
     /** 内部配置快照：热更新时经 {@link #updateConfig} 整体替换，避免停留在旧参数 */
@@ -78,6 +79,7 @@ public class CircularBubbleView extends FrameLayout {
         this.config = config;
         // 材质参数统一走 HyperOpenConfig 组件级解析（柔光磨砂浓度驱动模糊半径、跟随全局等）
         this.blurRadiusDp = config != null ? config.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE) : 25f;
+        this.bubbleBgEnabled = config != null ? config.showBubbleBg : true;
         this.paddingPercent = config != null ? config.bubblePaddingPercent : 18;
         this.cornerRadiusPercent = config != null ? Math.max(0, Math.min(50, config.iconCornerRadius)) : 50;
 
@@ -187,6 +189,7 @@ public class CircularBubbleView extends FrameLayout {
         lastConfigSignature = sig;
         this.activeStyle = HyperOSMaterialFactory.resolveActiveStyle(getContext(), newConfig.materialStyle);
         this.blurRadiusDp = newConfig.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE);
+        this.bubbleBgEnabled = newConfig.showBubbleBg;
         this.paddingPercent = newConfig.bubblePaddingPercent;
         this.dimAlpha = newConfig.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE);
         this.cornerRadiusPercent = Math.max(0, Math.min(50, newConfig.iconCornerRadius));
@@ -223,6 +226,7 @@ public class CircularBubbleView extends FrameLayout {
         h = h * 31 + Float.floatToIntBits(c.glassEdgeRange);
         h = h * 31 + Float.floatToIntBits(c.glassEdgePower);
         h = h * 31 + Float.floatToIntBits(c.glassReflectOffset);
+        h = h * 31 + (c.showBubbleBg ? 1 : 0);
         h = h * 31 + c.bubblePaddingPercent;
         h = h * 31 + c.iconCornerRadius;
         h = h * 31 + Float.floatToIntBits(c.iconAlpha);
@@ -280,7 +284,8 @@ public class CircularBubbleView extends FrameLayout {
     }
 
     private void applyIconPadding() {
-        int iconPadding = (int) (sizePx * (Math.max(0, Math.min(40, paddingPercent)) / 100f));
+        int effectivePadding = bubbleBgEnabled ? Math.max(0, Math.min(40, paddingPercent)) : 0;
+        int iconPadding = (int) (sizePx * (effectivePadding / 100f));
         iconView.setPadding(iconPadding, iconPadding, iconPadding, iconPadding);
     }
 
@@ -293,8 +298,7 @@ public class CircularBubbleView extends FrameLayout {
     }
 
     private int getBlurRadiusPx() {
-        // 留白 0% = 气泡整体关闭，气泡模糊跟随停用（开关规格统一由 BubbleBlurSpec 提供）
-        if (!systemBlurEnabled || !BubbleBlurSpec.isEnabled(blurRadiusDp, paddingPercent)) return 0;
+        if (!systemBlurEnabled || !BubbleBlurSpec.isEnabled(blurRadiusDp, bubbleBgEnabled)) return 0;
         return Math.round(TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP, blurRadiusDp, getResources().getDisplayMetrics()
         ));
@@ -322,8 +326,8 @@ public class CircularBubbleView extends FrameLayout {
             setBackground(null);
         }
 
-        if (paddingPercent <= 0) {
-            // 留白 0% = 气泡整体关闭：不绘制气泡底衬，模糊与压暗一并停用，仅保留图标
+        if (!bubbleBgEnabled) {
+            // 气泡材质已关闭：不绘制气泡底衬，模糊与压暗一并停用，仅保留图标
             blurSession.release();
             if (blurCarrierView != null) {
                 HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(blurCarrierView);
@@ -436,9 +440,9 @@ public class CircularBubbleView extends FrameLayout {
         applyEffectiveDim();
     }
 
-    /** 按气泡开关应用压暗：留白 0% 气泡关闭时压暗跟随停用 */
+    /** 按气泡开关应用压暗：气泡材质关闭时压暗跟随停用 */
     private void applyEffectiveDim() {
-        opticDrawable.setDimAlpha(paddingPercent > 0 ? dimAlpha : 0f);
+        opticDrawable.setDimAlpha(bubbleBgEnabled ? dimAlpha : 0f);
     }
 
     public void setBlurRadius(float radiusDp) {
@@ -449,13 +453,20 @@ public class CircularBubbleView extends FrameLayout {
         }
     }
 
+    public void setBubbleBgEnabled(boolean enabled) {
+        if (this.bubbleBgEnabled != enabled) {
+            this.bubbleBgEnabled = enabled;
+            applyIconPadding();
+            invalidate();
+            ensureBlurAndRefreshBackground();
+        }
+    }
+
     public void setBubblePaddingPercent(int percent) {
         if (this.paddingPercent != percent) {
             this.paddingPercent = percent;
             applyIconPadding();
             invalidate();
-            // 留白变化会切换气泡开关（0% 关闭气泡）：重建底衬、模糊与压暗
-            ensureBlurAndRefreshBackground();
         }
     }
 
@@ -632,7 +643,7 @@ public class CircularBubbleView extends FrameLayout {
         canvas.clipPath(ghostClipPath);
 
         // 1. 光学层（底衬 + 磨砂 + 边框）：直接绘制 opticDrawable，规避硬件加速 View 跨树 draw 的约束
-        if (paddingPercent > 0 && opticDrawable != null) {
+        if (bubbleBgEnabled && opticDrawable != null) {
             ghostDrawableBounds.set(opticDrawable.getBounds());
             try {
                 opticDrawable.setBounds(0, 0, w, h);
@@ -688,7 +699,7 @@ public class CircularBubbleView extends FrameLayout {
             Drawable bd = blurSession.drawable();
             int w = getWidth();
             int h = getHeight();
-            if (bd == null || paddingPercent <= 0 || w <= 0 || h <= 0) {
+            if (bd == null || !bubbleBgEnabled || w <= 0 || h <= 0) {
                 return;
             }
             float s = Math.max(0.01f, CircularBubbleView.this.getScaleX());
@@ -743,7 +754,7 @@ public class CircularBubbleView extends FrameLayout {
         @Override
         protected void onDraw(@NonNull Canvas canvas) {
             super.onDraw(canvas);
-            if (ghostLayer == null || paddingPercent <= 0 || getWidth() <= 0 || getHeight() <= 0) {
+            if (ghostLayer == null || !bubbleBgEnabled || getWidth() <= 0 || getHeight() <= 0) {
                 clearBlurEffect();
                 return;
             }

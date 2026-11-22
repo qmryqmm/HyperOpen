@@ -84,6 +84,9 @@ import io.github.qmryqmm.hyperopen.ui.edit.ShortcutEditPage
 import io.github.qmryqmm.hyperopen.ui.pages.ParamsPage
 import io.github.qmryqmm.hyperopen.ui.pages.FolderLayoutSettings
 import io.github.qmryqmm.hyperopen.ui.pages.FolderMotionSettings
+import io.github.qmryqmm.hyperopen.ui.pages.HapticSettings
+import io.github.qmryqmm.hyperopen.ui.pages.HeaderHintSettings
+import io.github.qmryqmm.hyperopen.ui.pages.MaterialSurfaceSettings
 import io.github.qmryqmm.hyperopen.ui.pages.PanelMotionSettings
 import io.github.qmryqmm.hyperopen.ui.pages.PermissionCheckPage
 import io.github.qmryqmm.hyperopen.ui.pages.BlurMaterialSettingsPage
@@ -203,6 +206,7 @@ fun HyperOpenApp(
     var hapticSlideDoubleGapMs by remember { mutableFloatStateOf(initialConfig.hapticSlideDoubleGapMs.toFloat()) }
     var regionBlurRadius by remember { mutableFloatStateOf(initialConfig.regionBlurRadius.toFloat()) }
     var iconSpacingOffset by remember { mutableFloatStateOf(initialConfig.iconSpacingOffset.toFloat()) }
+    var showBubbleBg by remember { mutableStateOf(initialConfig.showBubbleBg) }
     var bubblePaddingPercent by remember { mutableFloatStateOf(initialConfig.bubblePaddingPercent.toFloat()) }
     var bubbleBlurRadius by remember { mutableFloatStateOf(initialConfig.bubbleBlurRadius.toFloat()) }
     var glyphPadEnabled by remember { mutableStateOf(initialConfig.glyphPadEnabled) }
@@ -572,6 +576,7 @@ fun HyperOpenApp(
         c.hapticSlideDoubleGapMs = hapticSlideDoubleGapMs.toInt()
         c.regionBlurRadius = regionBlurRadius.toInt()
         c.iconSpacingOffset = iconSpacingOffset.toInt()
+        c.showBubbleBg = showBubbleBg
         c.bubblePaddingPercent = bubblePaddingPercent.toInt()
         c.bubbleBlurRadius = bubbleBlurRadius.toInt()
         c.glyphPadEnabled = glyphPadEnabled
@@ -716,6 +721,7 @@ fun HyperOpenApp(
             hapticSlideDoubleGapMs = config.hapticSlideDoubleGapMs.toFloat()
             regionBlurRadius = config.regionBlurRadius.toFloat()
             iconSpacingOffset = config.iconSpacingOffset.toFloat()
+            showBubbleBg = config.showBubbleBg
             bubblePaddingPercent = config.bubblePaddingPercent.toFloat()
             bubbleBlurRadius = config.bubbleBlurRadius.toFloat()
             glyphPadEnabled = config.glyphPadEnabled
@@ -1206,7 +1212,7 @@ fun HyperOpenApp(
 
     val currentLiveConfig = remember(
         materialStyle, bubbleDimAlpha, iconCornerRadius, iconAlpha,
-        bubblePaddingPercent, glyphPadEnabled, glyphPadColor, glyphPadMode,
+        showBubbleBg, bubblePaddingPercent, glyphPadEnabled, glyphPadColor, glyphPadMode,
         glassPreset, glassRefractIor, glassThickness, glassSpecular, glassMatteAlpha, glassBorderLight,
         glassBackgroundSaturation, glassBackgroundBrightness, glassBackgroundBurn,
         glassMatteWhiteMix, glassMatteColorMix, glassMatteColorPower,
@@ -1220,6 +1226,7 @@ fun HyperOpenApp(
             this.bubbleDimAlpha = bubbleDimAlpha
             this.iconCornerRadius = iconCornerRadius.toInt().coerceIn(0, 50)
             this.iconAlpha = iconAlpha
+            this.showBubbleBg = showBubbleBg
             this.bubblePaddingPercent = bubblePaddingPercent.toInt().coerceIn(0, 40)
             this.glyphPadEnabled = glyphPadEnabled
             this.glyphPadColor = glyphPadColor
@@ -1472,6 +1479,7 @@ fun HyperOpenApp(
                             this.hapticDurationMs = hapticDurationMs.toInt()
                             this.hapticMode = hapticMode
                             this.iconSpacingOffset = iconSpacingOffset.toInt()
+                            this.showBubbleBg = showBubbleBg
                             this.bubblePaddingPercent = bubblePaddingPercent.toInt()
                             this.glyphPadEnabled = glyphPadEnabled
                             this.glassPreset = glassPreset
@@ -1682,7 +1690,7 @@ fun HyperOpenApp(
                     else -> {
                         // when(page) 整段抽为局部组合 lambda（编译为独立合成方法，避免 Scaffold content 方法体超 64KB）
                         val paramsPageContent: @Composable () -> Unit = {
-                            val panelMotionSettings = PanelMotionSettings(
+                            fun buildPanelMotionSettings() = PanelMotionSettings(
                                 animDurationMs = animDurationMs,
                                 onAnimDurationMs = { animDurationMs = it; persist() },
                                 expandAnimType = panelExpandAnimType,
@@ -1700,7 +1708,7 @@ fun HyperOpenApp(
                                 selectedPopScale = panelSelectedPopScale,
                                 onSelectedPopScale = { panelSelectedPopScale = it; persist() },
                             )
-                            val folderLayoutSettings = FolderLayoutSettings(
+                            fun buildFolderLayoutSettings() = FolderLayoutSettings(
                                 iconSize = iconSize,
                                 onIconSize = { iconSize = it; clampIconCountToCapacity(); persist() },
                                 displayRangeScale = folderChildDisplayRangeScale,
@@ -1714,7 +1722,7 @@ fun HyperOpenApp(
                                 sizeScale = folderChildSizeScale,
                                 onSizeScale = { folderChildSizeScale = it; persist() },
                             )
-                            val folderMotionSettings = FolderMotionSettings(
+                            fun buildFolderMotionSettings() = FolderMotionSettings(
                                 hoverDelayMs = folderHoverDelayMs,
                                 onHoverDelayMs = { folderHoverDelayMs = it; persist() },
                                 expandAnimType = folderChildExpandAnimType,
@@ -1736,165 +1744,176 @@ fun HyperOpenApp(
                                 overshoot = folderChildOvershoot,
                                 onOvershoot = { folderChildOvershoot = it; persist() },
                             )
+                            fun buildMaterialSurfaceSettings() = MaterialSurfaceSettings(
+                                materialStyle = materialStyle,
+                                onMaterialStyle = {
+                                    if (it == HyperOpenConfig.MATERIAL_SOFT_GLASS && !softGlassSupported) {
+                                        android.widget.Toast.makeText(
+                                            ctx,
+                                            "当前系统不支持柔光玻璃材质，已自动使用高斯模糊",
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                        materialStyle = HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR
+                                    } else {
+                                        materialStyle = it
+                                    }
+                                    persist()
+                                },
+                                onOpenSoftGlassPage = { subPage = 5 },
+                                onOpenBlurMaterialPage = { subPage = 6 },
+                                bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal,
+                                onBubbleMaterialFollowGlobal = { bubbleMaterialFollowGlobal = it; persist() },
+                                regionMaterialFollowGlobal = regionMaterialFollowGlobal,
+                                onRegionMaterialFollowGlobal = { regionMaterialFollowGlobal = it; persist() },
+                                headerMaterialFollowGlobal = headerMaterialFollowGlobal,
+                                onHeaderMaterialFollowGlobal = { headerMaterialFollowGlobal = it; persist() },
+                                bubbleGlassMatteAlpha = bubbleGlassMatteAlpha,
+                                onBubbleGlassMatteAlpha = { bubbleGlassMatteAlpha = it; persist() },
+                                regionGlassMatteAlpha = regionGlassMatteAlpha,
+                                onRegionGlassMatteAlpha = { regionGlassMatteAlpha = it; persist() },
+                                headerGlassMatteAlpha = headerGlassMatteAlpha,
+                                onHeaderGlassMatteAlpha = { headerGlassMatteAlpha = it; persist() },
+                                fullscreenBlurMaskAlpha = fullscreenBlurMaskAlpha,
+                                onFullscreenBlurMaskAlpha = { fullscreenBlurMaskAlpha = it; persist() },
+                                fullscreenDimAlpha = fullscreenDimAlpha,
+                                onFullscreenDimAlpha = { fullscreenDimAlpha = it; persist() },
+                                headerDimAlpha = headerDimAlpha,
+                                onHeaderDimAlpha = { headerDimAlpha = it; persist() },
+                                regionDimAlpha = regionDimAlpha,
+                                onRegionDimAlpha = { regionDimAlpha = it; persist() },
+                                bubbleDimAlpha = bubbleDimAlpha,
+                                onBubbleDimAlpha = { bubbleDimAlpha = it; persist() },
+                                regionBlurRadius = regionBlurRadius,
+                                onRegionBlurRadius = { regionBlurRadius = it; persist() },
+                                showBubbleBg = showBubbleBg,
+                                onShowBubbleBg = { showBubbleBg = it; persist() },
+                                bubblePaddingPercent = bubblePaddingPercent,
+                                onBubblePaddingPercent = { bubblePaddingPercent = it; persist() },
+                                bubbleBlurRadius = bubbleBlurRadius,
+                                onBubbleBlurRadius = { bubbleBlurRadius = it; persist() },
+                            )
+                            fun buildHeaderHintSettings() = HeaderHintSettings(
+                                showHeaderPill = showHeaderPill,
+                                onShowHeaderPill = { showHeaderPill = it; persist() },
+                                showHeaderPillBg = showHeaderPillBg,
+                                onShowHeaderPillBg = { showHeaderPillBg = it; persist() },
+                                headerTopMargin = headerTopMargin,
+                                onHeaderTopMargin = { headerTopMargin = it; persist() },
+                                headerTitleSize = headerTitleSize,
+                                onHeaderTitleSize = { headerTitleSize = it; persist() },
+                                headerSubtitleSize = headerSubtitleSize,
+                                onHeaderSubtitleSize = { headerSubtitleSize = it; persist() },
+                                headerBlurRadius = headerBlurRadius,
+                                onHeaderBlurRadius = { headerBlurRadius = it; persist() },
+                                headerTextCentered = headerTextCentered,
+                                onHeaderTextCentered = { headerTextCentered = it; persist() },
+                                globalHintColorMode = globalHintColorMode,
+                                onGlobalHintColorMode = { globalHintColorMode = it; persist() },
+                                globalHintCustomColor = globalHintCustomColor,
+                                onGlobalHintCustomColor = { globalHintCustomColor = it; persist() },
+                                defaultHintTextStroke = defaultHintTextStroke,
+                                onDefaultHintTextStroke = { defaultHintTextStroke = it; persist() },
+                                defaultHintTextShadow = defaultHintTextShadow,
+                                onDefaultHintTextShadow = { defaultHintTextShadow = it; persist() },
+                                defaultHintTextWeight = defaultHintTextWeight,
+                                onDefaultHintTextWeight = { defaultHintTextWeight = it; persist() },
+                                defaultHintTextLetterSpacing = defaultHintTextLetterSpacing,
+                                onDefaultHintTextLetterSpacing = { defaultHintTextLetterSpacing = it; persist() },
+                                defaultShowHintTitle = defaultShowHintTitle,
+                                onDefaultShowHintTitle = { defaultShowHintTitle = it; persist() },
+                                defaultShowHintSubtitle = defaultShowHintSubtitle,
+                                onDefaultShowHintSubtitle = { defaultShowHintSubtitle = it; persist() },
+                            )
+                            fun buildHapticSettings() = HapticSettings(
+                                hapticEnabled = hapticEnabled,
+                                onHapticEnabled = { hapticEnabled = it; persist() },
+                                hapticStrength = hapticStrength,
+                                onHapticStrength = { hapticStrength = it; persist() },
+                                hapticDurationMs = hapticDurationMs,
+                                onHapticDurationMs = { hapticDurationMs = it; persist() },
+                                hapticMode = hapticMode,
+                                onHapticMode = { hapticMode = it; persist() },
+                                hapticSlideEnabled = hapticSlideEnabled,
+                                onHapticSlideEnabled = { hapticSlideEnabled = it; persist() },
+                                hapticSlideStrength = hapticSlideStrength,
+                                onHapticSlideStrength = { hapticSlideStrength = it; persist() },
+                                hapticSlideDurationMs = hapticSlideDurationMs,
+                                onHapticSlideDurationMs = { hapticSlideDurationMs = it; persist() },
+                                hapticSlideMode = hapticSlideMode,
+                                onHapticSlideMode = { hapticSlideMode = it; persist() },
+                                hapticStockWaveExpand = hapticStockWaveExpand,
+                                onHapticStockWaveExpand = { hapticStockWaveExpand = it; persist() },
+                                hapticStockWaveSlide = hapticStockWaveSlide,
+                                onHapticStockWaveSlide = { hapticStockWaveSlide = it; persist() },
+                                hapticBrakePulse = hapticBrakePulse,
+                                onHapticBrakePulse = { hapticBrakePulse = it; persist() },
+                                hapticDoubleGapMs = hapticDoubleGapMs,
+                                onHapticDoubleGapMs = { hapticDoubleGapMs = it; persist() },
+                                hapticSlideBrakePulse = hapticSlideBrakePulse,
+                                onHapticSlideBrakePulse = { hapticSlideBrakePulse = it; persist() },
+                                hapticSlideDoubleGapMs = hapticSlideDoubleGapMs,
+                                onHapticSlideDoubleGapMs = { hapticSlideDoubleGapMs = it; persist() },
+                            )
                             ParamsPage(
-                                    contentPadding = innerPadding,
-                                    lazyListState = paramsListStates[paramsTab.coerceIn(0, paramsListStates.lastIndex)],
-                                    selectedTab = paramsTab,
-                                    panelMotion = panelMotionSettings,
-                                    folderLayout = folderLayoutSettings,
-                                    folderMotion = folderMotionSettings,
-                                    materialStyle = materialStyle,
-                                    onMaterialStyle = {
-                                        if (it == HyperOpenConfig.MATERIAL_SOFT_GLASS && !softGlassSupported) {
-                                            android.widget.Toast.makeText(
-                                                ctx,
-                                                "当前系统不支持柔光玻璃材质，已自动使用高斯模糊",
-                                                android.widget.Toast.LENGTH_SHORT
-                                            ).show()
-                                            materialStyle = HyperOpenConfig.MATERIAL_GAUSSIAN_BLUR
-                                        } else {
-                                            materialStyle = it
-                                        }
-                                        persist()
-                                    },
-                                    onOpenSoftGlassPage = { subPage = 5 },
-                                    onOpenBlurMaterialPage = { subPage = 6 },
-                                    bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal,
-                                    onBubbleMaterialFollowGlobal = { bubbleMaterialFollowGlobal = it; persist() },
-                                    regionMaterialFollowGlobal = regionMaterialFollowGlobal,
-                                    onRegionMaterialFollowGlobal = { regionMaterialFollowGlobal = it; persist() },
-                                    headerMaterialFollowGlobal = headerMaterialFollowGlobal,
-                                    onHeaderMaterialFollowGlobal = { headerMaterialFollowGlobal = it; persist() },
-                                    bubbleGlassMatteAlpha = bubbleGlassMatteAlpha,
-                                    onBubbleGlassMatteAlpha = { bubbleGlassMatteAlpha = it; persist() },
-                                    regionGlassMatteAlpha = regionGlassMatteAlpha,
-                                    onRegionGlassMatteAlpha = { regionGlassMatteAlpha = it; persist() },
-                                    headerGlassMatteAlpha = headerGlassMatteAlpha,
-                                    onHeaderGlassMatteAlpha = { headerGlassMatteAlpha = it; persist() },
-                                    offsetY = offsetY,
-                                    onOffsetY = { offsetY = it; persist() },
-                                    regionDiameter = regionDiameter,
-                                    onRegionDiameter = { regionDiameter = it; clampIconCountToCapacity(); persist() },
-                                    iconSpacingOffset = iconSpacingOffset,
-                                    onIconSpacingOffset = { iconSpacingOffset = it; clampIconCountToCapacity(); persist() },
-                                    showRegionBg = showRegionBg,
-                                    onShowRegionBg = { showRegionBg = it; persist() },
-                                    showHeaderPill = showHeaderPill,
-                                    onShowHeaderPill = { showHeaderPill = it; persist() },
-                                    showHeaderPillBg = showHeaderPillBg,
-                                    onShowHeaderPillBg = { showHeaderPillBg = it; persist() },
-                                    headerTopMargin = headerTopMargin,
-                                    onHeaderTopMargin = { headerTopMargin = it; persist() },
-                                    headerTitleSize = headerTitleSize,
-                                    onHeaderTitleSize = { headerTitleSize = it; persist() },
-                                    headerSubtitleSize = headerSubtitleSize,
-                                    onHeaderSubtitleSize = { headerSubtitleSize = it; persist() },
-                                    headerBlurRadius = headerBlurRadius,
-                                    onHeaderBlurRadius = { headerBlurRadius = it; persist() },
-                                    headerTextCentered = headerTextCentered,
-                                    onHeaderTextCentered = { headerTextCentered = it; persist() },
-                                    maxIconCount = maxIconCount,
-                                    onMaxIconCount = { maxIconCount = it; persist() },
-                                    iconCapacity = iconCapacity,
-                                    enabledShortcutsCount = enabledShortcutsCount,
-                                    layoutStyle = layoutStyle,
-                                    onLayoutStyle = { layoutStyle = it; clampIconCountToCapacity(); persist() },
-                                    stockSystemRegion = stockSystemRegion,
-                                    onStockSystemRegion = { stockSystemRegion = it; persist() },
-                                    ringSectorMode = ringSectorMode,
-                                    onRingSectorMode = { ringSectorMode = it; persist() },
-                                    sectorLineColor = sectorLineColor,
-                                    onSectorLineColor = { sectorLineColor = it; persist() },
-                                    sectorLineAlpha = sectorLineAlpha,
-                                    onSectorLineAlpha = { sectorLineAlpha = it; persist() },
-                                    sectorDashLength = sectorDashLength,
-                                    onSectorDashLength = { sectorDashLength = it; persist() },
-                                    sectorDashGap = sectorDashGap,
-                                    onSectorDashGap = { sectorDashGap = it; persist() },
-                                    sectorLineWidth = sectorLineWidth,
-                                    onSectorLineWidth = { sectorLineWidth = it; persist() },
-                                    sectorHighlightEnabled = sectorHighlightEnabled,
-                                    onSectorHighlightEnabled = { sectorHighlightEnabled = it; persist() },
-                                    globalHintColorMode = globalHintColorMode,
-                                    onGlobalHintColorMode = { globalHintColorMode = it; persist() },
-                                    globalHintCustomColor = globalHintCustomColor,
-                                    onGlobalHintCustomColor = { globalHintCustomColor = it; persist() },
-                                    defaultHintTextStroke = defaultHintTextStroke,
-                                    onDefaultHintTextStroke = { defaultHintTextStroke = it; persist() },
-                                    defaultHintTextShadow = defaultHintTextShadow,
-                                    onDefaultHintTextShadow = { defaultHintTextShadow = it; persist() },
-                                    defaultHintTextWeight = defaultHintTextWeight,
-                                    onDefaultHintTextWeight = { defaultHintTextWeight = it; persist() },
-                                    defaultHintTextLetterSpacing = defaultHintTextLetterSpacing,
-                                    onDefaultHintTextLetterSpacing = { defaultHintTextLetterSpacing = it; persist() },
-                                    defaultShowHintTitle = defaultShowHintTitle,
-                                    onDefaultShowHintTitle = { defaultShowHintTitle = it; persist() },
-                                    defaultShowHintSubtitle = defaultShowHintSubtitle,
-                                    onDefaultShowHintSubtitle = { defaultShowHintSubtitle = it; persist() },
-                                    maxScale = maxScale,
-                                    onMaxScale = { maxScale = it; persist() },
-                                    influenceRadius = influenceRadius,
-                                    onInfluenceRadius = { influenceRadius = it; persist() },
-                                    iconAlpha = iconAlpha,
-                                    onIconAlpha = { iconAlpha = it; persist() },
-                                    fisheyeZoomAlpha = fisheyeZoomAlpha,
-                                    onFisheyeZoomAlpha = { fisheyeZoomAlpha = it; persist() },
-                                    fisheyeOtherAlpha = fisheyeOtherAlpha,
-                                    onFisheyeOtherAlpha = { fisheyeOtherAlpha = it; persist() },
-                                    iconCornerRadius = iconCornerRadius,
-                                    onIconCornerRadius = { iconCornerRadius = it; persist() },
-                                    fullscreenBlurMaskAlpha = fullscreenBlurMaskAlpha,
-                                    onFullscreenBlurMaskAlpha = { fullscreenBlurMaskAlpha = it; persist() },
-                                    fullscreenDimAlpha = fullscreenDimAlpha,
-                                    onFullscreenDimAlpha = { fullscreenDimAlpha = it; persist() },
-                                    headerDimAlpha = headerDimAlpha,
-                                    onHeaderDimAlpha = { headerDimAlpha = it; persist() },
-                                    regionDimAlpha = regionDimAlpha,
-                                    onRegionDimAlpha = { regionDimAlpha = it; persist() },
-                                    bubbleDimAlpha = bubbleDimAlpha,
-                                    onBubbleDimAlpha = { bubbleDimAlpha = it; persist() },
-                                    showDelayMs = showDelayMs,
-                                    onShowDelayMs = { showDelayMs = it; persist() },
-                                    disableSystemEnterAnim = disableSystemEnterAnim,
-                                    onDisableSystemEnterAnim = { disableSystemEnterAnim = it; persist() },
-                                    faceUnlockQuickOpen = faceUnlockQuickOpen,
-                                    onFaceUnlockQuickOpen = { faceUnlockQuickOpen = it; persist() },
-                                    bleUnlockQuickOpen = bleUnlockQuickOpen,
-                                    onBleUnlockQuickOpen = { bleUnlockQuickOpen = it; persist() },
-                                    hapticEnabled = hapticEnabled,
-                                    onHapticEnabled = { hapticEnabled = it; persist() },
-                                    hapticStrength = hapticStrength,
-                                    onHapticStrength = { hapticStrength = it; persist() },
-                                    hapticDurationMs = hapticDurationMs,
-                                    onHapticDurationMs = { hapticDurationMs = it; persist() },
-                                    hapticMode = hapticMode,
-                                    onHapticMode = { hapticMode = it; persist() },
-                                    hapticSlideEnabled = hapticSlideEnabled,
-                                    onHapticSlideEnabled = { hapticSlideEnabled = it; persist() },
-                                    hapticSlideStrength = hapticSlideStrength,
-                                    onHapticSlideStrength = { hapticSlideStrength = it; persist() },
-                                    hapticSlideDurationMs = hapticSlideDurationMs,
-                                    onHapticSlideDurationMs = { hapticSlideDurationMs = it; persist() },
-                                    hapticSlideMode = hapticSlideMode,
-                                    onHapticSlideMode = { hapticSlideMode = it; persist() },
-                                    hapticStockWaveExpand = hapticStockWaveExpand,
-                                    onHapticStockWaveExpand = { hapticStockWaveExpand = it; persist() },
-                                    hapticStockWaveSlide = hapticStockWaveSlide,
-                                    onHapticStockWaveSlide = { hapticStockWaveSlide = it; persist() },
-                                    hapticBrakePulse = hapticBrakePulse,
-                                    onHapticBrakePulse = { hapticBrakePulse = it; persist() },
-                                    hapticDoubleGapMs = hapticDoubleGapMs,
-                                    onHapticDoubleGapMs = { hapticDoubleGapMs = it; persist() },
-                                    hapticSlideBrakePulse = hapticSlideBrakePulse,
-                                    onHapticSlideBrakePulse = { hapticSlideBrakePulse = it; persist() },
-                                    hapticSlideDoubleGapMs = hapticSlideDoubleGapMs,
-                                    onHapticSlideDoubleGapMs = { hapticSlideDoubleGapMs = it; persist() },
-                                    regionBlurRadius = regionBlurRadius,
-                                    onRegionBlurRadius = { regionBlurRadius = it; persist() },
-                                    bubblePaddingPercent = bubblePaddingPercent,
-                                    onBubblePaddingPercent = { bubblePaddingPercent = it; persist() },
-                                    bubbleBlurRadius = bubbleBlurRadius,
-                                    onBubbleBlurRadius = { bubbleBlurRadius = it; persist() },
+                                contentPadding = innerPadding,
+                                lazyListState = paramsListStates[paramsTab.coerceIn(0, paramsListStates.lastIndex)],
+                                selectedTab = paramsTab,
+                                panelMotion = buildPanelMotionSettings(),
+                                folderLayout = buildFolderLayoutSettings(),
+                                folderMotion = buildFolderMotionSettings(),
+                                materialSurface = buildMaterialSurfaceSettings(),
+                                headerHint = buildHeaderHintSettings(),
+                                haptic = buildHapticSettings(),
+                                offsetY = offsetY,
+                                onOffsetY = { offsetY = it; persist() },
+                                regionDiameter = regionDiameter,
+                                onRegionDiameter = { regionDiameter = it; clampIconCountToCapacity(); persist() },
+                                iconSpacingOffset = iconSpacingOffset,
+                                onIconSpacingOffset = { iconSpacingOffset = it; clampIconCountToCapacity(); persist() },
+                                showRegionBg = showRegionBg,
+                                onShowRegionBg = { showRegionBg = it; persist() },
+                                maxIconCount = maxIconCount,
+                                onMaxIconCount = { maxIconCount = it; persist() },
+                                iconCapacity = iconCapacity,
+                                enabledShortcutsCount = enabledShortcutsCount,
+                                layoutStyle = layoutStyle,
+                                onLayoutStyle = { layoutStyle = it; clampIconCountToCapacity(); persist() },
+                                stockSystemRegion = stockSystemRegion,
+                                onStockSystemRegion = { stockSystemRegion = it; persist() },
+                                ringSectorMode = ringSectorMode,
+                                onRingSectorMode = { ringSectorMode = it; persist() },
+                                sectorLineColor = sectorLineColor,
+                                onSectorLineColor = { sectorLineColor = it; persist() },
+                                sectorLineAlpha = sectorLineAlpha,
+                                onSectorLineAlpha = { sectorLineAlpha = it; persist() },
+                                sectorDashLength = sectorDashLength,
+                                onSectorDashLength = { sectorDashLength = it; persist() },
+                                sectorDashGap = sectorDashGap,
+                                onSectorDashGap = { sectorDashGap = it; persist() },
+                                sectorLineWidth = sectorLineWidth,
+                                onSectorLineWidth = { sectorLineWidth = it; persist() },
+                                sectorHighlightEnabled = sectorHighlightEnabled,
+                                onSectorHighlightEnabled = { sectorHighlightEnabled = it; persist() },
+                                maxScale = maxScale,
+                                onMaxScale = { maxScale = it; persist() },
+                                influenceRadius = influenceRadius,
+                                onInfluenceRadius = { influenceRadius = it; persist() },
+                                iconAlpha = iconAlpha,
+                                onIconAlpha = { iconAlpha = it; persist() },
+                                fisheyeZoomAlpha = fisheyeZoomAlpha,
+                                onFisheyeZoomAlpha = { fisheyeZoomAlpha = it; persist() },
+                                fisheyeOtherAlpha = fisheyeOtherAlpha,
+                                onFisheyeOtherAlpha = { fisheyeOtherAlpha = it; persist() },
+                                iconCornerRadius = iconCornerRadius,
+                                onIconCornerRadius = { iconCornerRadius = it; persist() },
+                                showDelayMs = showDelayMs,
+                                onShowDelayMs = { showDelayMs = it; persist() },
+                                disableSystemEnterAnim = disableSystemEnterAnim,
+                                onDisableSystemEnterAnim = { disableSystemEnterAnim = it; persist() },
+                                faceUnlockQuickOpen = faceUnlockQuickOpen,
+                                onFaceUnlockQuickOpen = { faceUnlockQuickOpen = it; persist() },
+                                bleUnlockQuickOpen = bleUnlockQuickOpen,
+                                onBleUnlockQuickOpen = { bleUnlockQuickOpen = it; persist() },
                             )
                         }
                         val pagesContent: @Composable () -> Unit = {
