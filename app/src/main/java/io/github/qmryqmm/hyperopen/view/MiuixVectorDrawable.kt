@@ -15,12 +15,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.VectorGroup
 import androidx.compose.ui.graphics.vector.VectorPath
 import androidx.compose.ui.graphics.vector.toPath
-import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
+import io.github.qmryqmm.hyperopen.model.ShortcutItem
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 将 Compose Miuix [ImageVector] 真实矢量指令转为 Android 平台 [Drawable]，
- * 支持圆形纯色/微透/反色衬底渲染与呼吸辉光。
+ * 支持独立前景矢量色与纯色+透明度的圆形底垫衬底。
  *
  * 性能优化：对每个 [ImageVector] 的解析后 [android.graphics.Path]、线帽属性与总边界框做进程级静态缓存，
  * 避免每次构建气泡时重复解析 SVG PathNode、矩阵变换与 computeBounds。
@@ -30,7 +30,7 @@ class MiuixVectorDrawable @JvmOverloads constructor(
     tintColor: Int,
     private val padEnabled: Boolean = false,
     private val padColor: Int = 0xFF2A82E4.toInt(),
-    private val padMode: Int = HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT,
+    padAlpha: Float = ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA,
     private val cornerRadiusPercent: Int = 50,
 ) : Drawable() {
 
@@ -41,29 +41,21 @@ class MiuixVectorDrawable @JvmOverloads constructor(
 
     private val elements = ArrayList<PathElement>(8)
     private val padPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val padBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val totalBounds: RectF
 
-    // 图标前景色
-    private val iconColor: Int = when {
-        !padEnabled -> blendWithWhite(if (tintColor == 0) 0xFFFFFFFF.toInt() else tintColor, 0.18f)
-        padMode == HyperOpenConfig.GLYPH_PAD_MODE_INVERTED -> if (tintColor != 0) tintColor else padColor
-        else -> 0xFFFFFFFF.toInt() // 饱满底色或微透底色上始终使用高清晰纯白
+    // 图标前景色：永远忠实呈现指定的矢量颜色（100% 不透明）
+    private val iconColor: Int = if (tintColor != 0) {
+        Color.rgb(Color.red(tintColor), Color.green(tintColor), Color.blue(tintColor))
+    } else {
+        0xFFFFFFFF.toInt()
     }
+    private val basePadAlpha: Int = Math.round(ShortcutItem.clampPadAlpha(padAlpha) * 255f)
 
     init {
         if (padEnabled) {
-            val baseColor = if (padColor != 0) padColor else tintColor
+            val baseColor = if (padColor != 0) padColor else iconColor
             padPaint.style = Paint.Style.FILL
-            padPaint.color = when (padMode) {
-                HyperOpenConfig.GLYPH_PAD_MODE_SOLID -> Color.rgb(Color.red(baseColor), Color.green(baseColor), Color.blue(baseColor))
-                HyperOpenConfig.GLYPH_PAD_MODE_INVERTED -> Color.argb(48, 255, 255, 255)
-                else -> Color.argb(165, Color.red(baseColor), Color.green(baseColor), Color.blue(baseColor)) // 微透
-            }
-
-            padBorderPaint.style = Paint.Style.STROKE
-            padBorderPaint.strokeWidth = 2.5f
-            padBorderPaint.color = Color.argb(45, 255, 255, 255)
+            padPaint.color = Color.argb(basePadAlpha, Color.red(baseColor), Color.green(baseColor), Color.blue(baseColor))
         }
 
         val parsed = getOrParseVector(vector)
@@ -130,11 +122,11 @@ class MiuixVectorDrawable @JvmOverloads constructor(
     }
 
     override fun setAlpha(alpha: Int) {
+        val clamped = alpha.coerceIn(0, 255)
         for (elem in elements) {
-            elem.paint.alpha = alpha
+            elem.paint.alpha = clamped
         }
-        padPaint.alpha = alpha
-        padBorderPaint.alpha = alpha
+        padPaint.alpha = Math.round(basePadAlpha * (clamped / 255f))
     }
 
     override fun setColorFilter(colorFilter: ColorFilter?) {
@@ -237,15 +229,6 @@ class MiuixVectorDrawable @JvmOverloads constructor(
             val parsed = ParsedVector(nodes, bounds)
             PARSED_VECTOR_CACHE.putIfAbsent(vector, parsed)
             return parsed
-        }
-
-        private fun blendWithWhite(color: Int, ratio: Float): Int {
-            val r = ratio.coerceIn(0f, 1f)
-            val a = Color.alpha(color)
-            val cr = Math.round(Color.red(color) * (1 - r) + 255 * r)
-            val cg = Math.round(Color.green(color) * (1 - r) + 255 * r)
-            val cb = Math.round(Color.blue(color) * (1 - r) + 255 * r)
-            return Color.argb(a, cr, cg, cb)
         }
     }
 }

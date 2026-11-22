@@ -205,8 +205,8 @@ public final class IconGlyphFactory {
         if (notBlank(item.iconGlyph)) {
             boolean padEnabled = item.glyphPadEnabled;
             int padColor = item.glyphPadColor;
-            int padMode = item.glyphPadMode;
-            Drawable d = resolveMiuixIcon(item.iconGlyph.trim(), item.tintColor, padEnabled, padColor, padMode, cornerRadiusPercent);
+            float padAlpha = item.glyphPadAlpha;
+            Drawable d = resolveMiuixIcon(item.iconGlyph.trim(), item.tintColor, padEnabled, padColor, padAlpha, cornerRadiusPercent);
             if (d != null) return d;
         }
 
@@ -238,11 +238,11 @@ public final class IconGlyphFactory {
 
         // 4c) 动作默认行为：FOLDER 文件夹气泡（优先使用内置 folder 图标）
         if (ShortcutItem.ACTION_FOLDER.equals(item.actionType)) {
-            return resolveMiuixIcon("remix:folder-2-fill", item.tintColor, item.glyphPadEnabled, item.glyphPadColor, item.glyphPadMode, cornerRadiusPercent);
+            return resolveMiuixIcon("remix:folder-2-fill", item.tintColor, item.glyphPadEnabled, item.glyphPadColor, item.glyphPadAlpha, cornerRadiusPercent);
         }
 
         // 5) 关键词匹配内置符号兜底
-        return createGlyph(glyphForItem(item), item.tintColor);
+        return new GlyphDrawable(glyphForItem(item), item.tintColor, item.glyphPadEnabled, item.glyphPadColor, item.glyphPadAlpha, cornerRadiusPercent);
     }
 
     /**
@@ -301,19 +301,19 @@ public final class IconGlyphFactory {
      * 解析 Miuix / Remix 矢量图标或兼容内置符号
      */
     @Nullable
-    public static Drawable resolveMiuixIcon(@NonNull String glyphKey, int tintColor, boolean padEnabled, int padColor, int padMode) {
-        return resolveMiuixIcon(glyphKey, tintColor, padEnabled, padColor, padMode, 50);
+    public static Drawable resolveMiuixIcon(@NonNull String glyphKey, int tintColor, boolean padEnabled, int padColor, float padAlpha) {
+        return resolveMiuixIcon(glyphKey, tintColor, padEnabled, padColor, padAlpha, 50);
     }
 
     @Nullable
-    public static Drawable resolveMiuixIcon(@NonNull String glyphKey, int tintColor, boolean padEnabled, int padColor, int padMode, int cornerRadiusPercent) {
+    public static Drawable resolveMiuixIcon(@NonNull String glyphKey, int tintColor, boolean padEnabled, int padColor, float padAlpha, int cornerRadiusPercent) {
         // 1. 优先尝试 Remix Icon 矢量
         try {
             if (io.github.qmryqmm.hyperopen.ui.RemixIconRegistry.INSTANCE.isRemixIcon(glyphKey)) {
                 androidx.compose.ui.graphics.vector.ImageVector rv =
                     io.github.qmryqmm.hyperopen.ui.RemixIconRegistry.INSTANCE.find(glyphKey);
                 if (rv != null) {
-                    return new MiuixVectorDrawable(rv, tintColor, padEnabled, padColor, padMode, cornerRadiusPercent);
+                    return new MiuixVectorDrawable(rv, tintColor, padEnabled, padColor, padAlpha, cornerRadiusPercent);
                 }
             }
         } catch (Throwable ignored) {}
@@ -323,7 +323,7 @@ public final class IconGlyphFactory {
             androidx.compose.ui.graphics.vector.ImageVector v =
                 io.github.qmryqmm.hyperopen.ui.MiuixIconRegistry.INSTANCE.find(glyphKey, null);
             if (v != null) {
-                return new MiuixVectorDrawable(v, tintColor, padEnabled, padColor, padMode, cornerRadiusPercent);
+                return new MiuixVectorDrawable(v, tintColor, padEnabled, padColor, padAlpha, cornerRadiusPercent);
             }
         } catch (Throwable ignored) {}
 
@@ -331,12 +331,12 @@ public final class IconGlyphFactory {
         if (clean.contains(":")) {
             clean = clean.split(":")[0].trim();
         }
-        return new GlyphDrawable(clean.toLowerCase(), tintColor, padEnabled, padColor, padMode, cornerRadiusPercent);
+        return new GlyphDrawable(clean.toLowerCase(), tintColor, padEnabled, padColor, padAlpha, cornerRadiusPercent);
     }
 
     @Nullable
     public static Drawable resolveMiuixIcon(@NonNull String glyphKey, int tintColor) {
-        return resolveMiuixIcon(glyphKey, tintColor, false, 0, HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT);
+        return resolveMiuixIcon(glyphKey, tintColor, false, 0, ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA);
     }
 
     /**
@@ -453,49 +453,32 @@ public final class IconGlyphFactory {
         private final String key;
         private boolean padEnabled = false;
         private int padColor = 0;
-        private int padMode = HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT;
+        private int basePadAlpha = Math.round(ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA * 255f);
         private int cornerRadiusPercent = 50;
         private final Paint padPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint padBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         GlyphDrawable(String key, int tintColor) {
-            this(key, tintColor, false, 0, HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT, 50);
+            this(key, tintColor, false, 0, ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA, 50);
         }
 
-        GlyphDrawable(String key, int tintColor, boolean padEnabled, int padColor, int padMode) {
-            this(key, tintColor, padEnabled, padColor, padMode, 50);
+        GlyphDrawable(String key, int tintColor, boolean padEnabled, int padColor, float padAlpha) {
+            this(key, tintColor, padEnabled, padColor, padAlpha, 50);
         }
 
-        GlyphDrawable(String key, int tintColor, boolean padEnabled, int padColor, int padMode, int cornerRadiusPercent) {
+        GlyphDrawable(String key, int tintColor, boolean padEnabled, int padColor, float padAlpha, int cornerRadiusPercent) {
             this.key = key;
             this.padEnabled = padEnabled;
             this.padColor = padColor;
-            this.padMode = padMode;
+            this.basePadAlpha = Math.round(ShortcutItem.clampPadAlpha(padAlpha) * 255f);
             this.cornerRadiusPercent = Math.max(0, Math.min(50, cornerRadiusPercent));
 
-            int baseColor = padColor != 0 ? padColor : tintColor;
-            int color;
+            int color = tintColor != 0
+                ? Color.rgb(Color.red(tintColor), Color.green(tintColor), Color.blue(tintColor))
+                : 0xFFFFFFFF;
             if (padEnabled) {
-                if (padMode == HyperOpenConfig.GLYPH_PAD_MODE_INVERTED) {
-                    color = blend(baseColor, 0xFFFFFFFF, 0.15f);
-                } else {
-                    color = 0xFFFFFFFF;
-                }
-
+                int baseColor = padColor != 0 ? padColor : color;
                 padPaint.setStyle(Paint.Style.FILL);
-                if (padMode == HyperOpenConfig.GLYPH_PAD_MODE_SOLID) {
-                    padPaint.setColor(Color.rgb(Color.red(baseColor), Color.green(baseColor), Color.blue(baseColor)));
-                } else if (padMode == HyperOpenConfig.GLYPH_PAD_MODE_INVERTED) {
-                    padPaint.setColor(Color.argb(48, 255, 255, 255));
-                } else {
-                    padPaint.setColor(Color.argb(165, Color.red(baseColor), Color.green(baseColor), Color.blue(baseColor)));
-                }
-
-                padBorderPaint.setStyle(Paint.Style.STROKE);
-                padBorderPaint.setStrokeWidth(2.5f);
-                padBorderPaint.setColor(Color.argb(45, 255, 255, 255));
-            } else {
-                color = blend(tintColor, 0xFFFFFFFF, 0.18f);
+                padPaint.setColor(Color.argb(basePadAlpha, Color.red(baseColor), Color.green(baseColor), Color.blue(baseColor)));
             }
 
             strokePaint.setStyle(Paint.Style.STROKE);
@@ -542,10 +525,10 @@ public final class IconGlyphFactory {
 
         @Override
         public void setAlpha(int alpha) {
-            strokePaint.setAlpha(alpha);
-            fillPaint.setAlpha(alpha);
-            padPaint.setAlpha(alpha);
-            padBorderPaint.setAlpha(alpha);
+            int clamped = Math.max(0, Math.min(255, alpha));
+            strokePaint.setAlpha(clamped);
+            fillPaint.setAlpha(clamped);
+            padPaint.setAlpha(Math.round(basePadAlpha * (clamped / 255f)));
         }
 
         @Override
@@ -793,14 +776,5 @@ public final class IconGlyphFactory {
                 break;
             }
         }
-    }
-
-    private static int blend(int c1, int c2, float ratio) {
-        float r = Math.max(0f, Math.min(1f, ratio));
-        int a = Math.round(Color.alpha(c1) * (1 - r) + Color.alpha(c2) * r);
-        int cr = Math.round(Color.red(c1) * (1 - r) + Color.red(c2) * r);
-        int cg = Math.round(Color.green(c1) * (1 - r) + Color.green(c2) * r);
-        int cb = Math.round(Color.blue(c1) * (1 - r) + Color.blue(c2) * r);
-        return Color.argb(a, cr, cg, cb);
     }
 }

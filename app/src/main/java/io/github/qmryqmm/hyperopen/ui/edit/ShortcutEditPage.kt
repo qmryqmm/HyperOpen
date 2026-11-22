@@ -15,6 +15,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -68,7 +69,6 @@ import androidx.compose.ui.window.DialogProperties
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
 import io.github.qmryqmm.hyperopen.model.ActivityLaunchSpec
 import io.github.qmryqmm.hyperopen.model.ShortcutItem
-import io.github.qmryqmm.hyperopen.ui.IconPainter
 import io.github.qmryqmm.hyperopen.ui.MiuixIconRegistry
 import io.github.qmryqmm.hyperopen.ui.RemixIconRegistry
 import io.github.qmryqmm.hyperopen.ui.components.CollapsibleSectionTitle
@@ -89,6 +89,8 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Switch
+import top.yukonga.miuix.kmp.basic.TabRow
+import top.yukonga.miuix.kmp.basic.TabRowDefaults
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
@@ -176,6 +178,42 @@ private fun nextExtraType(t: String): String = when (t) {
     else -> ActivityLaunchSpec.TYPE_STRING
 }
 
+private fun normalizeOpaqueColor(color: Int, fallback: Int): Int =
+    if (color != 0) (color or 0xFF000000.toInt()) else fallback
+
+private fun isLightSwatch(argb: Int): Boolean {
+    val r = (argb shr 16) and 0xFF
+    val g = (argb shr 8) and 0xFF
+    val b = argb and 0xFF
+    return (r * 299 + g * 587 + b * 114) / 1000 >= 210
+}
+
+private fun parseHexColor(text: String): Int? {
+    val t = text.trim().removePrefix("#").removePrefix("0x").removePrefix("0X")
+    if (t.length != 6) return null
+    return try {
+        (0xFF shl 24) or t.toLong(16).toInt()
+    } catch (_: Throwable) {
+        null
+    }
+}
+
+private fun composePadColor(r: Int, g: Int, b: Int): Int =
+    (0xFF shl 24) or ((r and 0xFF) shl 16) or ((g and 0xFF) shl 8) or (b and 0xFF)
+
+private fun formatRgbHex(argb: Int): String = String.format("#%06X", argb and 0xFFFFFF)
+
+private val ICON_PRESET_COLORS = listOf(
+    "纯白" to 0xFFFFFFFF.toInt(),
+    "暗夜黑" to 0xFF1F2329.toInt(),
+    "微信绿" to 0xFF07C160.toInt(),
+    "支付宝蓝" to 0xFF1677FF.toInt(),
+    "科技蓝" to 0xFF2A82E4.toInt(),
+    "小米橙" to 0xFFFF6900.toInt(),
+    "网易红" to 0xFFE60026.toInt(),
+    "极客紫" to 0xFF7928CA.toInt(),
+)
+
 /** 预览卡片上的「铅笔」编辑角标：主色圆底 + 白色铅笔，提示该区域可点开浮窗编辑 */
 @Composable
 private fun EditBadge(modifier: Modifier = Modifier) {
@@ -191,6 +229,140 @@ private fun EditBadge(modifier: Modifier = Modifier) {
             contentDescription = "编辑",
             tint = Color.White,
             modifier = Modifier.size(11.dp),
+        )
+    }
+}
+
+/** 矢量前景/底垫公用的色板 + 十六进制 + RGB 分量编辑区块，保证两套取色交互完全一致 */
+@Composable
+private fun VectorColorEditorSection(
+    sectionLabel: String,
+    color: Int,
+    hexInput: String,
+    hexLabel: String,
+    channelPrefix: String,
+    colorSummaryTarget: String,
+    showCustomStar: Boolean = false,
+    onColorChange: (Int) -> Unit,
+    onHexInputChange: (String) -> Unit,
+) {
+    val borderColor = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.22f)
+    Column {
+        Text(
+            text = sectionLabel,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            color = MiuixTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            ICON_PRESET_COLORS.forEach { (_, colorValue) ->
+                val light = isLightSwatch(colorValue)
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(Color(colorValue))
+                        .then(if (light) Modifier.border(1.dp, borderColor, CircleShape) else Modifier)
+                        .clickable {
+                            onColorChange(colorValue)
+                            onHexInputChange(formatRgbHex(colorValue))
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (color == colorValue) {
+                        Text(
+                            "✓",
+                            color = if (light) Color(0xFF1F2329) else Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                        )
+                    }
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            val previewLight = isLightSwatch(color)
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(Color(color))
+                    .then(if (previewLight) Modifier.border(1.dp, borderColor, CircleShape) else Modifier),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (showCustomStar && ICON_PRESET_COLORS.none { it.second == color }) {
+                    Text(
+                        "✦",
+                        color = if (previewLight) Color(0xFF1F2329) else Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                    )
+                }
+            }
+            TextField(
+                value = hexInput,
+                onValueChange = { value ->
+                    onHexInputChange(value)
+                    parseHexColor(value)?.let { onColorChange(it) }
+                },
+                label = hexLabel,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        val r = (color shr 16) and 0xFF
+        val g = (color shr 8) and 0xFF
+        val b = color and 0xFF
+        SliderPreference(
+            title = "${channelPrefix}红色分量",
+            summary = "自定义${colorSummaryTarget}的红色通道 (R)",
+            valueText = "$r",
+            value = r.toFloat(),
+            valueRange = 0f..255f,
+            onValueChange = { nextR ->
+                val updated = composePadColor(nextR.toInt(), g, b)
+                onColorChange(updated)
+                onHexInputChange(formatRgbHex(updated))
+            },
+        )
+        SliderPreference(
+            title = "${channelPrefix}绿色分量",
+            summary = "自定义${colorSummaryTarget}的绿色通道 (G)",
+            valueText = "$g",
+            value = g.toFloat(),
+            valueRange = 0f..255f,
+            onValueChange = { nextG ->
+                val updated = composePadColor(r, nextG.toInt(), b)
+                onColorChange(updated)
+                onHexInputChange(formatRgbHex(updated))
+            },
+        )
+        SliderPreference(
+            title = "${channelPrefix}蓝色分量",
+            summary = "自定义${colorSummaryTarget}的蓝色通道 (B)",
+            valueText = "$b",
+            value = b.toFloat(),
+            valueRange = 0f..255f,
+            onValueChange = { nextB ->
+                val updated = composePadColor(r, g, nextB.toInt())
+                onColorChange(updated)
+                onHexInputChange(formatRgbHex(updated))
+            },
         )
     }
 }
@@ -234,10 +406,11 @@ fun ShortcutEditPage(
     var actionPayload by remember { mutableStateOf(initialItem.actionPayload) }
     var iconPackage by remember { mutableStateOf(initialItem.iconPackage) }
     var iconGlyph by remember { mutableStateOf(initialItem.iconGlyph) }
-    var iconColor by remember { mutableIntStateOf(initialItem.tintColor) }
+    var iconColor by remember { mutableIntStateOf(normalizeOpaqueColor(initialItem.tintColor, 0xFFFFFFFF.toInt())) }
     var glyphPadEnabled by remember { mutableStateOf(initialItem.glyphPadEnabled) }
-    var glyphPadColor by remember { mutableIntStateOf(initialItem.glyphPadColor) }
-    var glyphPadMode by remember { mutableIntStateOf(initialItem.glyphPadMode) }
+    var glyphPadColor by remember { mutableIntStateOf(normalizeOpaqueColor(initialItem.glyphPadColor, 0xFF2A82E4.toInt())) }
+    var glyphPadAlpha by remember { mutableFloatStateOf(ShortcutItem.clampPadAlpha(initialItem.glyphPadAlpha)) }
+    var iconStyleTab by remember { mutableIntStateOf(0) }
     var appIconCropMode by remember {
         mutableIntStateOf(
             if (initialItem.appIconCropMode > 0) initialItem.appIconCropMode
@@ -265,13 +438,13 @@ fun ShortcutEditPage(
     var showHintSubtitle by remember { mutableStateOf(initialItem.showHintSubtitle) }
     // 颜色十六进制输入（关闭「跟随」后显示，与底垫 padHexInput 同款双向同步模式）
     var hintHexInput by remember {
-        val base = if (initialItem.hintTextColor != 0) initialItem.hintTextColor else initialItem.tintColor
-        mutableStateOf(String.format("#%06X", base and 0xFFFFFF))
+        val base = if (initialItem.hintTextColor != 0) initialItem.hintTextColor else initialItem.resolveIconPrimaryColor()
+        mutableStateOf(formatRgbHex(base))
     }
     var hintHexSubInput by remember {
         val base = if (initialItem.hintTextColorSub != 0) initialItem.hintTextColorSub
-            else if (initialItem.hintTextColor != 0) initialItem.hintTextColor else initialItem.tintColor
-        mutableStateOf(String.format("#%06X", base and 0xFFFFFF))
+            else if (initialItem.hintTextColor != 0) initialItem.hintTextColor else initialItem.resolveIconPrimaryColor()
+        mutableStateOf(formatRgbHex(base))
     }
     // 启动用户（0 = 当前/主空间默认；>0 跨用户，如 999 应用双开/分身）与 SHELL Root 执行开关
     // 启动用户：userId 字段优先；老快捷方式只有 URI 标记（i.hyperopen_user）时从 payload 解析回来
@@ -327,7 +500,7 @@ fun ShortcutEditPage(
         newItem.tintColor = iconColor
         newItem.glyphPadEnabled = glyphPadEnabled
         newItem.glyphPadColor = glyphPadColor
-        newItem.glyphPadMode = glyphPadMode
+        newItem.glyphPadAlpha = ShortcutItem.clampPadAlpha(glyphPadAlpha)
         newItem.appIconCropMode = appIconCropMode
         newItem.enabled = enabled
         newItem.userId = pickedUser
@@ -363,28 +536,11 @@ fun ShortcutEditPage(
     var showTextDialog by remember { mutableStateOf(false) }
 
     var iconHexInput by remember {
-        mutableStateOf(String.format("#%06X", initialItem.tintColor and 0xFFFFFF))
+        mutableStateOf(formatRgbHex(iconColor))
     }
     // 自定义矢量图标底垫颜色：十六进制文本框（与 RGB 分量滑条双向同步）
     var padHexInput by remember {
-        mutableStateOf(String.format("#%06X", initialItem.glyphPadColor and 0xFFFFFF))
-    }
-    fun parseHexColor(text: String): Int? {
-        val t = text.trim().removePrefix("#").removePrefix("0x").removePrefix("0X")
-        if (t.length != 6) return null
-        return try {
-            (0xFF shl 24) or t.toLong(16).toInt()
-        } catch (_: Throwable) {
-            null
-        }
-    }
-    fun composePadColor(r: Int, g: Int, b: Int): Int =
-        (0xFF shl 24) or ((r and 0xFF) shl 16) or ((g and 0xFF) shl 8) or (b and 0xFF)
-    fun syncPadHexFromColor() {
-        padHexInput = String.format("#%06X", glyphPadColor and 0xFFFFFF)
-    }
-    fun syncIconHexFromColor() {
-        iconHexInput = String.format("#%06X", iconColor and 0xFFFFFF)
+        mutableStateOf(formatRgbHex(glyphPadColor))
     }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
@@ -426,17 +582,17 @@ fun ShortcutEditPage(
     // 检查是否有未保存的修改（基准为「最近一次保存」的快照：保存修改后留在编辑页时重置基准，
     // 返回键不会因已保存内容误弹未保存弹窗）
     var savedBaseline by remember { mutableStateOf(initialItem) }
-    val isModified = remember(title, subtitle, actionType, actionPayload, iconPackage, iconGlyph, iconColor, glyphPadEnabled, glyphPadColor, glyphPadMode, appIconCropMode, enabled, pickedUser, shellAsRoot, actAction, actData, actComponent, actPackage, actExtras, actNewTask, actUseRoot, savedBaseline, followGlobalHintStyle, hintTextColor, hintTextAlpha, hintTextColorSub, hintTextAlphaSub, hintTextShadow, hintTextStroke, hintTextWeight, hintTextLetterSpacing, showHintTitle, showHintSubtitle, childrenRev) {
+    val isModified = remember(title, subtitle, actionType, actionPayload, iconPackage, iconGlyph, iconColor, glyphPadEnabled, glyphPadColor, glyphPadAlpha, appIconCropMode, enabled, pickedUser, shellAsRoot, actAction, actData, actComponent, actPackage, actExtras, actNewTask, actUseRoot, savedBaseline, followGlobalHintStyle, hintTextColor, hintTextAlpha, hintTextColorSub, hintTextAlphaSub, hintTextShadow, hintTextStroke, hintTextWeight, hintTextLetterSpacing, showHintTitle, showHintSubtitle, childrenRev) {
         title != savedBaseline.title ||
         subtitle != savedBaseline.subtitle ||
         actionType != savedBaseline.actionType ||
         (actionType != ShortcutItem.ACTION_FOLDER && actionPayload != savedBaseline.actionPayload) ||
         iconPackage != savedBaseline.iconPackage ||
         iconGlyph != savedBaseline.iconGlyph ||
-        iconColor != savedBaseline.tintColor ||
+        iconColor != normalizeOpaqueColor(savedBaseline.tintColor, 0xFFFFFFFF.toInt()) ||
         glyphPadEnabled != savedBaseline.glyphPadEnabled ||
-        glyphPadColor != savedBaseline.glyphPadColor ||
-        glyphPadMode != savedBaseline.glyphPadMode ||
+        glyphPadColor != normalizeOpaqueColor(savedBaseline.glyphPadColor, 0xFF2A82E4.toInt()) ||
+        Math.round(glyphPadAlpha * 100f) != Math.round(ShortcutItem.clampPadAlpha(savedBaseline.glyphPadAlpha) * 100f) ||
         appIconCropMode != (if (savedBaseline.appIconCropMode > 0) savedBaseline.appIconCropMode else HyperOpenConfig.CROP_ADAPTIVE_EXPAND) ||
         enabled != savedBaseline.enabled ||
         pickedUser != savedBaseline.userId ||
@@ -493,7 +649,7 @@ fun ShortcutEditPage(
 
     val previewItem = remember(
         initialItem, title, subtitle, actionType, actionPayload,
-        iconPackage, iconGlyph, iconColor, appIconCropMode, glyphPadEnabled, glyphPadColor, glyphPadMode
+        iconPackage, iconGlyph, iconColor, appIconCropMode, glyphPadEnabled, glyphPadColor, glyphPadAlpha
     ) {
         initialItem.copy().apply {
             this.title = title.trim().ifBlank { "快捷方式" }
@@ -510,7 +666,7 @@ fun ShortcutEditPage(
             this.appIconCropMode = appIconCropMode
             this.glyphPadEnabled = glyphPadEnabled
             this.glyphPadColor = glyphPadColor
-            this.glyphPadMode = glyphPadMode
+            this.glyphPadAlpha = ShortcutItem.clampPadAlpha(glyphPadAlpha)
         }
     }
 
@@ -1174,28 +1330,26 @@ fun ShortcutEditPage(
                         fontWeight = FontWeight.Bold,
                         color = MiuixTheme.colorScheme.onSurface,
                     )
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(8.dp))
+                    // ── 实时预览圆（固定顶部，调色与滑动参数时始终可见）──
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        ShortcutBubbleIcon(
+                            item = previewItem,
+                            size = 64.dp,
+                        )
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 480.dp),
+                            .heightIn(max = 420.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        // ── 实时预览圆 ──
-                        item(key = "icon_dialog_preview") {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                ShortcutBubbleIcon(
-                                    item = previewItem,
-                                    size = 64.dp,
-                                )
-                            }
-                        }
-
                         // ── 图标来源 ──
                         item(key = "icon_dialog_source") {
                             ArrowPreference(
@@ -1287,279 +1441,77 @@ fun ShortcutEditPage(
                             }
                         }
 
-                        // ── 矢量图标颜色与底垫（仅图标库矢量图标）──
-                        if (vectorIcon != null && iconPackage.isBlank()) {
-                            item(key = "icon_dialog_icon_color") {
+                        // ── 矢量图标前景与底垫独立设置（双 Tab 切换，互不覆盖）──
+                        if (!isAppIcon) {
+                            item(key = "icon_dialog_style_tabs") {
                                 Column {
-                                    Text(
-                                        text = "矢量图标颜色",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MiuixTheme.colorScheme.onSurface,
-                                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
-                                    )
-
-                                    val iconBrandColors = listOf(
-                                        "微信绿" to 0xFF07C160.toInt(),
-                                        "支付宝蓝" to 0xFF1677FF.toInt(),
-                                        "小米橙" to 0xFFFF6900.toInt(),
-                                        "网易红" to 0xFFE60026.toInt(),
-                                        "极客紫" to 0xFF7928CA.toInt(),
-                                        "暗夜黑" to 0xFF1F2329.toInt(),
-                                        "科技蓝" to 0xFF2A82E4.toInt(),
-                                    )
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                    ) {
-                                        iconBrandColors.forEach { (_, colorValue) ->
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(36.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color(colorValue))
-                                                    .clickable {
-                                                        iconColor = colorValue
-                                                        syncIconHexFromColor()
-                                                    },
-                                                contentAlignment = Alignment.Center,
-                                            ) {
-                                                if (iconColor == colorValue) {
-                                                    Text("✓", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(36.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(iconColor)),
-                                        )
-                                        TextField(
-                                            value = iconHexInput,
-                                            onValueChange = { value ->
-                                                iconHexInput = value
-                                                parseHexColor(value)?.let { iconColor = it }
-                                            },
-                                            label = "图标颜色 (#RRGGBB)",
-                                            singleLine = true,
-                                            modifier = Modifier.fillMaxWidth(),
-                                        )
-                                    }
-
-                                    SliderPreference(
-                                        title = "图标红色分量",
-                                        valueText = "${(iconColor shr 16) and 0xFF}",
-                                        value = ((iconColor shr 16) and 0xFF).toFloat(),
-                                        valueRange = 0f..255f,
-                                        onValueChange = { red ->
-                                            iconColor = composePadColor(
-                                                red.toInt(), (iconColor shr 8) and 0xFF, iconColor and 0xFF
-                                            )
-                                            syncIconHexFromColor()
-                                        },
-                                    )
-                                    SliderPreference(
-                                        title = "图标绿色分量",
-                                        valueText = "${(iconColor shr 8) and 0xFF}",
-                                        value = ((iconColor shr 8) and 0xFF).toFloat(),
-                                        valueRange = 0f..255f,
-                                        onValueChange = { green ->
-                                            iconColor = composePadColor(
-                                                (iconColor shr 16) and 0xFF, green.toInt(), iconColor and 0xFF
-                                            )
-                                            syncIconHexFromColor()
-                                        },
-                                    )
-                                    SliderPreference(
-                                        title = "图标蓝色分量",
-                                        valueText = "${iconColor and 0xFF}",
-                                        value = (iconColor and 0xFF).toFloat(),
-                                        valueRange = 0f..255f,
-                                        onValueChange = { blue ->
-                                            iconColor = composePadColor(
-                                                (iconColor shr 16) and 0xFF, (iconColor shr 8) and 0xFF, blue.toInt()
-                                            )
-                                            syncIconHexFromColor()
-                                        },
+                                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                                    TabRow(
+                                        tabs = listOf("图标颜色", "图标底垫"),
+                                        selectedTabIndex = iconStyleTab,
+                                        onTabSelected = { iconStyleTab = it },
+                                        colors = TabRowDefaults.tabRowColors(backgroundColor = Color.Transparent),
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     )
                                 }
                             }
-                            item(key = "icon_dialog_pad") {
-                                Column {
-                                    SwitchPreference(
-                                        title = "启用此图标圆形底垫",
-                                        summary = "为当前矢量图标添加独立圆形底板",
-                                        checked = glyphPadEnabled,
-                                        onCheckedChange = { glyphPadEnabled = it },
+
+                            if (iconStyleTab == 0) {
+                                item(key = "icon_dialog_icon_color") {
+                                    VectorColorEditorSection(
+                                        sectionLabel = "矢量图标颜色",
+                                        color = iconColor,
+                                        hexInput = iconHexInput,
+                                        hexLabel = "图标颜色 (#RRGGBB)",
+                                        channelPrefix = "图标",
+                                        colorSummaryTarget = "矢量图标颜色",
+                                        showCustomStar = false,
+                                        onColorChange = { iconColor = it },
+                                        onHexInputChange = { iconHexInput = it },
                                     )
-
-                                    if (glyphPadEnabled) {
-                                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-                                        Text(
-                                            text = "底垫渲染质感",
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = MiuixTheme.colorScheme.onSurface,
-                                            modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
+                                }
+                            } else {
+                                item(key = "icon_dialog_pad") {
+                                    Column {
+                                        SwitchPreference(
+                                            title = "启用此图标圆形底垫",
+                                            summary = "为当前矢量图标添加独立纯色底板",
+                                            checked = glyphPadEnabled,
+                                            onCheckedChange = { glyphPadEnabled = it },
                                         )
 
-                                        RadioButtonPreference(
-                                            title = "磨砂微透底板",
-                                            summary = "65% 半透明高光底板，颜色与背景毛玻璃相互交融",
-                                            selected = glyphPadMode == HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT,
-                                            onClick = { glyphPadMode = HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT },
-                                        )
-                                        RadioButtonPreference(
-                                            title = "饱满纯色底板",
-                                            summary = "100% 不透明纯色实心圆，上方呈现白色高对比矢量",
-                                            selected = glyphPadMode == HyperOpenConfig.GLYPH_PAD_MODE_SOLID,
-                                            onClick = { glyphPadMode = HyperOpenConfig.GLYPH_PAD_MODE_SOLID },
-                                        )
-                                        RadioButtonPreference(
-                                            title = "反色渲染模式",
-                                            summary = "微透亮白底板 + 彩色矢量图标",
-                                            selected = glyphPadMode == HyperOpenConfig.GLYPH_PAD_MODE_INVERTED,
-                                            onClick = { glyphPadMode = HyperOpenConfig.GLYPH_PAD_MODE_INVERTED },
-                                        )
+                                        if (glyphPadEnabled) {
+                                            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
-                                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-                                        Text(
-                                            text = "快捷品牌色预设",
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = MiuixTheme.colorScheme.onSurface,
-                                            modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
-                                        )
-
-                                        val brandColors = listOf(
-                                            "微信绿" to 0xFF07C160.toInt(),
-                                            "支付宝蓝" to 0xFF1677FF.toInt(),
-                                            "小米橙" to 0xFFFF6900.toInt(),
-                                            "网易红" to 0xFFE60026.toInt(),
-                                            "极客紫" to 0xFF7928CA.toInt(),
-                                            "暗夜黑" to 0xFF1F2329.toInt(),
-                                            "科技蓝" to 0xFF2A82E4.toInt(),
-                                        )
-
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 16.dp, vertical = 6.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                        ) {
-                                            brandColors.forEach { (name, colorValue) ->
-                                                val isSelectedColor = glyphPadColor == colorValue
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(36.dp)
-                                                        .clip(CircleShape)
-                                                        .background(Color(colorValue))
-                                                        .clickable {
-                                                            glyphPadColor = colorValue
-                                                            padHexInput = String.format("#%06X", colorValue and 0xFFFFFF)
-                                                        },
-                                                    contentAlignment = Alignment.Center,
-                                                ) {
-                                                    if (isSelectedColor) {
-                                                        Text("✓", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-                                        Text(
-                                            text = "自定义底垫颜色",
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = MiuixTheme.colorScheme.onSurface,
-                                            modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
-                                        )
-
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 16.dp, vertical = 6.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(36.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color(glyphPadColor)),
-                                                contentAlignment = Alignment.Center,
-                                            ) {
-                                                if (brandColors.none { it.second == glyphPadColor }) {
-                                                    Text("✦", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                                }
-                                            }
-                                            TextField(
-                                                value = padHexInput,
-                                                onValueChange = { s ->
-                                                    padHexInput = s
-                                                    parseHexColor(s)?.let { glyphPadColor = it }
+                                            val clampedPadAlpha = glyphPadAlpha.coerceIn(
+                                                ShortcutItem.MIN_GLYPH_PAD_ALPHA, 1f
+                                            )
+                                            SliderPreference(
+                                                title = "底垫不透明度",
+                                                summary = "调节底垫的不透明程度（100% 为饱满纯色，低值呈微透效果）",
+                                                valueText = "${Math.round(clampedPadAlpha * 100)}%",
+                                                value = clampedPadAlpha,
+                                                valueRange = ShortcutItem.MIN_GLYPH_PAD_ALPHA..1f,
+                                                onValueChange = {
+                                                    glyphPadAlpha = (Math.round(it * 20f) / 20f)
+                                                        .coerceIn(ShortcutItem.MIN_GLYPH_PAD_ALPHA, 1f)
                                                 },
-                                                label = "十六进制颜色 (#RRGGBB)",
-                                                singleLine = true,
-                                                modifier = Modifier.fillMaxWidth(),
+                                            )
+
+                                            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+                                            VectorColorEditorSection(
+                                                sectionLabel = "底垫颜色",
+                                                color = glyphPadColor,
+                                                hexInput = padHexInput,
+                                                hexLabel = "底垫颜色 (#RRGGBB)",
+                                                channelPrefix = "",
+                                                colorSummaryTarget = "底垫颜色",
+                                                showCustomStar = true,
+                                                onColorChange = { glyphPadColor = it },
+                                                onHexInputChange = { padHexInput = it },
                                             )
                                         }
-
-                                        SliderPreference(
-                                            title = "红色分量",
-                                            summary = "自定义底垫颜色的红色通道 (R)",
-                                            valueText = "${(glyphPadColor shr 16) and 0xFF}",
-                                            value = ((glyphPadColor shr 16) and 0xFF).toFloat(),
-                                            valueRange = 0f..255f,
-                                            onValueChange = { r ->
-                                                glyphPadColor = composePadColor(
-                                                    r.toInt(), (glyphPadColor shr 8) and 0xFF, glyphPadColor and 0xFF
-                                                )
-                                                syncPadHexFromColor()
-                                            },
-                                        )
-                                        SliderPreference(
-                                            title = "绿色分量",
-                                            summary = "自定义底垫颜色的绿色通道 (G)",
-                                            valueText = "${(glyphPadColor shr 8) and 0xFF}",
-                                            value = ((glyphPadColor shr 8) and 0xFF).toFloat(),
-                                            valueRange = 0f..255f,
-                                            onValueChange = { g ->
-                                                glyphPadColor = composePadColor(
-                                                    (glyphPadColor shr 16) and 0xFF, g.toInt(), glyphPadColor and 0xFF
-                                                )
-                                                syncPadHexFromColor()
-                                            },
-                                        )
-                                        SliderPreference(
-                                            title = "蓝色分量",
-                                            summary = "自定义底垫颜色的蓝色通道 (B)",
-                                            valueText = "${glyphPadColor and 0xFF}",
-                                            value = (glyphPadColor and 0xFF).toFloat(),
-                                            valueRange = 0f..255f,
-                                            onValueChange = { b ->
-                                                glyphPadColor = composePadColor(
-                                                    (glyphPadColor shr 16) and 0xFF, (glyphPadColor shr 8) and 0xFF, b.toInt()
-                                                )
-                                                syncPadHexFromColor()
-                                            },
-                                        )
                                     }
                                 }
                             }
@@ -1616,14 +1568,14 @@ fun ShortcutEditPage(
                             val globalCfg = remember(ctx) { HyperOpenConfig.loadFromApp(ctx) }
 
                             val previewTitleBase = Color(
-                                if (followGlobalHintStyle) initialItem.resolveHintTitleColor(globalCfg)
-                                else if (hintTextColor != 0) hintTextColor else initialItem.resolveIconPrimaryColor()
+                                if (followGlobalHintStyle) previewItem.resolveHintTitleColor(globalCfg)
+                                else if (hintTextColor != 0) hintTextColor else previewItem.resolveIconPrimaryColor()
                             )
                             val previewTitleAlpha = if (followGlobalHintStyle) 1.0f else hintTextAlpha.coerceIn(0.05f, 1f)
                             val previewSubAlphaEffective = previewTitleAlpha * 0.82f
                             val previewSubBase = Color(
-                                if (followGlobalHintStyle) initialItem.resolveHintSubtitleColor(globalCfg)
-                                else if (hintTextColorSub != 0) hintTextColorSub else (if (hintTextColor != 0) hintTextColor else initialItem.resolveIconPrimaryColor())
+                                if (followGlobalHintStyle) previewItem.resolveHintSubtitleColor(globalCfg)
+                                else if (hintTextColorSub != 0) hintTextColorSub else (if (hintTextColor != 0) hintTextColor else previewItem.resolveIconPrimaryColor())
                             )
                             val previewSubAlpha =
                                 if (followGlobalHintStyle) 0.82f
@@ -1760,7 +1712,7 @@ fun ShortcutEditPage(
                                         checked = hintTextColor == 0,
                                         onCheckedChange = { follow ->
                                             hintTextColor = if (follow) 0
-                                            else parseHexColor(hintHexInput) ?: (initialItem.tintColor or 0xFF000000.toInt())
+                                            else parseHexColor(hintHexInput) ?: (previewItem.resolveIconPrimaryColor() or 0xFF000000.toInt())
                                         },
                                     )
                                     if (hintTextColor != 0) {
@@ -1837,7 +1789,7 @@ fun ShortcutEditPage(
                                         onCheckedChange = { follow ->
                                             hintTextColorSub = if (follow) 0
                                             else parseHexColor(hintHexSubInput)
-                                                ?: (if (hintTextColor != 0) hintTextColor else initialItem.tintColor)
+                                                ?: (if (hintTextColor != 0) hintTextColor else previewItem.resolveIconPrimaryColor())
                                         },
                                     )
                                     if (hintTextColorSub != 0) {
@@ -2209,7 +2161,7 @@ private fun FolderChildrenEditor(
                     true,
                     preset.glyphPadEnabled,
                     preset.glyphPadColor,
-                    preset.glyphPadMode,
+                    preset.glyphPadAlpha,
                 )
                 child.userId = preset.userId
                 child.shellUseRoot = preset.shellUseRoot

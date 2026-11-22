@@ -32,9 +32,15 @@ public class HyperOpenConfig {
     public static final int CROP_BITMAP_CIRCLE = 1;
     public static final int CROP_ADAPTIVE_EXPAND = 2;
 
-    /** Miuix 矢量图标底垫渲染模式：0=彩色底板+白色图标, 1=微透磨砂底板, 2=反色(微透浅底+彩色图标) */
+    /**
+     * @deprecated 已由 {@link ShortcutItem#glyphPadAlpha}（独立前景色 + 纯色底垫透明度）取代，
+     * 仅保留常量用于旧配置反序列化迁移与 IPC 兼容。
+     */
+    @Deprecated
     public static final int GLYPH_PAD_MODE_SOLID = 0;
+    @Deprecated
     public static final int GLYPH_PAD_MODE_TRANSLUCENT = 1;
+    @Deprecated
     public static final int GLYPH_PAD_MODE_INVERTED = 2;
 
     /** 界面风格：0=Material You 深色玻璃, 1=MIUIX 浅色卡片 */
@@ -1687,8 +1693,8 @@ public class HyperOpenConfig {
             "wx_scan", "微信扫一扫", "直接唤起扫码镜头",
             ShortcutItem.ACTION_INTENT_URI, "intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;launchFlags=0x10000000;package=com.tencent.mm;component=com.tencent.mm/.plugin.scanner.ui.BaseScanUI;end",
             "", "remix:qr-scan-2-line",
-            0xFF07C160, true,
-            true, 0xFF07C160, GLYPH_PAD_MODE_TRANSLUCENT
+            0xFFFFFFFF, true,
+            true, 0xFF07C160, ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA
         );
         // userId 默认 0 = 主空间；要跨用户（如 999 双开）在编辑界面「启动用户」里选择，保存时会双写 URI 标记
         items.add(wxScan);
@@ -1698,8 +1704,8 @@ public class HyperOpenConfig {
             "wx_pay", "微信付款码", "出示收银台向商家付款",
             ShortcutItem.ACTION_INTENT_URI, "intent:#Intent;launchFlags=0x10000000;component=com.tencent.mm/com.tencent.mm.plugin.offline.ui.WalletOfflineCoinPurseUI;i.key_entry_scene=2;end",
             "", "remix:qr-code-line",
-            0xFF07C160, true,
-            true, 0xFF07C160, GLYPH_PAD_MODE_TRANSLUCENT
+            0xFFFFFFFF, true,
+            true, 0xFF07C160, ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA
         ));
 
         // 3. 微信收款码 (智能助理官方面对面二维码收款入口，配 Remix 付款码矢量图标 + 微信绿微透底垫)
@@ -1707,8 +1713,8 @@ public class HyperOpenConfig {
             "wx_receive", "微信收款码", "面对面二维码收款",
             ShortcutItem.ACTION_INTENT_URI, "intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;launchFlags=0x10000000;package=com.tencent.mm;component=com.tencent.mm/.plugin.collect.ui.CollectMainUI;end",
             "", "remix:money-cny-circle-line",
-            0xFF07C160, true,
-            true, 0xFF07C160, GLYPH_PAD_MODE_TRANSLUCENT
+            0xFFFFFFFF, true,
+            true, 0xFF07C160, ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA
         ));
 
         // 4. 支付宝扫一扫 (官方扫码协议，配 Remix 扫一扫图标 + 支付宝蓝微透底垫)
@@ -1716,8 +1722,8 @@ public class HyperOpenConfig {
                 "alipay_scan", "支付宝扫一扫", "扫码识别或骑行单车",
                 ShortcutItem.ACTION_INTENT_URI, "intent://platformapi/startapp?appId=10000007#Intent;scheme=alipays;package=com.eg.android.AlipayGphone;end",
                 "", "remix:qr-scan-2-line",
-                0xFF1677FF, true,
-                true, 0xFF1677FF, GLYPH_PAD_MODE_TRANSLUCENT
+                0xFFFFFFFF, true,
+                true, 0xFF1677FF, ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA
         ));
 
         // 5. 支付宝付款码 (智能助理官方 Scheme，配 Remix 银行卡矢量图标 + 支付宝蓝微透底垫)
@@ -1725,8 +1731,8 @@ public class HyperOpenConfig {
             "alipay_pay", "支付宝付款码", "出示收银台付款",
             ShortcutItem.ACTION_INTENT_URI, "alipays://platformapi/startapp?appId=20000056&chInfo=ch_xiaomiLeft",
             "", "remix:qr-code-fill",
-            0xFF1677FF, true,
-            true, 0xFF1677FF, GLYPH_PAD_MODE_TRANSLUCENT
+            0xFFFFFFFF, true,
+            true, 0xFF1677FF, ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA
         ));
 
         // 6. 支付宝收款码 (智能助理官方收钱码协议，配 Remix 人民币矢量图标 + 支付宝蓝微透底垫)
@@ -1734,8 +1740,8 @@ public class HyperOpenConfig {
             "alipay_receive", "支付宝收款码", "面对面二维码收钱",
             ShortcutItem.ACTION_INTENT_URI, "alipays://platformapi/startapp?appId=20000123&chInfo=ch_xiaomi_left&sceneCode=KF_CHANGSHANG&shareUserId=2088831085791813&partnerId=ch_xiaomi_left&pikshemo=YES",
             "", "remix:money-cny-circle-fill",
-            0xFF1677FF, true,
-            true, 0xFF1677FF, GLYPH_PAD_MODE_TRANSLUCENT
+            0xFFFFFFFF, true,
+            true, 0xFF1677FF, ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA
         ));
 
         // 7. 乘车码 (交通乘车码统一入口，配 Remix 地铁矢量图标 + 银联绿底垫)
@@ -1743,8 +1749,8 @@ public class HyperOpenConfig {
                 "bus_code", "乘车码", "地铁公交一卡通刷码",
                 ShortcutItem.ACTION_INTENT_URI, "intent://platformapi/startapp?appId=200011235#Intent;scheme=alipays;package=com.eg.android.AlipayGphone;end",
                 "", "remix:subway-fill",
-                0xFF52C41A, true,
-                true, 0xFF52C41A, GLYPH_PAD_MODE_TRANSLUCENT
+                0xFFFFFFFF, true,
+                true, 0xFF52C41A, ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA
         ));
 
         // 8. 手电筒 (系统底层 Camera Torch，配 Remix 手电筒矢量图标 + 暖阳橙微透底垫)
@@ -1752,8 +1758,8 @@ public class HyperOpenConfig {
             "flashlight", "手电筒", "开关后置 LED 强光",
             ShortcutItem.ACTION_FLASHLIGHT, "",
             "", "remix:flashlight-fill",
-            0xFFFAAD14, true,
-            true, 0xFFFAAD14, GLYPH_PAD_MODE_TRANSLUCENT
+            0xFFFFFFFF, true,
+            true, 0xFFFAAD14, ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA
         ));
 
         // 9. 街拍相机 (系统原生相机标准 Action，配 Remix 相机矢量图标 + 活力红底垫)
@@ -1761,8 +1767,8 @@ public class HyperOpenConfig {
             "camera", "街拍相机", "秒级开启抓拍",
             ShortcutItem.ACTION_INTENT_URI, "intent:#Intent;action=android.media.action.STILL_IMAGE_CAMERA;end",
             "", "remix:camera-fill",
-            0xFFFF4D4F, true,
-            true, 0xFFFF4D4F, GLYPH_PAD_MODE_TRANSLUCENT
+            0xFFFFFFFF, true,
+            true, 0xFFFF4D4F, ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA
         ));
 
         return items;

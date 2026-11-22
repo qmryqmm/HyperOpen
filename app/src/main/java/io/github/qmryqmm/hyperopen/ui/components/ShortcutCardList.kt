@@ -53,7 +53,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
 import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory
 import io.github.qmryqmm.hyperopen.model.ShortcutItem
-import io.github.qmryqmm.hyperopen.ui.IconPainter
 import io.github.qmryqmm.hyperopen.ui.LocalHyperOpenConfig
 import io.github.qmryqmm.hyperopen.ui.MiuixIconRegistry
 import io.github.qmryqmm.hyperopen.ui.RemixIconRegistry
@@ -928,7 +927,7 @@ fun ShortcutBubbleIcon(
     // 其余参数（模糊/压暗/留白/圆角/透明度/选中）经 update 实时热同步，与真实容器的热更新链一致
     val viewKey = listOf(
         item.id, item.iconPackage, item.iconGlyph, item.actionType, item.actionPayload,
-        item.appIconCropMode, item.glyphPadEnabled, item.glyphPadColor, item.glyphPadMode,
+        item.appIconCropMode, item.glyphPadEnabled, item.glyphPadColor, item.glyphPadAlpha,
         item.tintColor, sizePx, resolvedStyle,
         cfg.appIconCropMode, cfg.glyphPadEnabled, cfg.glyphPadColor, cfg.glyphPadMode,
     ).joinToString("|")
@@ -978,9 +977,9 @@ fun newBlankChildShortcut(): ShortcutItem = ShortcutItem(
     "",
     "",
     "remix:sparkling-fill",
-    0xFF2A82E4.toInt(),
+    0xFFFFFFFF.toInt(),
     true,
     true,
     0xFF2A82E4.toInt(),
-    1,
+    ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA,
 )

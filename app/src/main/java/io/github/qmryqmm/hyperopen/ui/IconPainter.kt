@@ -22,7 +22,7 @@ object IconPainter {
 
     fun resolve(item: ShortcutItem, ctx: Context, cropMode: Int = item.appIconCropMode): Painter {
         val effectiveCrop = if (cropMode > 0) cropMode else 2
-        val key = "${item.id}|${item.iconPackage}|${item.iconGlyph}|${item.actionType}|${item.actionPayload}|$effectiveCrop"
+        val key = "${item.id}|${item.iconPackage}|${item.iconGlyph}|${item.actionType}|${item.actionPayload}|${item.tintColor}|${item.glyphPadEnabled}|${item.glyphPadColor}|${item.glyphPadAlpha}|$effectiveCrop"
         synchronized(cache) { cache[key]?.let { return it } }
         val tempItem = item.copy().apply { this.appIconCropMode = effectiveCrop }
         val d: Drawable = IconGlyphFactory.resolve(ctx, tempItem)

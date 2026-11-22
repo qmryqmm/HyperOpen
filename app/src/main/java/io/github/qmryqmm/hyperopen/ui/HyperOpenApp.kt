@@ -1947,11 +1947,11 @@ fun HyperOpenApp(
                                             "[]",
                                             "",
                                             "remix:folder-2-fill",
-                                            0xFF2A82E4.toInt(),
+                                            0xFFFFFFFF.toInt(),
                                             true,
                                             true,
                                             0xFF2A82E4.toInt(),
-                                            1,
+                                            ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA,
                                         )
                                         requestEditBackTrigger = 0
                                         isNewShortcut = true
@@ -2048,7 +2048,7 @@ fun HyperOpenApp(
                         true,
                         preset.glyphPadEnabled,
                         preset.glyphPadColor,
-                        preset.glyphPadMode,
+                        preset.glyphPadAlpha,
                     ).apply {
                         userId = preset.userId
                         shellUseRoot = preset.shellUseRoot

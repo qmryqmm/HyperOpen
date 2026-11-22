@@ -56,10 +56,18 @@ public class ShortcutItem {
     public int tintColor;
     public boolean enabled;
 
-    /** 该快捷方式独享的 Miuix 矢量底垫配置 */
+    public static final float DEFAULT_GLYPH_PAD_ALPHA = 0.65f;
+    public static final float MIN_GLYPH_PAD_ALPHA = 0.05f;
+
+    /** 该快捷方式独享的矢量图标底垫配置（纯色底板 + 独立不透明度） */
     public boolean glyphPadEnabled = false;
     public int glyphPadColor = 0xFF2A82E4;
-    public int glyphPadMode = 1; // 0=SOLID, 1=TRANSLUCENT, 2=INVERTED
+    public float glyphPadAlpha = DEFAULT_GLYPH_PAD_ALPHA;
+
+    public static float clampPadAlpha(float alpha) {
+        if (Float.isNaN(alpha) || alpha <= 0f) return DEFAULT_GLYPH_PAD_ALPHA;
+        return Math.max(MIN_GLYPH_PAD_ALPHA, Math.min(1f, alpha));
+    }
     /** 该快捷方式独享的应用图标形状裁切方案：1=标准抗锯齿圆形裁切, 2=自适应外扩满铺 */
     public int appIconCropMode = 2;
     /** 排版模式下的用户自定义偏移量（dp），用于关闭自动吸附时的自由摆放 */
@@ -94,29 +102,29 @@ public class ShortcutItem {
     public boolean showHintSubtitle = true;
 
     public ShortcutItem(String id, String title, String subtitle, String actionType, String actionPayload, int tintColor, boolean enabled) {
-        this(id, title, subtitle, actionType, actionPayload, "", "", tintColor, enabled, false, 0xFF2A82E4, 1, 2, 0f, 0f);
+        this(id, title, subtitle, actionType, actionPayload, "", "", tintColor, enabled, false, 0xFF2A82E4, DEFAULT_GLYPH_PAD_ALPHA, 2, 0f, 0f);
     }
 
     public ShortcutItem(String id, String title, String subtitle, String actionType, String actionPayload,
                         String iconPackage, String iconGlyph, int tintColor, boolean enabled) {
-        this(id, title, subtitle, actionType, actionPayload, iconPackage, iconGlyph, tintColor, enabled, false, 0xFF2A82E4, 1, 2, 0f, 0f);
+        this(id, title, subtitle, actionType, actionPayload, iconPackage, iconGlyph, tintColor, enabled, false, 0xFF2A82E4, DEFAULT_GLYPH_PAD_ALPHA, 2, 0f, 0f);
     }
 
     public ShortcutItem(String id, String title, String subtitle, String actionType, String actionPayload,
                         String iconPackage, String iconGlyph, int tintColor, boolean enabled,
-                        boolean glyphPadEnabled, int glyphPadColor, int glyphPadMode) {
-        this(id, title, subtitle, actionType, actionPayload, iconPackage, iconGlyph, tintColor, enabled, glyphPadEnabled, glyphPadColor, glyphPadMode, 2, 0f, 0f);
+                        boolean glyphPadEnabled, int glyphPadColor, float glyphPadAlpha) {
+        this(id, title, subtitle, actionType, actionPayload, iconPackage, iconGlyph, tintColor, enabled, glyphPadEnabled, glyphPadColor, glyphPadAlpha, 2, 0f, 0f);
     }
 
     public ShortcutItem(String id, String title, String subtitle, String actionType, String actionPayload,
                         String iconPackage, String iconGlyph, int tintColor, boolean enabled,
-                        boolean glyphPadEnabled, int glyphPadColor, int glyphPadMode, int appIconCropMode) {
-        this(id, title, subtitle, actionType, actionPayload, iconPackage, iconGlyph, tintColor, enabled, glyphPadEnabled, glyphPadColor, glyphPadMode, appIconCropMode, 0f, 0f);
+                        boolean glyphPadEnabled, int glyphPadColor, float glyphPadAlpha, int appIconCropMode) {
+        this(id, title, subtitle, actionType, actionPayload, iconPackage, iconGlyph, tintColor, enabled, glyphPadEnabled, glyphPadColor, glyphPadAlpha, appIconCropMode, 0f, 0f);
     }
 
     public ShortcutItem(String id, String title, String subtitle, String actionType, String actionPayload,
                         String iconPackage, String iconGlyph, int tintColor, boolean enabled,
-                        boolean glyphPadEnabled, int glyphPadColor, int glyphPadMode, int appIconCropMode,
+                        boolean glyphPadEnabled, int glyphPadColor, float glyphPadAlpha, int appIconCropMode,
                         float customOffsetX, float customOffsetY) {
         this.id = id;
         this.title = title;
@@ -129,7 +137,7 @@ public class ShortcutItem {
         this.enabled = enabled;
         this.glyphPadEnabled = glyphPadEnabled;
         this.glyphPadColor = glyphPadColor;
-        this.glyphPadMode = glyphPadMode;
+        this.glyphPadAlpha = clampPadAlpha(glyphPadAlpha);
         this.appIconCropMode = appIconCropMode > 0 ? appIconCropMode : 2;
         this.customOffsetX = customOffsetX;
         this.customOffsetY = customOffsetY;
@@ -149,7 +157,7 @@ public class ShortcutItem {
             json.put("enabled", enabled);
             json.put("glyphPadEnabled", glyphPadEnabled);
             json.put("glyphPadColor", glyphPadColor);
-            json.put("glyphPadMode", glyphPadMode);
+            json.put("glyphPadAlpha", (double) clampPadAlpha(glyphPadAlpha));
             json.put("appIconCropMode", appIconCropMode);
             json.put("customOffsetX", (double) customOffsetX);
             json.put("customOffsetY", (double) customOffsetY);
@@ -172,7 +180,41 @@ public class ShortcutItem {
         return json;
     }
 
+    @SuppressWarnings("deprecation")
     public static ShortcutItem fromJson(JSONObject json) {
+        int tintColor = json.optInt("tintColor", Color.CYAN);
+        boolean padEnabled = json.optBoolean("glyphPadEnabled", false);
+        int padColor = json.optInt("glyphPadColor", 0xFF2A82E4);
+        float padAlpha;
+        if (json.has("glyphPadAlpha")) {
+            padAlpha = clampPadAlpha((float) json.optDouble("glyphPadAlpha", DEFAULT_GLYPH_PAD_ALPHA));
+        } else {
+            // 无损迁移旧版 glyphPadMode（SOLID / TRANSLUCENT / INVERTED）到独立双层参数，保持视觉完全一致
+            int legacyMode = json.optInt("glyphPadMode", io.github.qmryqmm.hyperopen.config.HyperOpenConfig.GLYPH_PAD_MODE_TRANSLUCENT);
+            if (padEnabled) {
+                if (legacyMode == io.github.qmryqmm.hyperopen.config.HyperOpenConfig.GLYPH_PAD_MODE_SOLID) {
+                    padAlpha = 1.0f;
+                    tintColor = 0xFFFFFFFF;
+                } else if (legacyMode == io.github.qmryqmm.hyperopen.config.HyperOpenConfig.GLYPH_PAD_MODE_INVERTED) {
+                    if (tintColor == 0) {
+                        tintColor = padColor != 0 ? padColor : 0xFFFFFFFF;
+                    }
+                    padColor = 0xFFFFFFFF;
+                    padAlpha = 0.20f;
+                } else {
+                    padAlpha = DEFAULT_GLYPH_PAD_ALPHA;
+                    tintColor = 0xFFFFFFFF;
+                }
+            } else {
+                if (legacyMode == io.github.qmryqmm.hyperopen.config.HyperOpenConfig.GLYPH_PAD_MODE_SOLID) {
+                    padAlpha = 1.0f;
+                } else if (legacyMode == io.github.qmryqmm.hyperopen.config.HyperOpenConfig.GLYPH_PAD_MODE_INVERTED) {
+                    padAlpha = 0.20f;
+                } else {
+                    padAlpha = DEFAULT_GLYPH_PAD_ALPHA;
+                }
+            }
+        }
         ShortcutItem item = new ShortcutItem(
             json.optString("id", ""),
             json.optString("title", "未命名"),
@@ -181,11 +223,11 @@ public class ShortcutItem {
             json.optString("actionPayload", ""),
             json.optString("iconPackage", ""),
             json.optString("iconGlyph", ""),
-            json.optInt("tintColor", Color.CYAN),
+            tintColor,
             json.optBoolean("enabled", true),
-            json.optBoolean("glyphPadEnabled", false),
-            json.optInt("glyphPadColor", 0xFF2A82E4),
-            json.optInt("glyphPadMode", 1),
+            padEnabled,
+            padColor,
+            padAlpha,
             json.optInt("appIconCropMode", 2),
             (float) json.optDouble("customOffsetX", 0.0),
             (float) json.optDouble("customOffsetY", 0.0)
@@ -217,7 +259,7 @@ public class ShortcutItem {
         ShortcutItem item = new ShortcutItem(
             id, title, subtitle, actionType, actionPayload,
             iconPackage, iconGlyph, tintColor, enabled,
-            glyphPadEnabled, glyphPadColor, glyphPadMode, appIconCropMode,
+            glyphPadEnabled, glyphPadColor, glyphPadAlpha, appIconCropMode,
             customOffsetX, customOffsetY
         );
         item.userId = userId;
@@ -236,11 +278,26 @@ public class ShortcutItem {
         return item;
     }
 
+    private static boolean isChromatic(int color) {
+        if (color == 0) return false;
+        int r = Color.red(color);
+        int g = Color.green(color);
+        int b = Color.blue(color);
+        return (Math.max(r, Math.max(g, b)) - Math.min(r, Math.min(g, b))) >= 28;
+    }
+
     /**
-     * 智能解析该快捷方式的图标主色调（底垫颜色优先，其次为 tintColor）
+     * 智能解析该快捷方式的图标主色调（高不透明有彩色底垫优先，低透/黑白底垫回退有彩色前景色）
      */
     public int resolveIconPrimaryColor() {
-        if (glyphPadEnabled && glyphPadColor != 0) {
+        boolean padVisible = glyphPadEnabled && glyphPadColor != 0 && clampPadAlpha(glyphPadAlpha) >= 0.40f;
+        if (padVisible && isChromatic(glyphPadColor)) {
+            return glyphPadColor;
+        }
+        if (isChromatic(tintColor)) {
+            return tintColor;
+        }
+        if (padVisible) {
             return glyphPadColor;
         }
         return tintColor != 0 ? tintColor : 0xFF2A82E4;

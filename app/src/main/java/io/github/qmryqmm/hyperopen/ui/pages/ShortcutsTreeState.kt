@@ -546,11 +546,11 @@ class ShortcutsTreeState(
                     "[]",
                     "",
                     "remix:folder-2-fill",
-                    0xFF2A82E4.toInt(),
+                    0xFFFFFFFF.toInt(),
                     true,
                     true,
                     0xFF2A82E4.toInt(),
-                    1,
+                    ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA,
                 )
                 newFolder.setFolderChildren(movedItems)
                 if (firstTopIdx in 0..shortcuts.size) shortcuts.add(firstTopIdx, newFolder) else shortcuts.add(newFolder)

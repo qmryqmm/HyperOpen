@@ -582,7 +582,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                     || a.tintColor != b.tintColor
                     || a.glyphPadEnabled != b.glyphPadEnabled
                     || a.glyphPadColor != b.glyphPadColor
-                    || a.glyphPadMode != b.glyphPadMode
+                    || Float.compare(a.glyphPadAlpha, b.glyphPadAlpha) != 0
                     || a.appIconCropMode != b.appIconCropMode
                     || a.hintTextColor != b.hintTextColor
                     || Float.compare(a.hintTextAlpha, b.hintTextAlpha) != 0
