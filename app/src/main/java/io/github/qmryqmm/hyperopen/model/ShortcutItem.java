@@ -310,13 +310,13 @@ public class ShortcutItem {
         return tintColor != 0 ? tintColor : 0xFF2A82E4;
     }
 
-    /** 解析后的提示标题颜色：hintTextColor 非 0 用自定义，否则智能回退 */
+    /** 解析后的提示标题颜色：跟随全局时按全局模式，否则 hintTextColor 非 0 用自定义、回退智能底色 */
     public int resolveHintTitleColor() {
         return resolveHintTitleColor(null);
     }
 
     public int resolveHintTitleColor(io.github.qmryqmm.hyperopen.config.HyperOpenConfig config) {
-        if (hintTextColor != 0) {
+        if (!followGlobalHintStyle && hintTextColor != 0) {
             return hintTextColor;
         }
         if (config != null) {
@@ -336,13 +336,16 @@ public class ShortcutItem {
         return Math.max(0.05f, Math.min(1f, a));
     }
 
-    /** 解析后的提示副标题颜色：自定义色 → 标题色 → 智能底色链式回退 */
+    /** 解析后的提示副标题颜色：跟随全局时与标题一致；否则自定义色 → 标题色 → 智能底色链式回退 */
     public int resolveHintSubtitleColor() {
         return resolveHintSubtitleColor(null);
     }
 
     public int resolveHintSubtitleColor(io.github.qmryqmm.hyperopen.config.HyperOpenConfig config) {
-        return hintTextColorSub != 0 ? hintTextColorSub : resolveHintTitleColor(config);
+        if (!followGlobalHintStyle && hintTextColorSub != 0) {
+            return hintTextColorSub;
+        }
+        return resolveHintTitleColor(config);
     }
 
     /** 解析后的提示副标题透明度：自定义值 → 标题透明度×0.82（对应旧版 0xAA） */

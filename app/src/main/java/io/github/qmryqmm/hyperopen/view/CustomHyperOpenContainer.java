@@ -181,8 +181,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
     /** 全量刷新所有组件的组合模糊半径（窗口级模糊变化 / 配置热更新时调用）。 */
     private void applyStackedBlurRadii() {
         if (config == null) return;
+        boolean showRegion = config.showRegionBg && config.layoutStyle != HyperOpenConfig.LAYOUT_SYSTEM_STOCK;
         if (regionBackdrop != null) {
-            regionBackdrop.setBlurRadius(config.showRegionBg
+            regionBackdrop.setBlurRadius(showRegion
                 ? componentBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION) : 0f);
         }
         for (CircularBubbleView b : bubbles) {
@@ -205,11 +206,16 @@ public class CustomHyperOpenContainer extends FrameLayout {
             }
             this.resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(getContext(), config.materialStyle);
             if (regionBackdrop != null) {
+                boolean showRegion = config.showRegionBg && config.layoutStyle != HyperOpenConfig.LAYOUT_SYSTEM_STOCK;
                 regionBackdrop.setStyle(resolvedStyle);
                 regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION));
-                regionBackdrop.setBlurRadius(config.showRegionBg
-                    ? componentBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION) : 0);
-                regionBackdrop.setDimAlpha(config.showRegionBg ? config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION) : 0f);
+                if (showRegion) {
+                    regionBackdrop.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_REGION));
+                    regionBackdrop.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION));
+                } else {
+                    regionBackdrop.reset();
+                    regionBackdrop.setVisibility(View.GONE);
+                }
                 // 扇区分隔线样式（颜色/透明度/虚线规格）热生效
                 if (ringSectorSpec != null) {
                     float liveCenterY = fodCenterY - dpToPx(config.offsetY);
@@ -736,8 +742,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 && !activeItems.isEmpty()
                 && activeItems.size() < RingSectorPacking.MAX_SECTOR_COUNT_EXCLUSIVE;
 
-        // 更新底衬大小与位置：完全跟随「显示圆形区域底衬」开关（分隔虚线由全屏覆盖层独立绘制）
-        if (config.showRegionBg) {
+        // 更新底衬大小与位置：完全跟随「显示圆形区域底衬」开关（系统经典扇形固定以指纹为中心，强制隐藏底衬避免圆心错位）
+        boolean showRegion = config.showRegionBg && config.layoutStyle != HyperOpenConfig.LAYOUT_SYSTEM_STOCK;
+        if (showRegion) {
             regionBackdrop.setVisibility(View.VISIBLE);
             regionBackdrop.prepareForUse();
             regionBackdrop.setStyle(resolvedStyle);

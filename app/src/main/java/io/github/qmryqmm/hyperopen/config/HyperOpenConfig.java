@@ -438,21 +438,18 @@ public class HyperOpenConfig {
     /**
      * 该组件最终生效的模糊半径 (dp)：
      * <ul>
-     *   <li>基准 = 模糊半径滑块链：跟随全局取 globalBlurRadius，否则取组件独立滑块值；</li>
-     *   <li>柔光玻璃模式下磨砂浓度按滑块文案「同时影响模糊半径」做<b>向上增益</b>
-     *       （{@link #matteToBlurDp}），只增不减——磨砂滑块调低只减弱雾面质感，
-     *       绝不把模糊整体抽空（历史回归点：曾用磨砂换算值整体替换模糊半径，
-     *       磨砂拖到最低后图标/底衬/胶囊模糊全部消失）；</li>
-     *   <li>「已关闭模糊」仍生效：高斯模式下把对应模糊滑块设 0 即可。</li>
+     *   <li>柔光玻璃模式：直接由当前组件生效的磨砂浓度（{@link #effectiveMatteAlpha} → {@link #matteToBlurDp}）
+     *       全段线性驱动（5%~40% 对应 6~50dp），不被高斯模式残留的 globalBlurRadius / *BlurRadius 锁死；</li>
+     *   <li>高斯模糊模式（含不支持柔光玻璃设备经 {@link #adaptUnsupportedSoftGlass} 降级后）：
+     *       跟随全局取 globalBlurRadius，否则取组件独立模糊滑块值，设 0 即关闭模糊。</li>
      * </ul>
      */
     public int effectiveBlurRadiusDp(int component) {
-        int base = materialFollowGlobal(component) ? globalBlurRadius : rawBlurRadiusFor(component);
-        int resolved = Math.max(0, base);
         if (materialStyle == MATERIAL_SOFT_GLASS) {
-            resolved = Math.max(resolved, matteToBlurDp(effectiveMatteAlpha(component)));
+            return matteToBlurDp(effectiveMatteAlpha(component));
         }
-        return resolved;
+        int base = materialFollowGlobal(component) ? globalBlurRadius : rawBlurRadiusFor(component);
+        return Math.max(0, base);
     }
 
     /**
@@ -490,8 +487,15 @@ public class HyperOpenConfig {
         return (float) Math.sqrt(componentPx * componentPx + fsPx * fsPx) / d;
     }
 
-    /** 该组件最终生效的压暗程度 (0.0 ~ 1.0)：跟随全局用 globalDimAlpha，否则用组件独立值 */
+    /**
+     * 该组件最终生效的压暗程度 (0.0 ~ 1.0)：
+     * 柔光玻璃模式下不叠加高斯模式的黑底压暗蒙层（避免柔光下残留无法关闭的黑底）；
+     * 高斯模式下跟随全局用 globalDimAlpha，否则用组件独立值。
+     */
     public float effectiveDimAlpha(int component) {
+        if (materialStyle == MATERIAL_SOFT_GLASS) {
+            return 0f;
+        }
         float v;
         if (materialFollowGlobal(component)) {
             v = globalDimAlpha;

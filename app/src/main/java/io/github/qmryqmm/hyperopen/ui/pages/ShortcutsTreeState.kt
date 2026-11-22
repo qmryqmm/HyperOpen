@@ -160,8 +160,22 @@ class ShortcutsTreeState(
         }
     }
 
-    fun selectedNodes(): List<ShortcutRowNode> =
-        buildNodes().filter { it.key in interactionState.selection }
+    fun selectedNodes(): List<ShortcutRowNode> {
+        val sel = interactionState.selection
+        val all = buildNodes()
+        val selectedFolderIds = all
+            .filter { it.depth == 0 && it.item.actionType == ShortcutItem.ACTION_FOLDER && it.key in sel }
+            .map { it.item.id }
+            .toSet()
+        return all.filter { node ->
+            node.key in sel && !(
+                node.depth == 1 && (
+                    "top:${node.parentFolderId}" in sel ||
+                    (node.parentFolderId != null && node.parentFolderId in selectedFolderIds)
+                )
+            )
+        }
+    }
 
     fun moveNode(node: ShortcutRowNode, dir: Int) {
         if (node.depth == 0) {
@@ -321,9 +335,23 @@ class ShortcutsTreeState(
         val targetFolder = targetNode.item
         if (targetFolder.actionType != ShortcutItem.ACTION_FOLDER) return
 
-        // 收集待移入的节点（排除文件夹本身，且不能是目标文件夹本身）
+        val keySet = keys.toSet()
+        val selectedFolderIds = nodes
+            .filter { it.depth == 0 && it.item.actionType == ShortcutItem.ACTION_FOLDER && it.key in keySet }
+            .map { it.item.id }
+            .toSet()
+
+        // 收集待移入的节点（排除文件夹本身、目标文件夹本身、父文件夹已在选集内的子项以及已属于目标文件夹的子项）
         val targetNodes = keys.mapNotNull { k -> nodes.firstOrNull { it.key == k } }
-            .filter { it.item.actionType != ShortcutItem.ACTION_FOLDER && it.item.id != targetFolder.id }
+            .filter { node ->
+                node.item.actionType != ShortcutItem.ACTION_FOLDER &&
+                    node.item.id != targetFolder.id &&
+                    !(node.depth == 1 && (
+                        "top:${node.parentFolderId}" in keySet ||
+                        (node.parentFolderId != null && node.parentFolderId in selectedFolderIds) ||
+                        node.parentFolderId == targetFolder.id
+                    ))
+            }
         if (targetNodes.isEmpty()) return
 
         // 1) 从来源移除
@@ -414,8 +442,17 @@ class ShortcutsTreeState(
      */
     fun dropGroupOutOfFolder(keys: List<String>) {
         val nodes = buildNodes()
+        val keySet = keys.toSet()
+        val selectedFolderIds = nodes
+            .filter { it.depth == 0 && it.item.actionType == ShortcutItem.ACTION_FOLDER && it.key in keySet }
+            .map { it.item.id }
+            .toSet()
         val targetNodes = keys.mapNotNull { k -> nodes.firstOrNull { it.key == k } }
-            .filter { it.depth == 1 && it.parentFolderId != null }
+            .filter { node ->
+                node.depth == 1 && node.parentFolderId != null &&
+                    "top:${node.parentFolderId}" !in keySet &&
+                    node.parentFolderId !in selectedFolderIds
+            }
         if (targetNodes.isEmpty()) return
 
         // 统一按原文件夹分组处理移除
@@ -511,8 +548,13 @@ class ShortcutsTreeState(
      */
     fun moveSelected(targetId: String) {
         val nodes = selectedNodes()
-        val movable = nodes.filterNot { it.depth == 0 && it.item.actionType == ShortcutItem.ACTION_FOLDER }
-        val skipped = nodes.size - movable.size
+        val nonFolderNodes = nodes.filterNot { it.depth == 0 && it.item.actionType == ShortcutItem.ACTION_FOLDER }
+        val skipped = nodes.size - nonFolderNodes.size
+        val movable = when (targetId) {
+            "__root__" -> nonFolderNodes.filter { it.depth == 1 }
+            "__new__" -> nonFolderNodes
+            else -> nonFolderNodes.filterNot { it.depth == 1 && it.parentFolderId == targetId }
+        }
         if (movable.isEmpty()) {
             interactionState.clearSelection()
             if (skipped > 0) Toast.makeText(context, "文件夹不支持嵌套移动", Toast.LENGTH_SHORT).show()

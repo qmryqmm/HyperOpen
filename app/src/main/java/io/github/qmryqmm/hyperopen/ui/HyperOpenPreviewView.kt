@@ -710,7 +710,8 @@ class HyperOpenPreviewView(
             topHeaderContainer.visibility = if (visible) View.VISIBLE else View.GONE
         }
         if (::regionBackdrop.isInitialized) {
-            if (visible && config.showRegionBg) {
+            val showRegion = visible && config.showRegionBg && config.layoutStyle != HyperOpenConfig.LAYOUT_SYSTEM_STOCK
+            if (showRegion) {
                 regionBackdrop.visibility = View.VISIBLE
                 regionBackdrop.prepareForUse()
             } else {
@@ -1158,10 +1159,16 @@ class HyperOpenPreviewView(
         this.resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(context, config.materialStyle)
         refreshBackdropMask()
         if (::regionBackdrop.isInitialized) {
+            val showRegion = config.showRegionBg && config.layoutStyle != HyperOpenConfig.LAYOUT_SYSTEM_STOCK
             regionBackdrop.setStyle(resolvedStyle)
             regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION))
-            regionBackdrop.setBlurRadius(if (config.showRegionBg) stackedBlurDp(HyperOpenConfig.COMPONENT_REGION) else 0f)
-            regionBackdrop.setDimAlpha(if (config.showRegionBg) config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION) else 0f)
+            if (showRegion) {
+                regionBackdrop.setBlurRadius(stackedBlurDp(HyperOpenConfig.COMPONENT_REGION))
+                regionBackdrop.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION))
+            } else {
+                regionBackdrop.reset()
+                regionBackdrop.visibility = View.GONE
+            }
             // 扇区分隔线样式（颜色/透明度/虚线规格）热生效
             val liveSpec = ringSectorSpec
             if (liveSpec != null && isRingSectorActive()) {
@@ -1278,14 +1285,20 @@ class HyperOpenPreviewView(
             activeShortcuts.isNotEmpty() &&
             activeShortcuts.size < RingSectorPacking.MAX_SECTOR_COUNT_EXCLUSIVE
 
-        // 定位底衬：完全跟随「显示圆形区域底衬」开关（分隔虚线已由全屏覆盖层独立绘制）
-        regionBackdrop.visibility = if (config.showRegionBg) View.VISIBLE else View.GONE
-        regionBackdrop.setSystemBlurEnabled(true)
-        regionBackdrop.setStyle(resolvedStyle)
-        regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION))
-        regionBackdrop.setBlurRadius(if (config.showRegionBg) stackedBlurDp(HyperOpenConfig.COMPONENT_REGION) else 0f)
-        regionBackdrop.setDimAlpha(if (config.showRegionBg) config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION) else 0f)
-        regionBackdrop.updateGeometry(regionRadiusPx)
+        // 定位底衬：完全跟随「显示圆形区域底衬」开关（系统经典扇形固定以指纹为中心，强制隐藏底衬避免圆心错位）
+        val showRegion = config.showRegionBg && config.layoutStyle != HyperOpenConfig.LAYOUT_SYSTEM_STOCK
+        if (showRegion) {
+            regionBackdrop.visibility = View.VISIBLE
+            regionBackdrop.setSystemBlurEnabled(true)
+            regionBackdrop.setStyle(resolvedStyle)
+            regionBackdrop.setGlassParams(config.glassParamsFor(HyperOpenConfig.COMPONENT_REGION))
+            regionBackdrop.setBlurRadius(stackedBlurDp(HyperOpenConfig.COMPONENT_REGION))
+            regionBackdrop.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_REGION))
+            regionBackdrop.updateGeometry(regionRadiusPx)
+        } else {
+            regionBackdrop.reset()
+            regionBackdrop.visibility = View.GONE
+        }
         val rLp = LayoutParams(regionDiameterPx.toInt(), regionDiameterPx.toInt()).apply {
             leftMargin = (fodX - regionRadiusPx).toInt()
             topMargin = (regionCenterY - regionRadiusPx).toInt()
@@ -1427,7 +1440,7 @@ class HyperOpenPreviewView(
         val hSpec = MeasureSpec.makeMeasureSpec(targetH, MeasureSpec.EXACTLY)
         bubblesContainer.measure(wSpec, hSpec)
         bubblesContainer.layout(0, 0, targetW, targetH)
-        if (config.showRegionBg) {
+        if (showRegion) {
             val rSpec = MeasureSpec.makeMeasureSpec(regionDiameterPx.toInt(), MeasureSpec.EXACTLY)
             regionBackdrop.measure(rSpec, rSpec)
             regionBackdrop.layout(

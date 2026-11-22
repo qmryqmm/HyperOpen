@@ -465,9 +465,17 @@ fun ParamsPage(
         uiPrefs.edit().putBoolean("section_collapsed_$key", willCollapse).apply()
     }
 
+    val pendingHapticRef = remember { arrayOfNulls<Runnable>(1) }
+    androidx.compose.runtime.DisposableEffect(view) {
+        onDispose {
+            pendingHapticRef[0]?.let { view.removeCallbacks(it) }
+            pendingHapticRef[0] = null
+        }
+    }
+
     fun triggerSampleHaptic(
         mode: Int = hapticMode,
-        strength: Int = hapticStrength.toInt(),
+        strength: Int? = null,
         durationMs: Int = hapticDurationMs.toInt(),
         enabled: Boolean = hapticEnabled,
         isSlide: Boolean = false,
@@ -481,21 +489,24 @@ fun ParamsPage(
         slideDoubleGap: Int = hapticSlideDoubleGapMs.toInt(),
     ) {
         try {
-            // 稍许延时 25ms 执行，彻底避开 Miuix 控件本身在 onClick 瞬间触发的默认按键点击触感（HapticFeedbackConstants.KEYBOARD_TAP），避免双重震动干扰
-            view.postDelayed({
+            pendingHapticRef[0]?.let { view.removeCallbacks(it) }
+            val resolvedExpandStrength = if (!isSlide && strength != null) strength else hapticStrength.toInt()
+            val resolvedSlideStrength = if (isSlide) (strength ?: hapticSlideStrength.toInt()) else hapticSlideStrength.toInt()
+            val runnable = Runnable {
+                pendingHapticRef[0] = null
                 try {
                     @Suppress("DEPRECATION")
                     val vibrator = ctx.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
                     val sampleCfg = HyperOpenConfig().apply {
                         this.hapticEnabled = if (isSlide) true else enabled
                         this.hapticMode = mode
-                        this.hapticStrength = strength
+                        this.hapticStrength = resolvedExpandStrength
                         this.hapticDurationMs = durationMs
                         this.hapticStockWaveExpand = stockWave
                         this.hapticBrakePulse = brake
                         this.hapticDoubleGapMs = doubleGap
                         this.hapticSlideEnabled = if (isSlide) enabled else hapticSlideEnabled
-                        this.hapticSlideStrength = if (isSlide) strength else hapticSlideStrength.toInt()
+                        this.hapticSlideStrength = resolvedSlideStrength
                         this.hapticSlideDurationMs = if (isSlide) slideDur else hapticSlideDurationMs.toInt()
                         this.hapticSlideMode = if (isSlide) slideMode else hapticSlideMode
                         this.hapticStockWaveSlide = slideWave
@@ -504,7 +515,10 @@ fun ParamsPage(
                     }
                     io.github.qmryqmm.hyperopen.view.CustomHyperOpenContainer.performConfiguredHaptic(ctx, vibrator, sampleCfg, isSlide)
                 } catch (_: Throwable) {}
-            }, 25L)
+            }
+            pendingHapticRef[0] = runnable
+            // 复用单一挂起 Runnable 防抖 70ms：既避开控件点击瞬间默认触感，又防止拖动滑块时马达高频连续蜂鸣
+            view.postDelayed(runnable, 70L)
         } catch (_: Throwable) {}
     }
 
@@ -584,34 +598,46 @@ fun ParamsPage(
                         )
                     }
                     if (layoutStyle == HyperOpenConfig.LAYOUT_RING) {
+                        val effectiveDisplayedCount = if (maxIconCount.toInt() > 0) {
+                            minOf(enabledShortcutsCount, maxIconCount.toInt())
+                        } else {
+                            enabledShortcutsCount
+                        }
                         SwitchPreference(
                             title = "扇区触发模式",
                             summary = when {
                                 !ringSectorMode -> "开启后：快捷方式 1~6 个时，图标沿圆周均分，中心圆内为取消区，圆外按图标数量均分为扇形（虚线分隔），滑入扇区即选中；该模式下强制开启图标吸附"
-                                enabledShortcutsCount in 1..6 -> "已生效（当前 $enabledShortcutsCount 个快捷方式）：中心圆内松手取消，圆外 $enabledShortcutsCount 个扇区各对应一个图标；图标吸附已锁定开启"
-                                else -> "快捷方式达到 7 个及以上时自动回退为常规同心圆环布局（当前 $enabledShortcutsCount 个）"
+                                effectiveDisplayedCount in 1..6 -> "已生效（当前实际显示 $effectiveDisplayedCount 个快捷方式）：中心圆内松手取消，圆外 $effectiveDisplayedCount 个扇区各对应一个图标；图标吸附已锁定开启"
+                                effectiveDisplayedCount <= 0 -> "当前无启用的快捷方式，启用 1~6 个快捷方式后生效"
+                                else -> "实际显示快捷方式达到 7 个及以上时自动回退为常规同心圆环布局（当前显示 $effectiveDisplayedCount 个）"
                             },
                             checked = ringSectorMode,
                             onCheckedChange = onRingSectorMode,
                         )
                     }
-                    SliderPreference(
-                        title = "整体垂直高度偏移",
-                        summary = "改变整体图标高度",
-                        valueText = "${offsetY.toInt()} dp",
-                        value = offsetY,
-                        valueRange = 0f..450f,
-                        onValueChange = onOffsetY,
-                    )
                     if (layoutStyle != HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
                         SliderPreference(
-                            title = "图标显示区域大小",
-                            summary = "修改此项同时会影响最大图标显示数量",
-                            valueText = "${regionDiameter.toInt()} dp",
-                            value = regionDiameter,
-                            valueRange = 150f..420f,
-                            onValueChange = onRegionDiameter,
+                            title = "整体垂直高度偏移",
+                            summary = "改变整体图标高度",
+                            valueText = "${offsetY.toInt()} dp",
+                            value = offsetY,
+                            valueRange = 0f..450f,
+                            onValueChange = onOffsetY,
                         )
+                    }
+                    SliderPreference(
+                        title = if (layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK) "扇面展开直径" else "图标显示区域大小",
+                        summary = if (layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
+                            "调节系统经典扇形距指纹中心的展开半径尺度"
+                        } else {
+                            "修改此项同时会影响最大图标显示数量"
+                        },
+                        valueText = "${regionDiameter.toInt()} dp",
+                        value = regionDiameter,
+                        valueRange = 150f..420f,
+                        onValueChange = onRegionDiameter,
+                    )
+                    if (layoutStyle != HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
                         SliderPreference(
                             title = "图标紧凑程度",
                             summary = "仅调整面板图标之间的疏密程度，不影响文件夹子项，同时会影响最大图标显示数量",
@@ -763,6 +789,11 @@ fun ParamsPage(
                         }
                         fun syncSectorHex(color: Int) {
                             sectorHexInput = String.format("#%06X", color and 0xFFFFFF)
+                        }
+                        androidx.compose.runtime.LaunchedEffect(sectorLineColor) {
+                            if (parseSectorHex(sectorHexInput)?.and(0xFFFFFF) != (sectorLineColor and 0xFFFFFF)) {
+                                syncSectorHex(sectorLineColor)
+                            }
                         }
 
                         Row(
@@ -1191,21 +1222,25 @@ fun ParamsPage(
                         selected = folderChildOrderMode == 4,
                         onClick = { onFolderChildOrderMode(4) },
                     )
-                    SmallTitle(text = "高级参数")
-                    SliderPreference(
-                        title = "子项起始缩放",
-                        valueText = "${(folderChildStartScale * 100).toInt()}%",
-                        value = folderChildStartScale * 100f,
-                        valueRange = 5f..80f,
-                        onValueChange = { onFolderChildStartScale(it / 100f) },
-                    )
-                    SliderPreference(
-                        title = "子项弹性强度",
-                        valueText = "${"%.2f".format(folderChildOvershoot)}",
-                        value = folderChildOvershoot,
-                        valueRange = 0f..2f,
-                        onValueChange = onFolderChildOvershoot,
-                    )
+                    if (folderChildExpandAnimType == HyperOpenConfig.FOLDER_CHILD_EXPAND_FAN_SPRING ||
+                        folderChildExpandAnimType == HyperOpenConfig.FOLDER_CHILD_EXPAND_WAVE
+                    ) {
+                        SmallTitle(text = "高级参数")
+                        SliderPreference(
+                            title = "子项起始缩放",
+                            valueText = "${(folderChildStartScale * 100).toInt()}%",
+                            value = folderChildStartScale * 100f,
+                            valueRange = 5f..80f,
+                            onValueChange = { onFolderChildStartScale(it / 100f) },
+                        )
+                        SliderPreference(
+                            title = "子项弹性强度",
+                            valueText = "${"%.2f".format(folderChildOvershoot)}",
+                            value = folderChildOvershoot,
+                            valueRange = 0f..2f,
+                            onValueChange = onFolderChildOvershoot,
+                        )
+                    }
                 }
             }
         }
@@ -1383,17 +1418,17 @@ fun ParamsPage(
                         )
                         SliderPreference(
                             title = "主标题文字大小",
-                            valueText = "${"%.1f".format(headerTitleSize)} sp",
-                            value = headerTitleSize,
-                            valueRange = 12f..28f,
-                            onValueChange = onHeaderTitleSize,
+                            valueText = "${kotlin.math.round(headerTitleSize).toInt().coerceIn(12, 26)} sp",
+                            value = kotlin.math.round(headerTitleSize).coerceIn(12f, 26f),
+                            valueRange = 12f..26f,
+                            onValueChange = { onHeaderTitleSize(kotlin.math.round(it).coerceIn(12f, 26f)) },
                         )
                         SliderPreference(
                             title = "副标题文字大小",
-                            valueText = "${"%.1f".format(headerSubtitleSize)} sp",
-                            value = headerSubtitleSize,
-                            valueRange = 9f..20f,
-                            onValueChange = onHeaderSubtitleSize,
+                            valueText = "${kotlin.math.round(headerSubtitleSize).toInt().coerceIn(9, 18)} sp",
+                            value = kotlin.math.round(headerSubtitleSize).coerceIn(9f, 18f),
+                            valueRange = 9f..18f,
+                            onValueChange = { onHeaderSubtitleSize(kotlin.math.round(it).coerceIn(9f, 18f)) },
                         )
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                         SmallTitle("全局文字版式与智能色彩（未单独指定的项均生效）")
@@ -1457,7 +1492,7 @@ fun ParamsPage(
                         )
                         SliderPreference(
                             title = "全局文字字间距",
-                            valueText = "${"%.1f".format(defaultHintTextLetterSpacing)} em",
+                            valueText = java.lang.String.format(java.util.Locale.US, "%.2f em", defaultHintTextLetterSpacing * 0.05f),
                             value = defaultHintTextLetterSpacing,
                             valueRange = -2f..6f,
                             onValueChange = onDefaultHintTextLetterSpacing,
@@ -1795,7 +1830,9 @@ fun ParamsPage(
                             )
                         }
 
-                        if (hapticMode != HyperOpenConfig.HAPTIC_MODE_STOCK) {
+                        if (hapticMode != HyperOpenConfig.HAPTIC_MODE_STOCK &&
+                            hapticMode != HyperOpenConfig.HAPTIC_MODE_DOUBLE
+                        ) {
                             SwitchPreference(
                                 title = "反向制动脉冲 (Brake Pulse)",
                                 summary = "在主震动末尾施加反向制动微脉冲",
@@ -1975,7 +2012,9 @@ fun ParamsPage(
                             )
                         }
 
-                        if (hapticSlideMode != HyperOpenConfig.HAPTIC_MODE_STOCK) {
+                        if (hapticSlideMode != HyperOpenConfig.HAPTIC_MODE_STOCK &&
+                            hapticSlideMode != HyperOpenConfig.HAPTIC_MODE_DOUBLE
+                        ) {
                             SwitchPreference(
                                 title = "反向制动脉冲 (Brake Pulse)",
                                 summary = "在主震动末尾施加反向制动微脉冲",

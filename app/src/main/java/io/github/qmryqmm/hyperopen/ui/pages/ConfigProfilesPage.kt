@@ -427,6 +427,7 @@ fun ConfigProfilesPage(
         singleNameOverride: String,
         includeShortcuts: Boolean,
         applyImmediately: Boolean,
+        backupCurrentFirst: Boolean,
     ) -> Unit,
     onRequestExport: (targetIds: List<String>?, includeShortcuts: Boolean, exportCurrentIfEmpty: Boolean) -> Unit,
     onMoveProfile: (String, Int) -> Unit,
@@ -444,6 +445,13 @@ fun ConfigProfilesPage(
     var showExportDialog by remember { mutableStateOf(false) }
     var exportTargetIds by remember { mutableStateOf<List<String>?>(null) }
     var exportSingleName by remember { mutableStateOf<String?>(null) }
+    var showCorruptRecoveryDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(profiles.size, activeProfileId) {
+        if (ConfigProfileStore.consumeCorruptRecoveryWarning()) {
+            showCorruptRecoveryDialog = true
+        }
+    }
 
     val interactionState = rememberConfigProfileInteractionState()
     val density = LocalDensity.current
@@ -901,15 +909,58 @@ fun ConfigProfilesPage(
 
     // ── 导入预览确认弹窗（先选文件，解析预览后再提交） ──
     pendingImportPreview?.let { preview ->
+        val needsBackupSuggestion = activeProfileId.isEmpty() || activeSyncStatus.isModified()
         ImportPreviewDialog(
             preview = preview,
             existingNames = profiles.map { it.name }.toSet(),
             softGlassSupported = softGlassSupported,
-            onConfirm = { singleNameOverride, includeShortcuts, applyImmediately ->
-                onCommitImport(preview, singleNameOverride, includeShortcuts, applyImmediately)
+            needsBackupSuggestion = needsBackupSuggestion,
+            onConfirm = { singleNameOverride, includeShortcuts, applyImmediately, backupCurrentFirst ->
+                onCommitImport(preview, singleNameOverride, includeShortcuts, applyImmediately, backupCurrentFirst)
             },
             onDismiss = onDismissImportPreview,
         )
+    }
+
+    // ── 配置库文件损坏恢复提示弹窗 ──
+    if (showCorruptRecoveryDialog) {
+        Dialog(
+            onDismissRequest = { showCorruptRecoveryDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth(0.86f)
+                    .padding(vertical = 16.dp),
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    Text(
+                        text = "配置库文件已损坏并备份",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "检测到本地配置方案列表存储文件已损坏，系统已自动将其备份为 config_profiles.json.corrupt 并重置为空列表。当前正在生效的面板设置不受影响，您可点击「新建配置」将当前设置重新保存为方案。",
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Spacer(Modifier.height(22.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            text = "我知道了",
+                            colors = ButtonDefaults.textButtonColorsPrimary(),
+                            onClick = { showCorruptRecoveryDialog = false },
+                        )
+                    }
+                }
+            }
+        }
     }
 
     // ── 导出弹窗 ──
@@ -1968,7 +2019,8 @@ private fun ImportPreviewDialog(
     preview: ConfigProfileStore.ImportPreview,
     existingNames: Set<String>,
     softGlassSupported: Boolean,
-    onConfirm: (singleNameOverride: String, includeShortcuts: Boolean, applyImmediately: Boolean) -> Unit,
+    needsBackupSuggestion: Boolean,
+    onConfirm: (singleNameOverride: String, includeShortcuts: Boolean, applyImmediately: Boolean, backupCurrentFirst: Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val firstCandidate = preview.candidates.firstOrNull()
@@ -1976,6 +2028,7 @@ private fun ImportPreviewDialog(
     val anyHasShortcuts = preview.anyHasShortcuts()
     var includeShortcuts by remember(preview) { mutableStateOf(anyHasShortcuts) }
     var applyImmediately by remember(preview) { mutableStateOf(false) }
+    var backupCurrentFirst by remember(preview, needsBackupSuggestion) { mutableStateOf(needsBackupSuggestion) }
     val hasUnsupportedSoftGlass =
         !softGlassSupported && preview.candidates.any { it.materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS }
     val skippedKeyCount = remember(preview) { preview.totalSkippedKeyCount() }
@@ -2035,7 +2088,9 @@ private fun ImportPreviewDialog(
                         keyboardActions = KeyboardActions(
                             onDone = {
                                 if (singleName.isNotBlank()) {
-                                    onConfirm(singleName.trim(), includeShortcuts, applyImmediately)
+                                    val finalApply = applyImmediately && !preview.isBundle
+                                    val finalBackup = finalApply && needsBackupSuggestion && backupCurrentFirst
+                                    onConfirm(singleName.trim(), includeShortcuts, finalApply, finalBackup)
                                 }
                             }
                         ),
@@ -2206,6 +2261,18 @@ private fun ImportPreviewDialog(
                             )
                         },
                     )
+                    if (applyImmediately && needsBackupSuggestion) {
+                        BasicComponent(
+                            title = "应用前备份当前配置",
+                            summary = "当前生效设置尚未归档或有未保存改动，开启后先另存为新备份再应用导入配置。",
+                            endActions = {
+                                Switch(
+                                    checked = backupCurrentFirst,
+                                    onCheckedChange = { backupCurrentFirst = it },
+                                )
+                            },
+                        )
+                    }
                 }
 
                 Spacer(Modifier.height(20.dp))
@@ -2221,7 +2288,9 @@ private fun ImportPreviewDialog(
                         colors = ButtonDefaults.textButtonColorsPrimary(),
                         enabled = confirmEnabled,
                         onClick = {
-                            onConfirm(singleName.trim(), includeShortcuts, applyImmediately && !preview.isBundle)
+                            val finalApply = applyImmediately && !preview.isBundle
+                            val finalBackup = finalApply && needsBackupSuggestion && backupCurrentFirst
+                            onConfirm(singleName.trim(), includeShortcuts, finalApply, finalBackup)
                         },
                     )
                 }

@@ -48,8 +48,22 @@ public final class ConfigProfileStore {
     private static final String LEGACY_KEY_ACTIVE_ID = "active_profile_id";
 
     private static final Object LOCK = new Object();
+    private static volatile boolean sPendingCorruptRecoveryWarning = false;
 
     private ConfigProfileStore() {
+    }
+
+    /**
+     * 消费一次性「配置库文件损坏已备份恢复」警示标志。
+     * 当 readStateLocked 检测到 config_profiles.json 损坏并重命名为 .corrupt 时置 true，
+     * 供 UI 层（ConfigProfilesPage）进入或刷新时弹窗提醒用户。
+     */
+    public static boolean consumeCorruptRecoveryWarning() {
+        synchronized (LOCK) {
+            boolean pending = sPendingCorruptRecoveryWarning;
+            sPendingCorruptRecoveryWarning = false;
+            return pending;
+        }
     }
 
     public static final class StoreState {
@@ -810,6 +824,7 @@ public final class ConfigProfileStore {
         } catch (Throwable t) {
             Log.e(TAG, "读取配置库文件失败，保留损坏备份以避免静默丢失", t);
             backupCorruptFile(file);
+            sPendingCorruptRecoveryWarning = true;
             return new StoreState(new ArrayList<>(), "");
         }
     }

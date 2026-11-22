@@ -303,6 +303,7 @@ private fun detectPackageVisibility(ctx: android.content.Context): Pair<Boolean?
         -1
     }
     return when {
+        count < 0 -> false to "无法读取应用列表（查询异常或受系统拦截）"
         declared && count >= 50 -> true to "已声明并授予；当前可见 $count 个应用"
         declared -> true to "已声明并授予；可见 $count 个应用（偏少，可能受系统限制）"
         count in 0..49 -> false to "未授权；仅可见 $count 个应用，应用选择器与图标加载会不全"

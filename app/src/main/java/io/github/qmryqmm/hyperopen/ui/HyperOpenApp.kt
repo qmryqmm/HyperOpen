@@ -467,6 +467,7 @@ fun HyperOpenApp(
     // 预览界面进入全屏沉浸模式，与真实锁屏 GxzwWindowFrameLayout 1:1 物理屏幕坐标对齐
     DisposableEffect(activity, subPage) {
         val window = activity?.window
+        val savedWindowBg = if (subPage == 3) window?.decorView?.background else null
         if (window != null) {
             val controller = WindowCompat.getInsetsController(window, window.decorView)
             if (subPage == 3) {
@@ -486,6 +487,12 @@ fun HyperOpenApp(
             if (w != null) {
                 WindowCompat.getInsetsController(w, w.decorView).show(WindowInsetsCompat.Type.systemBars())
                 w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                if (subPage == 3 && savedWindowBg != null) {
+                    w.setBackgroundDrawable(savedWindowBg)
+                }
+            }
+            if (subPage == 3) {
+                previewViewRef = null
             }
         }
     }
@@ -976,6 +983,7 @@ fun HyperOpenApp(
         singleNameOverride: String,
         includeShortcuts: Boolean,
         applyImmediately: Boolean,
+        backupCurrentFirst: Boolean = false,
     ) {
         pendingImportPreview = null
         configScope.launch(Dispatchers.IO) {
@@ -995,7 +1003,7 @@ fun HyperOpenApp(
                             profile = firstImported,
                             applyParams = true,
                             applyShortcuts = includeShortcuts && firstImported.hasShortcuts,
-                            backupCurrentFirst = false,
+                            backupCurrentFirst = backupCurrentFirst,
                         )
                     } else {
                         val msg = buildString {
@@ -1146,9 +1154,9 @@ fun HyperOpenApp(
         applyConfigToState(
             config = HyperOpenConfig(),
             applyShortcuts = false,
-            applyAppUiPrefs = true,
+            applyAppUiPrefs = false,
         )
-        // 恢复默认参数：保留现有快捷项目列表不变，仅重置外观、几何、物理、震动与等待时间等其他参数
+        // 恢复默认参数：保留现有快捷项目列表与 App 主题/底栏偏好不变，仅重置外观、几何、物理、震动与等待时间等面板参数
         persist()
     }
 
@@ -1181,6 +1189,9 @@ fun HyperOpenApp(
                     else -> if (subPage != 0) {
                         subPage = 0
                         editingItem = null
+                        editingChildFolder = null
+                        editingChildReturnToEditor = false
+                        editingChildFolderIsNew = false
                         true
                     } else {
                         false
@@ -1205,6 +1216,9 @@ fun HyperOpenApp(
                 else -> {
                     subPage = 0
                     editingItem = null
+                    editingChildFolder = null
+                    editingChildReturnToEditor = false
+                    editingChildFolderIsNew = false
                 }
             }
         }
@@ -1246,6 +1260,11 @@ fun HyperOpenApp(
             this.glassEdgeRange = glassEdgeRange
             this.glassEdgePower = glassEdgePower
             this.glassReflectOffset = glassReflectOffset
+            this.bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal
+            this.globalBlurRadius = globalBlurRadius.toInt()
+            this.globalDimAlpha = globalDimAlpha
+            this.bubbleGlassMatteAlpha = bubbleGlassMatteAlpha
+            this.bubbleBlurRadius = bubbleBlurRadius.toInt()
         }
     }
 
@@ -1268,6 +1287,7 @@ fun HyperOpenApp(
             3 -> "指纹快捷整体预览"
             4 -> "权限检测"
             5 -> "柔光玻璃设置"
+            6 -> "全局模糊材质"
             else -> when (page) {
                 0 -> "参数配置"
                 1 -> if (shortcutsTreeState.multiSelect) "已选择 ${shortcutsTreeState.selectedCount} 项" else "快捷项目"
@@ -1305,6 +1325,9 @@ fun HyperOpenApp(
                                         } else {
                                             subPage = 0
                                             editingItem = null
+                                            editingChildFolder = null
+                                            editingChildReturnToEditor = false
+                                            editingChildFolderIsNew = false
                                         }
                                     })
                                 } else if (page == 1 && shortcutsTreeState.multiSelect) {
@@ -1385,12 +1408,15 @@ fun HyperOpenApp(
                                 setEditingItem = { editingItem = it },
                                 setEditingChildFolder = { editingChildFolder = it },
                                 setEditingChildFolderIsNew = { editingChildFolderIsNew = it },
+                                setReturnToEditor = { editingChildReturnToEditor = it },
                                 setNew = { isNewShortcut = it },
                                 resetBackTrigger = { requestEditBackTrigger = 0 },
                                 exitToList = {
                                     subPage = 0
                                     editingItem = null
                                     editingChildFolder = null
+                                    editingChildReturnToEditor = false
+                                    editingChildFolderIsNew = false
                                 },
                             )
                         }
@@ -1413,6 +1439,7 @@ fun HyperOpenApp(
                             this.iconSize = iconSize.toInt()
                             this.maxIconCount = maxIconCount.toInt()
                             this.layoutStyle = layoutStyle
+                            this.stockSystemRegion = stockSystemRegion
                             this.ringSectorMode = ringSectorMode
                             this.sectorLineColor = sectorLineColor
                             this.sectorLineAlpha = sectorLineAlpha
@@ -1453,14 +1480,6 @@ fun HyperOpenApp(
                             this.folderChildOvershoot = folderChildOvershoot
                             this.maxScale = maxScale
                             this.influenceRadius = influenceRadius.toInt()
-                            this.layoutStyle = layoutStyle
-                            this.stockSystemRegion = stockSystemRegion
-                            this.ringSectorMode = ringSectorMode
-                            this.sectorLineColor = sectorLineColor
-                            this.sectorLineAlpha = sectorLineAlpha
-                            this.sectorDashLength = sectorDashLength.toInt()
-                            this.sectorDashGap = sectorDashGap.toInt()
-                            this.sectorLineWidth = sectorLineWidth
                             this.iconAlpha = iconAlpha
                             this.fisheyeZoomAlpha = fisheyeZoomAlpha
                             this.fisheyeOtherAlpha = fisheyeOtherAlpha
@@ -1478,10 +1497,22 @@ fun HyperOpenApp(
                             this.hapticStrength = hapticStrength.toInt()
                             this.hapticDurationMs = hapticDurationMs.toInt()
                             this.hapticMode = hapticMode
+                            this.hapticStockWaveExpand = hapticStockWaveExpand
+                            this.hapticBrakePulse = hapticBrakePulse
+                            this.hapticDoubleGapMs = hapticDoubleGapMs.toInt()
+                            this.hapticSlideEnabled = hapticSlideEnabled
+                            this.hapticSlideStrength = hapticSlideStrength.toInt()
+                            this.hapticSlideDurationMs = hapticSlideDurationMs.toInt()
+                            this.hapticSlideMode = hapticSlideMode
+                            this.hapticStockWaveSlide = hapticStockWaveSlide
+                            this.hapticSlideBrakePulse = hapticSlideBrakePulse
+                            this.hapticSlideDoubleGapMs = hapticSlideDoubleGapMs.toInt()
                             this.iconSpacingOffset = iconSpacingOffset.toInt()
                             this.showBubbleBg = showBubbleBg
                             this.bubblePaddingPercent = bubblePaddingPercent.toInt()
                             this.glyphPadEnabled = glyphPadEnabled
+                            this.glyphPadColor = glyphPadColor
+                            this.glyphPadMode = glyphPadMode
                             this.glassPreset = glassPreset
                             this.glassRefractIor = glassRefractIor
                             this.glassThickness = glassThickness
@@ -1941,6 +1972,8 @@ fun HyperOpenApp(
                                         editingItem = item.copy()
                                         isNewShortcut = false
                                         editingChildFolder = null
+                                        editingChildReturnToEditor = false
+                                        editingChildFolderIsNew = false
                                         subPage = 2
                                     },
                                     onChildClick = { parent, child ->
@@ -1975,6 +2008,8 @@ fun HyperOpenApp(
                                         requestEditBackTrigger = 0
                                         isNewShortcut = true
                                         editingChildFolder = null
+                                        editingChildReturnToEditor = false
+                                        editingChildFolderIsNew = false
                                         editingItem = folder
                                         subPage = 2
                                     },
@@ -2076,6 +2111,9 @@ fun HyperOpenApp(
                             this.actionPayload = ShortcutItem.syncUserMarker(this.actionPayload, preset.userId)
                         }
                     }
+                    editingChildFolder = null
+                    editingChildReturnToEditor = false
+                    editingChildFolderIsNew = false
                     isNewShortcut = true
                     subPage = 2
                 },
@@ -2182,6 +2220,7 @@ fun HyperOpenApp(
                                     showResetShortcutsDialog = false
                                     shortcuts.clear()
                                     shortcuts.addAll(HyperOpenConfig.getDefaultShortcuts())
+                                    shortcutsTreeState.interactionState.clearSelection()
                                     persist()
                                     Toast.makeText(ctx, "已恢复预设快捷项目", Toast.LENGTH_SHORT).show()
                                 },
@@ -2417,6 +2456,7 @@ private fun ShortcutEditSession(
     setEditingItem: (ShortcutItem?) -> Unit,
     setEditingChildFolder: (ShortcutItem?) -> Unit,
     setEditingChildFolderIsNew: (Boolean) -> Unit,
+    setReturnToEditor: (Boolean) -> Unit,
     setNew: (Boolean) -> Unit,
     resetBackTrigger: () -> Unit,
     exitToList: () -> Unit,
@@ -2431,9 +2471,11 @@ private fun ShortcutEditSession(
             isNew = isNew,
             backTrigger = backTrigger,
             existingShortcuts = shortcuts,
+            allowFolderAction = childFolder == null,
             onEditChild = { folderDraft, child ->
-                // 从文件夹编辑器进入子项编辑：保留文件夹草稿，切到子项
+                // 从文件夹编辑器进入子项编辑：保留文件夹草稿，切到子项，退出子项时回到文件夹编辑器
                 setEditingChildFolderIsNew(isNew)
+                setReturnToEditor(true)
                 resetBackTrigger()
                 setNew(false)
                 setEditingChildFolder(folderDraft)
@@ -2459,6 +2501,7 @@ private fun ShortcutEditSession(
                         Toast.makeText(ctx, "已保存子快捷方式: ${updated.title}", Toast.LENGTH_SHORT).show()
                         if (returnToEditor) {
                             // 返回文件夹编辑器
+                            setReturnToEditor(false)
                             setNew(childFolderIsNew)
                             setEditingItem(newFolder)
                             setEditingChildFolder(null)
@@ -2498,6 +2541,7 @@ private fun ShortcutEditSession(
                     }
                     Toast.makeText(ctx, "已删除子快捷方式", Toast.LENGTH_SHORT).show()
                     if (returnToEditor) {
+                        setReturnToEditor(false)
                         setNew(childFolderIsNew)
                         setEditingItem(newFolder)
                         setEditingChildFolder(null)
@@ -2524,6 +2568,7 @@ private fun ShortcutEditSession(
                             if (fi >= 0) shortcuts[fi] = newFolder.copy()
                             persist()
                         }
+                        setReturnToEditor(false)
                         setNew(childFolderIsNew)
                         setEditingItem(newFolder)
                         setEditingChildFolder(null)

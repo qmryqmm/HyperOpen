@@ -107,7 +107,7 @@ public final class HintTextStyler {
         tv.setLetterSpacing(spacing * LETTER_SPACING_UNIT);
     }
 
-    /** 复位到 idle/默认样式（buildHeader 初始观感：白标题假粗体、0xAA 白副标题、无特效） */
+    /** 复位到 idle/默认样式（继承全局描边、投影、字重、字间距配置，颜色保持白标题与 0xAA 白副标题） */
     public static void reset(TextView tv, boolean isTitle) {
         reset(tv, isTitle, null);
     }
@@ -118,13 +118,23 @@ public final class HintTextStyler {
                                : (config == null || config.defaultShowHintSubtitle);
         tv.setVisibility(show ? View.VISIBLE : View.GONE);
         tv.setTextColor(isTitle ? Color.WHITE : 0xAAFFFFFF);
-        tv.setShadowLayer(0f, 0f, 0f, 0);
-        if (tv instanceof StrokeTextView) {
-            ((StrokeTextView) tv).setStroke(0f, STROKE_COLOR);
+        int shadow = (config != null) ? Math.max(0, config.defaultHintTextShadow) : 0;
+        int stroke = (config != null) ? Math.max(0, config.defaultHintTextStroke) : 0;
+        int weight = (config != null && config.defaultHintTextWeight >= 0) ? config.defaultHintTextWeight : 3;
+        float spacing = (config != null) ? config.defaultHintTextLetterSpacing : 0f;
+
+        float density = tv.getResources().getDisplayMetrics().density;
+        if (shadow > 0) {
+            tv.setShadowLayer(shadow / 20f * 4f, 0f, 0f, SHADOW_COLOR);
+        } else {
+            tv.setShadowLayer(0f, 0f, 0f, 0);
         }
-        tv.setLetterSpacing(0f);
+        if (tv instanceof StrokeTextView) {
+            ((StrokeTextView) tv).setStroke(stroke * density, STROKE_COLOR);
+        }
+        tv.setLetterSpacing(spacing * LETTER_SPACING_UNIT);
         if (isTitle) {
-            applyTitleWeight(tv, 3);
+            applyTitleWeight(tv, weight);
         }
     }
 

@@ -153,12 +153,9 @@ public class SectorOverlayView extends View {
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         if (!enabled || count <= 0) return;
-
-        int alphaByte = Math.max(0, Math.min(255, Math.round(lineAlpha * 255f)));
-        if (alphaByte == 0) return; // 透明度 0% 等价于完全隐藏
         if (getWidth() <= 0 || getHeight() <= 0) return;
 
-        // 0. 当前选中扇区的径向淡雅高光反馈
+        // 0. 当前选中扇区的径向淡雅高光反馈（即使分隔线透明度设为 0% 隐藏线条，高光反馈仍独立绘制）
         if (highlightEnabled && highlightIndex >= 0 && highlightIndex < count && count > 1) {
             float stepDeg = 360f / count;
             float boundaryStart = startAngleDeg - stepDeg / 2f;
@@ -187,6 +184,9 @@ public class SectorOverlayView extends View {
             ));
             canvas.drawPath(highlightPath, highlightPaint);
         }
+
+        int alphaByte = Math.max(0, Math.min(255, Math.round(lineAlpha * 255f)));
+        if (alphaByte == 0) return; // 透明度 0% 等价于完全隐藏分隔线
 
         applyPaintStyle();
 

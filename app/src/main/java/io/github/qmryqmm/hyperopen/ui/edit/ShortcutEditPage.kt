@@ -46,7 +46,11 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -367,6 +371,13 @@ private fun VectorColorEditorSection(
     }
 }
 
+/** 应用选择器唤起模式：NONE=关闭，PAYLOAD=从动作区选择启动应用，ICON=从图标浮窗仅选择图标来源 */
+private enum class PickAppMode {
+    NONE,
+    PAYLOAD,
+    ICON,
+}
+
 @Composable
 fun ShortcutEditPage(
     contentPadding: PaddingValues,
@@ -378,9 +389,11 @@ fun ShortcutEditPage(
     onExitWithoutSave: () -> Unit,
     onEditChild: ((ShortcutItem, ShortcutItem) -> Unit)? = null,
     existingShortcuts: List<ShortcutItem> = emptyList(),
+    allowFolderAction: Boolean = true,
 ) {
     val ctx = LocalContext.current
     val lazyListState = rememberLazyListState()
+    val editScope = rememberCoroutineScope()
 
     // ── 选项分组展开收起（与参数配置页同款）：key → 是否已收起，持久化到 hyperopen_ui_state ──
     val uiPrefs = remember { ctx.getSharedPreferences("hyperopen_ui_state", android.content.Context.MODE_PRIVATE) }
@@ -446,6 +459,8 @@ fun ShortcutEditPage(
             else if (initialItem.hintTextColor != 0) initialItem.hintTextColor else initialItem.resolveIconPrimaryColor()
         mutableStateOf(formatRgbHex(base))
     }
+    // 设备用户列表（「启动用户」选择用；反射枚举一次即可）
+    val userOptions = remember(ctx) { loadAndroidUsers(ctx) }
     // 启动用户（0 = 当前/主空间默认；>0 跨用户，如 999 应用双开/分身）与 SHELL Root 执行开关
     // 启动用户：userId 字段优先；老快捷方式只有 URI 标记（i.hyperopen_user）时从 payload 解析回来
     val initialPickedUser = if (initialItem.userId > 0) initialItem.userId
@@ -454,8 +469,17 @@ fun ShortcutEditPage(
         else 0
     var pickedUser by remember { mutableIntStateOf(initialPickedUser) }
     var shellAsRoot by remember { mutableStateOf(initialItem.shellUseRoot) }
+    var customUserMode by remember {
+        mutableStateOf(initialPickedUser > 0 && userOptions.none { it.id == initialPickedUser })
+    }
     var customUserText by remember {
-        mutableStateOf(if (initialPickedUser > 0 && initialPickedUser != 999) initialPickedUser.toString() else "")
+        mutableStateOf(
+            if (initialPickedUser > 0 && userOptions.none { it.id == initialPickedUser }) {
+                initialPickedUser.toString()
+            } else {
+                ""
+            }
+        )
     }
     // ── 「启动 Activity」结构化 Intent 编辑状态（与 actionPayload 的 JSON 双向同步）──
     val initialActSpec = remember(initialItem) {
@@ -523,10 +547,111 @@ fun ShortcutEditPage(
         }
         return newItem
     }
-    // 设备用户列表（「启动用户」选择用；反射枚举一次即可）
-    val userOptions = remember(ctx) { loadAndroidUsers(ctx) }
+    /**
+     * 保存与「启动测试」前的必填动作参数与 Extra 类型校验：
+     * 返回 null 表示通过，返回非空字符串表示具体错误原因。
+     */
+    fun validateActionInput(): String? {
+        if (actionType == ShortcutItem.ACTION_APP ||
+            actionType == ShortcutItem.ACTION_INTENT_URI ||
+            actionType == ShortcutItem.ACTION_ACTIVITY
+        ) {
+            if (customUserMode) {
+                val parsedUser = customUserText.trim().toIntOrNull()
+                if (parsedUser == null || parsedUser <= 0) {
+                    return "请填写有效的自定义用户 ID（大于 0 的整数）"
+                }
+            }
+        }
+        when (actionType) {
+            ShortcutItem.ACTION_APP -> {
+                if (actionPayload.trim().isEmpty()) {
+                    return "请填写或从已安装应用选取目标应用包名"
+                }
+            }
+            ShortcutItem.ACTION_INTENT_URI -> {
+                val uriText = actionPayload.trim()
+                if (uriText.isEmpty()) {
+                    return "请填写 Intent URI 字符串"
+                }
+                val parsedOk = runCatching {
+                    Intent.parseUri(uriText, Intent.URI_INTENT_SCHEME)
+                }.isSuccess
+                if (!parsedOk) {
+                    return "Intent URI 格式无效，请检查语法"
+                }
+            }
+            ShortcutItem.ACTION_SHELL -> {
+                if (actionPayload.trim().isEmpty()) {
+                    return "请填写要执行的 Shell 脚本命令"
+                }
+            }
+            ShortcutItem.ACTION_BROADCAST -> {
+                if (actionPayload.trim().isEmpty()) {
+                    return "请填写要发送的广播 Action"
+                }
+            }
+            ShortcutItem.ACTION_ACTIVITY -> {
+                val comp = actComponent.trim()
+                val pkg = actPackage.trim()
+                val act = actAction.trim()
+                val dat = actData.trim()
+                if (comp.isNotEmpty()) {
+                    if (comp.contains("/")) {
+                        val cn = android.content.ComponentName.unflattenFromString(comp)
+                        if (cn == null || cn.packageName.isBlank() || cn.className.isBlank()) {
+                            return "目标组件格式无效，请填写正确的类名并配合目标包名"
+                        }
+                    } else if (pkg.isEmpty()) {
+                        return "已填写目标组件类名，请同时填写目标包名"
+                    }
+                }
+                if (actUseRoot) {
+                    if (comp.isEmpty() && pkg.isEmpty()) {
+                        return "Root 打开模式需填写目标包名与组件类名"
+                    }
+                } else {
+                    if (comp.isEmpty() && pkg.isEmpty() && act.isEmpty() && dat.isEmpty()) {
+                        return "请至少填写目标包名/组件类名，或填写 Action / Data URI"
+                    }
+                    for (extra in actExtras) {
+                        val k = extra.key.trim()
+                        val v = extra.value.trim()
+                        if (k.isEmpty() && v.isEmpty()) continue
+                        if (k.isEmpty()) {
+                            return "Extra 参数存在未填写 Key 的项"
+                        }
+                        when (extra.type) {
+                            ActivityLaunchSpec.TYPE_INT -> {
+                                if (v.toIntOrNull() == null) {
+                                    return "Extra「$k」的值不是有效的 int 整数"
+                                }
+                            }
+                            ActivityLaunchSpec.TYPE_LONG -> {
+                                if (v.toLongOrNull() == null) {
+                                    return "Extra「$k」的值不是有效的 long 长整数"
+                                }
+                            }
+                            ActivityLaunchSpec.TYPE_FLOAT -> {
+                                val f = v.toFloatOrNull()
+                                if (f == null || f.isNaN() || f.isInfinite()) {
+                                    return "Extra「$k」的值不是有效的 float 浮点数"
+                                }
+                            }
+                            ActivityLaunchSpec.TYPE_BOOL -> {
+                                if (!v.equals("true", ignoreCase = true) && !v.equals("false", ignoreCase = true)) {
+                                    return "Extra「$k」的 bool 值必须为 true 或 false"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return null
+    }
 
-    var showAppPicker by remember { mutableStateOf(false) }
+    var pickAppMode by remember { mutableStateOf(PickAppMode.NONE) }
     var showActivityPicker by remember { mutableStateOf(false) }
     var showMiuixIconPicker by remember { mutableStateOf(false) }
     var showRemixIconPicker by remember { mutableStateOf(false) }
@@ -547,34 +672,71 @@ fun ShortcutEditPage(
         contract = ActivityResultContracts.GetContent()
     ) { uri: android.net.Uri? ->
         if (uri != null) {
-            try {
-                ctx.contentResolver.openInputStream(uri)?.use { stream ->
-                    val rawBmp = android.graphics.BitmapFactory.decodeStream(stream)
-                    if (rawBmp != null && rawBmp.width > 0 && rawBmp.height > 0) {
-                        val size = 192
+            editScope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val targetSize = 192
+                        val boundsOpts = BitmapFactory.Options().apply {
+                            inJustDecodeBounds = true
+                        }
+                        ctx.contentResolver.openInputStream(uri)?.use { stream ->
+                            BitmapFactory.decodeStream(stream, null, boundsOpts)
+                        }
+                        val outW = boundsOpts.outWidth
+                        val outH = boundsOpts.outHeight
+                        if (outW <= 0 || outH <= 0) {
+                            return@runCatching null
+                        }
+                        val minRawEdge = kotlin.math.min(outW, outH)
+                        var sampleSize = 1
+                        while (minRawEdge / (sampleSize * 2) >= targetSize) {
+                            sampleSize *= 2
+                        }
+                        val decodeOpts = BitmapFactory.Options().apply {
+                            inSampleSize = sampleSize
+                            inPreferredConfig = Bitmap.Config.ARGB_8888
+                        }
+                        val rawBmp = ctx.contentResolver.openInputStream(uri)?.use { stream ->
+                            BitmapFactory.decodeStream(stream, null, decodeOpts)
+                        } ?: return@runCatching null
+                        if (rawBmp.width <= 0 || rawBmp.height <= 0) {
+                            rawBmp.recycle()
+                            return@runCatching null
+                        }
                         val srcW = rawBmp.width
                         val srcH = rawBmp.height
                         val minEdge = kotlin.math.min(srcW, srcH)
                         val cropX = (srcW - minEdge) / 2
                         val cropY = (srcH - minEdge) / 2
-                        val cropped = android.graphics.Bitmap.createBitmap(rawBmp, cropX, cropY, minEdge, minEdge)
-                        val scaled = if (minEdge != size) {
-                            android.graphics.Bitmap.createScaledBitmap(cropped, size, size, true)
+                        val cropped = Bitmap.createBitmap(rawBmp, cropX, cropY, minEdge, minEdge)
+                        if (cropped !== rawBmp) {
+                            rawBmp.recycle()
+                        }
+                        val scaled = if (minEdge != targetSize) {
+                            Bitmap.createScaledBitmap(cropped, targetSize, targetSize, true)
                         } else {
                             cropped
                         }
+                        if (scaled !== cropped) {
+                            cropped.recycle()
+                        }
                         val bos = java.io.ByteArrayOutputStream()
-                        scaled.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, bos)
-                        val b64 = android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP)
+                        scaled.compress(Bitmap.CompressFormat.PNG, 100, bos)
+                        scaled.recycle()
+                        Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
+                    }
+                }
+                result.onSuccess { b64 ->
+                    if (b64 != null) {
                         iconPackage = "${IconGlyphFactory.CUSTOM_IMAGE_PREFIX}$b64"
                         iconGlyph = ""
                         Toast.makeText(ctx, "已成功导入本地自定义图标", Toast.LENGTH_SHORT).show()
                     } else {
                         Toast.makeText(ctx, "无法解析所选图片文件", Toast.LENGTH_SHORT).show()
                     }
+                }.onFailure { e ->
+                    Toast.makeText(ctx, "导入图片失败: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
-            } catch (e: Throwable) {
-                Toast.makeText(ctx, "导入图片失败: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -583,10 +745,22 @@ fun ShortcutEditPage(
     // 返回键不会因已保存内容误弹未保存弹窗）
     var savedBaseline by remember { mutableStateOf(initialItem) }
     val isModified = remember(title, subtitle, actionType, actionPayload, iconPackage, iconGlyph, iconColor, glyphPadEnabled, glyphPadColor, glyphPadAlpha, appIconCropMode, enabled, pickedUser, shellAsRoot, actAction, actData, actComponent, actPackage, actExtras, actNewTask, actUseRoot, savedBaseline, followGlobalHintStyle, hintTextColor, hintTextAlpha, hintTextColorSub, hintTextAlphaSub, hintTextShadow, hintTextStroke, hintTextWeight, hintTextLetterSpacing, showHintTitle, showHintSubtitle, childrenRev) {
+        val currentDirectPayload = if (actionType == ShortcutItem.ACTION_INTENT_URI) {
+            ShortcutItem.syncUserMarker(actionPayload.trim(), pickedUser)
+        } else {
+            actionPayload.trim()
+        }
+        val baselineDirectPayload = if (savedBaseline.actionType == ShortcutItem.ACTION_INTENT_URI) {
+            ShortcutItem.syncUserMarker(savedBaseline.actionPayload.trim(), savedBaseline.userId)
+        } else {
+            savedBaseline.actionPayload.trim()
+        }
         title != savedBaseline.title ||
         subtitle != savedBaseline.subtitle ||
         actionType != savedBaseline.actionType ||
-        (actionType != ShortcutItem.ACTION_FOLDER && actionPayload != savedBaseline.actionPayload) ||
+        (actionType != ShortcutItem.ACTION_FOLDER &&
+            actionType != ShortcutItem.ACTION_ACTIVITY &&
+            currentDirectPayload != baselineDirectPayload) ||
         iconPackage != savedBaseline.iconPackage ||
         iconGlyph != savedBaseline.iconGlyph ||
         iconColor != normalizeOpaqueColor(savedBaseline.tintColor, 0xFFFFFFFF.toInt()) ||
@@ -605,10 +779,11 @@ fun ShortcutEditPage(
         hintTextShadow.toInt() != savedBaseline.hintTextShadow ||
         Math.round(hintTextStroke) != savedBaseline.hintTextStroke ||
         hintTextWeight != savedBaseline.hintTextWeight ||
-        Math.round(hintTextLetterSpacing * 2f) / 2 != Math.round(savedBaseline.hintTextLetterSpacing * 2f) / 2 ||
+        Math.round(hintTextLetterSpacing * 2f) != Math.round(savedBaseline.hintTextLetterSpacing * 2f) ||
         showHintTitle != savedBaseline.showHintTitle ||
         showHintSubtitle != savedBaseline.showHintSubtitle ||
-        (actionType == ShortcutItem.ACTION_ACTIVITY && buildActPayload() != savedBaseline.actionPayload) ||
+        (actionType == ShortcutItem.ACTION_ACTIVITY &&
+            buildActPayload() != ActivityLaunchSpec.fromJson(savedBaseline.actionPayload).toJson()) ||
         // FOLDER：子项列表即 payload，双侧归一化序列化后对比（预设手写 JSON 字段顺序差异不误报）
         (actionType == ShortcutItem.ACTION_FOLDER &&
             HyperOpenConfig.serializeShortcutsJson(folderChildren.toList()) !=
@@ -649,7 +824,8 @@ fun ShortcutEditPage(
 
     val previewItem = remember(
         initialItem, title, subtitle, actionType, actionPayload,
-        iconPackage, iconGlyph, iconColor, appIconCropMode, glyphPadEnabled, glyphPadColor, glyphPadAlpha
+        iconPackage, iconGlyph, iconColor, appIconCropMode, glyphPadEnabled, glyphPadColor, glyphPadAlpha,
+        childrenRev,
     ) {
         initialItem.copy().apply {
             this.title = title.trim().ifBlank { "快捷方式" }
@@ -737,6 +913,11 @@ fun ShortcutEditPage(
                             TextButton(
                                 text = if (isNew) "确认添加" else "保存修改",
                                 onClick = {
+                                    val err = validateActionInput()
+                                    if (err != null) {
+                                        Toast.makeText(ctx, err, Toast.LENGTH_SHORT).show()
+                                        return@TextButton
+                                    }
                                     val newItem = buildSavedItem()
                                     if (isNew) {
                                         // 新建：保存后退出编辑器，回到快捷方式列表
@@ -752,6 +933,15 @@ fun ShortcutEditPage(
                             TextButton(
                                 text = "启动测试",
                                 onClick = {
+                                    if (actionType == ShortcutItem.ACTION_FOLDER) {
+                                        Toast.makeText(ctx, "聚合文件夹在锁屏悬停展开子项，不支持直接启动测试", Toast.LENGTH_SHORT).show()
+                                        return@TextButton
+                                    }
+                                    val err = validateActionInput()
+                                    if (err != null) {
+                                        Toast.makeText(ctx, err, Toast.LENGTH_SHORT).show()
+                                        return@TextButton
+                                    }
                                     val testItem = initialItem.copy().apply {
                                         this.title = title.trim().ifBlank { "测试快捷方式" }
                                         this.actionType = actionType
@@ -825,12 +1015,14 @@ fun ShortcutEditPage(
                     selected = actionType == ShortcutItem.ACTION_CAMERA,
                     onClick = { actionType = ShortcutItem.ACTION_CAMERA },
                 )
-                RadioButtonPreference(
-                    title = "文件夹 / 聚合分组 (FOLDER)",
-                    summary = "手指滑到该气泡上悬停就地展开多项子快捷方式，兼顾面板简洁与大容量",
-                    selected = actionType == ShortcutItem.ACTION_FOLDER,
-                    onClick = { actionType = ShortcutItem.ACTION_FOLDER },
-                )
+                if (allowFolderAction) {
+                    RadioButtonPreference(
+                        title = "文件夹 / 聚合分组 (FOLDER)",
+                        summary = "手指滑到该气泡上悬停就地展开多项子快捷方式，兼顾面板简洁与大容量",
+                        selected = actionType == ShortcutItem.ACTION_FOLDER,
+                        onClick = { actionType = ShortcutItem.ACTION_FOLDER },
+                    )
+                }
                 RadioButtonPreference(
                     title = "打开应用 (APP)",
                     summary = "启动手机安装的目标应用程序",
@@ -868,7 +1060,6 @@ fun ShortcutEditPage(
         // ── 启动用户选择（APP / INTENT_URI / ACTIVITY 生效；0 = 主空间，>0 跨用户启动）──
         if (actionType == ShortcutItem.ACTION_APP || actionType == ShortcutItem.ACTION_INTENT_URI ||
             actionType == ShortcutItem.ACTION_ACTIVITY) {
-            val customUserSelected = pickedUser > 0 && userOptions.none { it.id == pickedUser }
             item(key = "target_user_title") {
                 CollapsibleSectionTitle("启动用户（应用双开 / 分身）", isOpen("target_user")) { toggle("target_user") }
             }
@@ -882,35 +1073,41 @@ fun ShortcutEditPage(
                     RadioButtonPreference(
                         title = "当前用户 / 主空间（默认）",
                         summary = "在默认用户空间中启动，不跨用户",
-                        selected = pickedUser <= 0,
-                        onClick = { pickedUser = 0 },
+                        selected = !customUserMode && pickedUser <= 0,
+                        onClick = {
+                            customUserMode = false
+                            pickedUser = 0
+                        },
                     )
                     userOptions.filter { it.id > 0 }.forEach { u ->
                         RadioButtonPreference(
                             title = "${u.id} · ${u.name}",
                             summary = "以 user ${u.id} 身份跨用户启动（该用户内需已安装/双开目标应用）",
-                            selected = pickedUser == u.id,
-                            onClick = { pickedUser = u.id },
+                            selected = !customUserMode && pickedUser == u.id,
+                            onClick = {
+                                customUserMode = false
+                                pickedUser = u.id
+                            },
                         )
                     }
                     RadioButtonPreference(
                         title = "自定义用户 ID",
                         summary = "手动输入其他 Android 用户 ID（user > 0）",
-                        selected = customUserSelected,
+                        selected = customUserMode,
                         onClick = {
-                            pickedUser = customUserText.trim().toIntOrNull()
-                                ?.takeIf { v -> v > 0 && userOptions.none { it.id == v } } ?: 10
+                            customUserMode = true
+                            pickedUser = customUserText.trim().toIntOrNull()?.takeIf { it > 0 } ?: 0
                         },
                     )
-                    if (customUserSelected) {
+                    if (customUserMode) {
                         Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                             TextField(
                                 value = customUserText,
                                 onValueChange = { text ->
                                     customUserText = text
-                                    text.trim().toIntOrNull()?.let { v -> if (v > 0) pickedUser = v }
+                                    pickedUser = text.trim().toIntOrNull()?.takeIf { it > 0 } ?: 0
                                 },
-                                label = "目标用户 ID（例如 10）",
+                                label = "目标用户 ID（正整数，例如 10）",
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -1112,7 +1309,7 @@ fun ShortcutEditPage(
                                 TextButton(
                                     text = "从已安装应用选取",
                                     onClick = {
-                                        showAppPicker = true
+                                        pickAppMode = PickAppMode.PAYLOAD
                                     },
                                     modifier = Modifier.align(Alignment.End),
                                 )
@@ -1136,20 +1333,30 @@ fun ShortcutEditPage(
         item { Spacer(Modifier.height(30.dp)) }
     }
 
-    // ── 应用选择弹窗 ──
-    if (showAppPicker) {
+    // ── 应用选择弹窗（区分 PAYLOAD 选启动应用 与 ICON 仅选图标来源） ──
+    if (pickAppMode != PickAppMode.NONE) {
+        val currentPickMode = pickAppMode
         AppListPickerDialog(
-            onDismiss = { showAppPicker = false },
+            onDismiss = { pickAppMode = PickAppMode.NONE },
             onSelectApp = { pkg, appName ->
-                if (actionType == ShortcutItem.ACTION_APP && actionPayload.isBlank()) {
-                    actionPayload = pkg
+                when (currentPickMode) {
+                    PickAppMode.PAYLOAD -> {
+                        actionPayload = pkg
+                        if (title.isBlank() || title == "新快捷方式" || title == "新子快捷方式") {
+                            title = appName
+                        }
+                        if (!IconGlyphFactory.isCustomImage(iconPackage)) {
+                            iconPackage = pkg
+                            iconGlyph = ""
+                        }
+                    }
+                    PickAppMode.ICON -> {
+                        iconPackage = pkg
+                        iconGlyph = ""
+                    }
+                    PickAppMode.NONE -> {}
                 }
-                if (title.isBlank() || title == "新快捷方式") {
-                    title = appName
-                }
-                iconPackage = pkg
-                iconGlyph = ""
-                showAppPicker = false
+                pickAppMode = PickAppMode.NONE
             },
         )
     }
@@ -1296,6 +1503,12 @@ fun ShortcutEditPage(
                             text = "保存并退出",
                             colors = ButtonDefaults.textButtonColorsPrimary(),
                             onClick = {
+                                val err = validateActionInput()
+                                if (err != null) {
+                                    showUnsavedDialog = false
+                                    Toast.makeText(ctx, err, Toast.LENGTH_SHORT).show()
+                                    return@TextButton
+                                }
                                 showUnsavedDialog = false
                                 // 保存并退出：共用 buildSavedItem()（含 userId/shellUseRoot/ACTIVITY payload/URI 标记同步）
                                 onSave(buildSavedItem(), true)
@@ -1380,7 +1593,7 @@ fun ShortcutEditPage(
                                         modifier = Modifier.padding(end = 8.dp),
                                     )
                                 },
-                                onClick = { showAppPicker = true },
+                                onClick = { pickAppMode = PickAppMode.ICON },
                             )
                             ArrowPreference(
                                 title = "选择 Remix Icon 快捷图标(推荐)",

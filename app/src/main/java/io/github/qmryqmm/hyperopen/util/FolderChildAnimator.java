@@ -204,7 +204,7 @@ public final class FolderChildAnimator {
                 float toX = folder.targetX - child.targetX;
                 float toY = folder.targetY - child.targetY;
                 long delay = type == HyperOpenConfig.FOLDER_CHILD_COLLAPSE_REVERSE_WAVE
-                        ? waveDelay(total - 1 - i, total, stagger)
+                        ? reverseWaveDelay(i, total, stagger)
                         : i * (long) stagger;
                 child.animate()
                         .translationX(toX)
@@ -235,5 +235,16 @@ public final class FolderChildAnimator {
     private static long waveDelay(int index, int count, int stagger) {
         int middle = Math.max(0, (count - 1) / 2);
         return Math.abs(index - middle) * (long) stagger;
+    }
+
+    /**
+     * 反向波浪收拢延迟：两侧边缘先动（delay = 0），向中心依次递增，中心最后收拢。
+     * 采用浮点对称中心 mid = (count - 1) / 2f 与 maxDist = mid，奇偶项下结果均严格非负且左右完全对称。
+     */
+    private static long reverseWaveDelay(int index, int count, int stagger) {
+        if (count <= 1 || stagger <= 0) return 0L;
+        float mid = (count - 1) / 2f;
+        float maxDist = mid;
+        return Math.max(0L, Math.round((maxDist - Math.abs(index - mid)) * stagger));
     }
 }
