@@ -115,8 +115,6 @@ data class PanelMotionSettings(
 data class FolderLayoutSettings(
     val iconSize: Float,
     val onIconSize: (Float) -> Unit,
-    val iconSpacingOffset: Float,
-    val onIconSpacingOffset: (Float) -> Unit,
     val displayRangeScale: Float,
     val onDisplayRangeScale: (Float) -> Unit,
     val directionMode: Int,
@@ -169,6 +167,7 @@ fun ParamsPage(
     onOpenSoftGlassPage: () -> Unit = {},
     offsetY: Float, onOffsetY: (Float) -> Unit,
     regionDiameter: Float, onRegionDiameter: (Float) -> Unit,
+    iconSpacingOffset: Float, onIconSpacingOffset: (Float) -> Unit,
     showRegionBg: Boolean, onShowRegionBg: (Boolean) -> Unit,
     showHeaderPill: Boolean, onShowHeaderPill: (Boolean) -> Unit,
     showHeaderPillBg: Boolean, onShowHeaderPillBg: (Boolean) -> Unit,
@@ -258,8 +257,6 @@ fun ParamsPage(
 
     val iconSize = folderLayout.iconSize
     val onIconSize: (Float) -> Unit = { folderLayout.onIconSize(it) }
-    val iconSpacingOffset = folderLayout.iconSpacingOffset
-    val onIconSpacingOffset: (Float) -> Unit = { folderLayout.onIconSpacingOffset(it) }
     val folderChildDisplayRangeScale = folderLayout.displayRangeScale
     val onFolderChildDisplayRangeScale: (Float) -> Unit = { folderLayout.onDisplayRangeScale(it) }
     val folderChildDirectionMode = folderLayout.directionMode
@@ -463,14 +460,26 @@ fun ParamsPage(
                             valueRange = 150f..420f,
                             onValueChange = onRegionDiameter,
                         )
+                        SliderPreference(
+                            title = "图标紧凑程度",
+                            summary = "仅调整面板图标之间的疏密程度，不影响文件夹子项，同时会影响最大图标显示数量",
+                            valueText = when {
+                                iconSpacingOffset.toInt() < 0 -> "紧凑 (${iconSpacingOffset.toInt()} dp)"
+                                iconSpacingOffset.toInt() > 0 -> "松散 (+${iconSpacingOffset.toInt()} dp)"
+                                else -> "标准 (0 dp)"
+                            },
+                            value = iconSpacingOffset.coerceIn(-10f, 20f),
+                            valueRange = -10f..20f,
+                            onValueChange = onIconSpacingOffset,
+                        )
                     }
                 }
             }
 
-            // ── 图标 / 文件夹布局与几何 ──
+            // ── 文件夹布局与几何 ──
             item(key = "folder_layout_title") {
                 CollapsibleSectionTitle(
-                    title = "图标 / 文件夹布局与几何",
+                    title = "文件夹布局与几何",
                     expanded = isOpen("folder_layout"),
                     onToggle = { toggle("folder_layout") },
                     summary = "固定圆环 · 显示范围 ${(folderChildDisplayRangeScale * 100).toInt()}% · 子项 ${(folderChildSizeScale * 100).toInt()}%",
@@ -483,18 +492,6 @@ fun ParamsPage(
                         .fillMaxWidth(),
                 ) {
                     SliderPreference(
-                        title = "图标紧凑程度",
-                        summary = "面板布局与文件夹子项间距共用",
-                        valueText = when {
-                            iconSpacingOffset.toInt() < 0 -> "紧凑 (${iconSpacingOffset.toInt()} dp)"
-                            iconSpacingOffset.toInt() > 0 -> "松散 (+${iconSpacingOffset.toInt()} dp)"
-                            else -> "标准 (0 dp)"
-                        },
-                        value = iconSpacingOffset,
-                        valueRange = -10f..20f,
-                        onValueChange = onIconSpacingOffset,
-                    )
-                    SliderPreference(
                         title = "子项显示范围",
                         summary = "缩放固定圆环的显示范围，不改变子项图标尺寸",
                         valueText = "${(folderChildDisplayRangeScale * 100).toInt()}%",
@@ -503,10 +500,15 @@ fun ParamsPage(
                         onValueChange = { onFolderChildDisplayRangeScale(it / 100f) },
                     )
                     SliderPreference(
-                        title = "子项最小间距",
-                        valueText = "${folderChildMinGapDp.toInt()} dp",
-                        value = folderChildMinGapDp,
-                        valueRange = 0f..24f,
+                        title = "子项图标紧凑程度",
+                        summary = "仅调整文件夹子项图标之间的疏密程度，不影响面板图标",
+                        valueText = when {
+                            folderChildMinGapDp.toInt() < 0 -> "紧凑 (${folderChildMinGapDp.toInt()} dp)"
+                            folderChildMinGapDp.toInt() > 0 -> "松散 (+${folderChildMinGapDp.toInt()} dp)"
+                            else -> "标准 (0 dp)"
+                        },
+                        value = folderChildMinGapDp.coerceIn(-10f, 20f),
+                        valueRange = -10f..20f,
                         onValueChange = onFolderChildMinGapDp,
                     )
                     SliderPreference(
@@ -923,10 +925,10 @@ fun ParamsPage(
                 }
             }
 
-            // ── 图标 / 文件夹动效 ──
+            // ── 文件夹动效 ──
             item(key = "folder_motion_title") {
                 CollapsibleSectionTitle(
-                    title = "图标 / 文件夹动效",
+                    title = "文件夹动效",
                     expanded = isOpen("folder_motion"),
                     onToggle = { toggle("folder_motion") },
                     summary = "${folderExpandAnimNameOf(folderChildExpandAnimType)} · ${folderChildExpandDurationMs.toInt()} ms · ${folderCollapseAnimNameOf(folderChildCollapseAnimType)}",

@@ -431,6 +431,7 @@ fun HyperOpenApp(
         (regionDiameter / 2f) * density,
         iconSize * density,
         iconSpacingOffset * density,
+        density,
     )
 
     val iconCapacity = computeLayoutCapacity()
@@ -1702,8 +1703,6 @@ fun HyperOpenApp(
                             val folderLayoutSettings = FolderLayoutSettings(
                                 iconSize = iconSize,
                                 onIconSize = { iconSize = it; clampIconCountToCapacity(); persist() },
-                                iconSpacingOffset = iconSpacingOffset,
-                                onIconSpacingOffset = { iconSpacingOffset = it; clampIconCountToCapacity(); persist() },
                                 displayRangeScale = folderChildDisplayRangeScale,
                                 onDisplayRangeScale = { folderChildDisplayRangeScale = it; persist() },
                                 directionMode = folderChildDirectionMode,
@@ -1776,6 +1775,8 @@ fun HyperOpenApp(
                                     onOffsetY = { offsetY = it; persist() },
                                     regionDiameter = regionDiameter,
                                     onRegionDiameter = { regionDiameter = it; clampIconCountToCapacity(); persist() },
+                                    iconSpacingOffset = iconSpacingOffset,
+                                    onIconSpacingOffset = { iconSpacingOffset = it; clampIconCountToCapacity(); persist() },
                                     showRegionBg = showRegionBg,
                                     onShowRegionBg = { showRegionBg = it; persist() },
                                     showHeaderPill = showHeaderPill,

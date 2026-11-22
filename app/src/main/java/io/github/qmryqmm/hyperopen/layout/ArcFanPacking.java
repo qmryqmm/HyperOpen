@@ -41,14 +41,15 @@ public class ArcFanPacking {
      */
     public static List<PointF> calculatePoints(int count, float centerX, float centerY,
                                                float regionRadius, float iconSize,
-                                               float spacingOffset) {
+                                               float spacingOffset, float density) {
         List<PointF> result = new ArrayList<>();
         if (count <= 0) return result;
 
-        // 间距语义与蜂窝完全一致：图标大小 + 基础边距 + 紧凑度微调（保底防重叠）
-        float minSpacing = Math.max(iconSize * 0.75f, iconSize + 12f + spacingOffset);
-        // 弧带可用最大半径：与蜂窝同款 +8 容差收边，且不超出视界圆 92%
-        float rMax = Math.min(regionRadius + 8f - iconSize / 2f, regionRadius * 0.92f);
+        float d = density > 0f ? density : 1f;
+        // 间距语义与蜂窝完全一致：图标大小 + 4dp 基础边距 + 紧凑度微调（保底防重叠）
+        float minSpacing = Math.max(iconSize * 0.75f, iconSize + 4f * d + spacingOffset);
+        // 弧带可用最大半径：与蜂窝同款 3dp 容差收边，且不超出视界圆 92%
+        float rMax = Math.min(regionRadius + 3f * d - iconSize / 2f, regionRadius * 0.92f);
         // 单弧所需半径（弧长近似弦长）；1 个图标退化为顶点
         float rNeed = count > 1 ? (count - 1) * minSpacing / SPAN : iconSize;
 

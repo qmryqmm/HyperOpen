@@ -214,6 +214,7 @@ public class HyperOpenConfig {
     public int folderChildDirectionMode = FOLDER_CHILD_DIRECTION_OUTWARD;
     public float folderChildDirectionOffsetDeg = 0f;
     public int folderChildOrderMode = 0;
+    /** 文件夹子项图标紧凑程度微调 (-10dp ~ 20dp，默认 8dp，负值更紧凑，正值更松散；仅对子项图标生效) */
     public int folderChildMinGapDp = 8;
     public float folderChildSizeScale = 1f;
     public int folderChildExpandAnimType = FOLDER_CHILD_EXPAND_FAN_SPRING;
@@ -280,7 +281,7 @@ public class HyperOpenConfig {
     /** 图标的圆形视界区域背景高斯模糊半径 (0 ~ 50 dp，默认 25 dp，0 为关闭) */
     public int regionBlurRadius = 25;
 
-    /** 图标分布紧凑度间距微调 (-10dp ~ 20dp，默认 5dp，负值更紧凑，正值更松散) */
+    /** 面板图标分布紧凑程度微调 (-10dp ~ 20dp，默认 5dp，负值更紧凑，正值更松散；仅对面板图标生效) */
     public int iconSpacingOffset = 5;
     /** 气泡内部图标留白比例 (0% ~ 40%，默认 0%)；0% 图标满铺并直接关闭气泡：底衬、模糊与压暗一并停用 */
     /**

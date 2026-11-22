@@ -68,6 +68,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
     private CircularBubbleView currentSelectedBubble = null;
     private CircularBubbleView pendingFolderBubble = null;
     private CircularBubbleView activeFolderBubble = null;
+    private float activeFolderDismissRadius = 0f;
     private final List<CircularBubbleView> folderSubBubbles = new ArrayList<>();
     private CircularBubbleView currentSelectedSubBubble = null;
 
@@ -661,7 +662,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
         regionBackdrop.setLayoutParams(rLp);
 
         // 计算布局坐标（紧凑度偏移量对蜂窝、空心圆环与弧形扇面通用）
-        float spacingOffsetPx = dpToPx(config.iconSpacingOffset);
+        float density = getResources().getDisplayMetrics().density;
+        float spacingOffsetPx = dpToPx((float) config.iconSpacingOffset);
         List<PointF> points;
         stockSpecs.clear();
         // 每次重建先清空扇区几何，仅扇区模式分支重新赋值（防止切换布局后残留旧判定）
@@ -692,7 +694,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
                     regionCenterY,
                     regionRadiusPx,
                     iconSizePx,
-                    spacingOffsetPx
+                    spacingOffsetPx,
+                    density
                 );
                 points = ringSectorSpec != null ? ringSectorSpec.points : new ArrayList<PointF>();
             } else {
@@ -704,7 +707,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
                     regionCenterY,
                     regionRadiusPx,
                     iconSizePx,
-                    spacingOffsetPx
+                    spacingOffsetPx,
+                    density
                 );
             }
         } else if (config.layoutStyle == HyperOpenConfig.LAYOUT_ARC) {
@@ -715,7 +719,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 regionCenterY,
                 regionRadiusPx,
                 iconSizePx,
-                spacingOffsetPx
+                spacingOffsetPx,
+                density
             );
         } else {
             points = CircularHoneycombPacking.calculatePoints(
@@ -724,7 +729,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 regionCenterY,
                 regionRadiusPx,
                 iconSizePx,
-                spacingOffsetPx
+                spacingOffsetPx,
+                density
             );
         }
 
@@ -1167,6 +1173,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
         int iconSizeInt = Math.max(1, (int) childIconSizePx);
         HyperOpenConfig cfg = config != null ? config : new HyperOpenConfig();
         float[] safeBounds = folderSafeBounds();
+        float density = getResources().getDisplayMetrics().density;
         FolderChildPacking.Result pack = FolderChildPacking.calculate(
             count,
             folderBubble.targetX,
@@ -1178,12 +1185,20 @@ public class CustomHyperOpenContainer extends FrameLayout {
             safeBounds[2],
             safeBounds[3],
             childIconSizePx,
-            dpToPx(cfg.folderChildMinGapDp),
+            dpToPx((float) cfg.folderChildMinGapDp),
+            density,
             cfg.folderChildDisplayRangeScale,
             cfg.folderChildDirectionMode,
             cfg.folderChildDirectionOffsetDeg,
             cfg.folderChildOrderMode
         );
+        float maxChildDist = pack.radius;
+        for (PointF p : pack.points) {
+            float d = (float) Math.hypot(p.x - folderBubble.targetX, p.y - folderBubble.targetY);
+            if (d > maxChildDist) maxChildDist = d;
+        }
+        float parentIconSizePx = dpToPx((float) cfg.iconSize);
+        activeFolderDismissRadius = Math.max(parentIconSizePx * 2.8f, maxChildDist + childIconSizePx * 1.3f);
         List<CircularBubbleView> createdSubs = new ArrayList<>(count);
 
         for (int i = 0; i < count; i++) {
@@ -1270,7 +1285,8 @@ public class CustomHyperOpenContainer extends FrameLayout {
             float distFromFolder = (activeFolderBubble != null)
                 ? (float) Math.hypot(touchX - activeFolderBubble.targetX, touchY - activeFolderBubble.targetY)
                 : Float.MAX_VALUE;
-            if (distFromFolder > iconSizePx * 2.8f) {
+            float dismissThreshold = Math.max(iconSizePx * 2.8f, activeFolderDismissRadius);
+            if (distFromFolder > dismissThreshold) {
                 dismissFolderSubBubbles(true);
             }
         }
@@ -1289,6 +1305,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
         folderSubBubbles.clear();
         currentSelectedSubBubble = null;
         activeFolderBubble = null;
+        activeFolderDismissRadius = 0f;
         ghostLayer.setExcludedSource(null);
 
         if (!animated) {

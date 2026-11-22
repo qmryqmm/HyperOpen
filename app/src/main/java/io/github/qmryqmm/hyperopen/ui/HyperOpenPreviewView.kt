@@ -136,6 +136,7 @@ class HyperOpenPreviewView(
     private var currentSelectedBubble: CircularBubbleView? = null
     private var pendingFolderBubble: CircularBubbleView? = null
     private var activeFolderBubble: CircularBubbleView? = null
+    private var activeFolderDismissRadius: Float = 0f
     private val folderSubBubbles = mutableListOf<CircularBubbleView>()
     /** 图标幻影层：气泡压盖时在玻璃内显示邻居磨砂虚影（除自身录制，与真机同源） */
     private val ghostLayer = io.github.qmryqmm.hyperopen.view.IconGhostLayer(bubbleViews, folderSubBubbles, 1.5f)
@@ -1193,6 +1194,7 @@ class HyperOpenPreviewView(
         refreshFloatingBackButtonBackground()
 
         // 计算布局坐标（图标紧凑程度对蜂窝、空心圆环与弧形扇面通用）
+        val density = context.resources.displayMetrics.density
         val spacingOffsetPx = dpToPx(config.iconSpacingOffset.toFloat())
         stockSpecs.clear()
         // 每次重建先清空扇区几何，仅扇区模式分支重新赋值（防止切换布局后残留旧判定）
@@ -1218,7 +1220,8 @@ class HyperOpenPreviewView(
                     regionCenterY,
                     regionRadiusPx,
                     iconSizePx,
-                    spacingOffsetPx
+                    spacingOffsetPx,
+                    density
                 )
                 ringSectorSpec = spec
                 spec?.points ?: emptyList()
@@ -1231,7 +1234,8 @@ class HyperOpenPreviewView(
                     regionCenterY,
                     regionRadiusPx,
                     iconSizePx,
-                    spacingOffsetPx
+                    spacingOffsetPx,
+                    density
                 )
             }
         } else if (config.layoutStyle == HyperOpenConfig.LAYOUT_ARC) {
@@ -1242,7 +1246,8 @@ class HyperOpenPreviewView(
                 regionCenterY,
                 regionRadiusPx,
                 iconSizePx,
-                spacingOffsetPx
+                spacingOffsetPx,
+                density
             )
         } else {
             CircularHoneycombPacking.calculatePoints(
@@ -1251,7 +1256,8 @@ class HyperOpenPreviewView(
                 regionCenterY,
                 regionRadiusPx,
                 iconSizePx,
-                spacingOffsetPx
+                spacingOffsetPx,
+                density
             )
         }
         // 布局容量不足时截断，保证快捷项与点集一一对应
@@ -2241,6 +2247,7 @@ class HyperOpenPreviewView(
         val childIconSizePx = dpToPx(config.iconSize.toFloat() * config.folderChildSizeScale)
         val iconSizeInt = childIconSizePx.toInt().coerceAtLeast(1)
         val safeBounds = folderSafeBounds()
+        val density = context.resources.displayMetrics.density
         val pack = FolderChildPacking.calculate(
             count,
             folderBubble.targetX,
@@ -2253,11 +2260,19 @@ class HyperOpenPreviewView(
             safeBounds[3],
             childIconSizePx,
             dpToPx(config.folderChildMinGapDp.toFloat()),
+            density,
             config.folderChildDisplayRangeScale,
             config.folderChildDirectionMode,
             config.folderChildDirectionOffsetDeg,
             config.folderChildOrderMode
         )
+        var maxChildDist = pack.radius
+        for (p in pack.points) {
+            val d = Math.hypot((p.x - folderBubble.targetX).toDouble(), (p.y - folderBubble.targetY).toDouble()).toFloat()
+            if (d > maxChildDist) maxChildDist = d
+        }
+        val parentIconSizePx = dpToPx(config.iconSize.toFloat())
+        activeFolderDismissRadius = maxOf(parentIconSizePx * 2.8f, maxChildDist + childIconSizePx * 1.3f)
         val createdSubs = ArrayList<CircularBubbleView>(count)
 
         for (i in 0 until count) {
@@ -2344,7 +2359,8 @@ class HyperOpenPreviewView(
                 Math.hypot((touchX - folder.targetX).toDouble(), (touchY - folder.targetY).toDouble()).toFloat()
             } else Float.MAX_VALUE
 
-            if (distFromFolder > iconSizePx * 2.8f) {
+            val dismissThreshold = maxOf(iconSizePx * 2.8f, activeFolderDismissRadius)
+            if (distFromFolder > dismissThreshold) {
                 dismissFolderSubBubbles(animated = true)
             }
         }
@@ -2363,6 +2379,7 @@ class HyperOpenPreviewView(
         folderSubBubbles.clear()
         currentSelectedSubBubble = null
         activeFolderBubble = null
+        activeFolderDismissRadius = 0f
 
         if (!animated) {
             for (sub in subs) {

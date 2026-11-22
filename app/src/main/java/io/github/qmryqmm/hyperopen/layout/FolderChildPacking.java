@@ -71,7 +71,8 @@ public final class FolderChildPacking {
                                    float fodX, float fodY,
                                    float safeLeft, float safeTop,
                                    float safeRight, float safeBottom,
-                                   float iconSize, float minGap,
+                                   float iconSize, float spacingOffset,
+                                   float density,
                                    float displayRangeScale,
                                    int directionMode, float directionOffsetDeg,
                                    int orderMode) {
@@ -79,7 +80,9 @@ public final class FolderChildPacking {
             return new Result(new ArrayList<>(), new ArrayList<>(), 0f, 0f);
         }
 
-        float spacing = iconSize + Math.max(0f, minGap);
+        float d = density > 0f ? density : 1f;
+        // 与主面板「图标紧凑程度」同构：0dp 对应 4dp 标准间距，负值紧凑（保底 0.75 * iconSize 防过度重叠），正值松散
+        float spacing = Math.max(iconSize * 0.75f, iconSize + 4f * d + spacingOffset);
         float halfIconSize = iconSize / 2f;
         float minX = safeLeft + halfIconSize;
         float maxX = safeRight - halfIconSize;
@@ -102,16 +105,21 @@ public final class FolderChildPacking {
                 outwardDeg, directionMode, directionOffsetDeg
         );
         float rangeScale = clamp(displayRangeScale, 0.5f, 2.5f);
-        float angleStepDeg = count == 1
-                ? 0f
-                : Math.min(36f, 300f / (count - 1));
-        float minimumRadius = count == 1
-                ? iconSize * 1.25f
-                : spacing / (2f * (float) Math.sin(Math.toRadians(angleStepDeg) / 2d));
-        float radius = Math.max(
-                iconSize * 1.35f * rangeScale,
-                minimumRadius
-        );
+        float desiredRadius = Math.max(iconSize * 0.80f, iconSize * 1.35f * rangeScale);
+        float radius;
+        float angleStepDeg;
+        if (count == 1) {
+            radius = desiredRadius;
+            angleStepDeg = 0f;
+        } else {
+            // 单个相邻夹角上限 120°（防止 count=2 时 300° 绕回对面），且总张角不超过 300°
+            float maxStepDeg = Math.min(120f, 300f / (count - 1));
+            double maxHalfStepRad = Math.toRadians(maxStepDeg) / 2d;
+            float minimumRadius = spacing / (2f * (float) Math.sin(maxHalfStepRad));
+            radius = Math.max(desiredRadius, minimumRadius);
+            float sinHalf = clamp(spacing / (2f * radius), 0f, 1f);
+            angleStepDeg = (float) Math.toDegrees(2d * Math.asin(sinHalf));
+        }
 
         Candidate selected = buildRing(
                 count, folderX, folderY, radius, angleStepDeg, preferredDeg

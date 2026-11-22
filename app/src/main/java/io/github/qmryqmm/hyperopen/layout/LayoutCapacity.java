@@ -30,7 +30,7 @@ public class LayoutCapacity {
      * @return 当前几何下最多可容纳的图标数（1 ~ MAX_VISIBLE）
      */
     public static int maxFeasibleCount(int layoutStyle, float regionRadiusPx, float iconSizePx,
-                                       float spacingOffsetPx) {
+                                       float spacingOffsetPx, float density) {
         // 弧形扇面与系统扇形布局无蜂窝拥挤几何上限（系统扇形经典支持 3~5 项，向上兼容至多项），按滑块设计上限处理
         if (layoutStyle == HyperOpenConfig.LAYOUT_ARC || layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK) {
             return MAX_VISIBLE;
@@ -39,10 +39,10 @@ public class LayoutCapacity {
         List<PointF> pts;
         if (layoutStyle == HyperOpenConfig.LAYOUT_RING) {
             pts = HollowRingPacking.calculatePoints(PROBE_COUNT, 0f, 0f,
-                    regionRadiusPx, iconSizePx, spacingOffsetPx);
+                    regionRadiusPx, iconSizePx, spacingOffsetPx, density);
         } else {
             pts = CircularHoneycombPacking.calculatePoints(PROBE_COUNT, 0f, 0f,
-                    regionRadiusPx, iconSizePx, spacingOffsetPx);
+                    regionRadiusPx, iconSizePx, spacingOffsetPx, density);
         }
         int n = pts.size();
         if (n < 1) n = 1;

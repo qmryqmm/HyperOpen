@@ -15,17 +15,18 @@ public final class HollowRingPacking {
 
     public static List<PointF> calculatePoints(int count, float centerX, float centerY,
                                                float regionRadius, float iconSize,
-                                               float spacingOffset) {
+                                               float spacingOffset, float density) {
         List<PointF> result = new ArrayList<>();
         if (count <= 0) return result;
 
-        float spacing = Math.max(iconSize * 0.75f, iconSize + 12f + spacingOffset);
+        float d = density > 0f ? density : 1f;
+        float spacing = Math.max(iconSize * 0.75f, iconSize + 4f * d + spacingOffset);
         float minRingRadius = count == 1
                 ? iconSize * 1.15f
                 : spacing / (2f * (float) Math.sin(Math.PI / count));
         minRingRadius = Math.max(minRingRadius, iconSize * 0.9f);
 
-        float maxRingRadius = regionRadius + 8f - iconSize / 2f;
+        float maxRingRadius = regionRadius + 3f * d - iconSize / 2f;
         if (maxRingRadius < minRingRadius) maxRingRadius = minRingRadius;
         float ringRadius = Math.min(maxRingRadius, Math.max(minRingRadius, regionRadius * 0.62f));
 

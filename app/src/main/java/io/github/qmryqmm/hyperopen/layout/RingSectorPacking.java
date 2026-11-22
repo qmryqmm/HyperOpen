@@ -57,11 +57,13 @@ public class RingSectorPacking {
      * @return 扇区几何规格；数量为 0 时返回 null
      */
     public static Result calculate(int count, float cx, float cy,
-                                   float regionRadius, float iconSize, float spacingOffset) {
+                                   float regionRadius, float iconSize,
+                                   float spacingOffset, float density) {
         if (count <= 0) return null;
 
-        // 间距语义与空心圆环 / 蜂窝完全一致：图标大小 + 基础边距 + 紧凑度微调
-        float spacing = Math.max(iconSize * 0.75f, iconSize + 12f + spacingOffset);
+        float d = density > 0f ? density : 1f;
+        // 间距语义与空心圆环 / 蜂窝完全一致：图标大小 + 4dp 基础边距 + 紧凑度微调
+        float spacing = Math.max(iconSize * 0.75f, iconSize + 4f * d + spacingOffset);
 
         // 图标中心圆半径：圆周上相邻图标弦长 >= spacing 的最小半径
         float minRingRadius;
@@ -78,7 +80,7 @@ public class RingSectorPacking {
         float ringRadius = Math.max(minRingRadius, regionRadius * 0.62f);
 
         // 不超出圆形视界：图标外缘需收在视界内
-        float maxRadius = regionRadius - iconSize * 0.5f - 8f;
+        float maxRadius = regionRadius - iconSize * 0.5f - 3f * d;
         if (maxRadius > 0 && ringRadius > maxRadius) {
             ringRadius = maxRadius;
         }

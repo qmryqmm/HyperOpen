@@ -30,11 +30,12 @@ public class CircularHoneycombPacking {
      * @return 排序好的网格坐标列表 (由内圈向外圈扩散)
      */
 
-    public static List<PointF> calculatePoints(int count, float centerX, float centerY, float regionRadius, float iconSize, float spacingOffset) {
+    public static List<PointF> calculatePoints(int count, float centerX, float centerY, float regionRadius, float iconSize, float spacingOffset, float density) {
         List<PackPoint> candidates = new ArrayList<>();
-        
-        // 间距：图标大小 + 基础边距 + 紧凑度微调（保底至少留 2px 物理间距防重叠崩溃）
-        float spacing = Math.max(iconSize * 0.75f, iconSize + 12f + spacingOffset);
+        float d = density > 0f ? density : 1f;
+
+        // 间距：图标大小 + 4dp 基础边距 + 紧凑度微调（保底 0.75 * iconSize 防过度重叠）
+        float spacing = Math.max(iconSize * 0.75f, iconSize + 4f * d + spacingOffset);
         float rowHeight = spacing * 0.8660254f; // spacing * sqrt(3) / 2
 
         // 计算最大排查网格步数
@@ -50,7 +51,7 @@ public class CircularHoneycombPacking {
                 float dist = (float) Math.hypot(x, y);
 
                 // 几何判定：图标完全收敛在圆盘内部
-                if (dist + iconSize / 2f <= regionRadius + 8f) {
+                if (dist + iconSize / 2f <= regionRadius + 3f * d) {
                     candidates.add(new PackPoint(centerX + x, centerY + y, dist));
                 }
             }
