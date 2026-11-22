@@ -63,6 +63,8 @@ public class CircularBubbleView extends FrameLayout {
     private HyperOpenConfig config;
     /** 上次应用的配置签名（updateConfig 变更检测） */
     private long lastConfigSignature;
+    /** 上次应用的图标相关配置签名（仅裁切/圆角/底垫变化时才重新解析图标） */
+    private long lastIconConfigSignature;
     private final ImageView iconView;
     /** 玻璃背景专用底层承载 View（高斯回退绘制 BackgroundBlurDrawable，柔光模式承载原生 MiGlass） */
     private final BlurCarrierView blurCarrierView;
@@ -182,7 +184,8 @@ public class CircularBubbleView extends FrameLayout {
         // 绑定图标 (优先从包名解析应用图标，或使用默认彩色矢量图形)
         loadItemIcon();
 
-        this.lastConfigSignature = config != null ? configSignature(config) : 0L;
+        this.lastConfigSignature = config != null ? configSignature(config, this.blurRadiusDp) : 0L;
+        this.lastIconConfigSignature = config != null ? iconConfigSignature(config) : 0L;
     }
 
     public CircularBubbleView(@NonNull Context context, ShortcutItem item, int style, int sizePx, ClassLoader classLoader) {
@@ -199,37 +202,64 @@ public class CircularBubbleView extends FrameLayout {
      * 每次重组都会调用本方法，参数未变时整链短路，避免图标重建与模糊反射更新开销。
      */
     public void updateConfig(@NonNull HyperOpenConfig newConfig) {
-        long sig = configSignature(newConfig);
+        updateConfig(newConfig, newConfig.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE), false);
+    }
+
+    /**
+     * 批量配置热更新（支持传入叠加全屏模糊后的最终模糊半径，并合并中间冗余刷新）。
+     *
+     * @param newConfig              最新配置快照
+     * @param resolvedBlurRadiusDp   气泡最终模糊半径 (dp)
+     * @param forceRefreshBackground 即使配置签名未变也强制刷新一次模糊背景（用于面板收起释放模糊会话后的复用重展开）
+     */
+    public void updateConfig(@NonNull HyperOpenConfig newConfig, float resolvedBlurRadiusDp, boolean forceRefreshBackground) {
+        float clampedBlurDp = Math.max(0f, resolvedBlurRadiusDp);
+        long sig = configSignature(newConfig, clampedBlurDp);
+        long iconSig = iconConfigSignature(newConfig);
         this.config = newConfig;
-        if (sig == lastConfigSignature) {
+        boolean sigChanged = (sig != lastConfigSignature);
+        boolean iconChanged = (iconSig != lastIconConfigSignature);
+        if (!sigChanged && !iconChanged) {
+            setIconAlpha(newConfig.iconAlpha);
+            if (forceRefreshBackground) {
+                ensureBlurAndRefreshBackground();
+            }
             return;
         }
         lastConfigSignature = sig;
         this.activeStyle = HyperOSMaterialFactory.resolveActiveStyle(getContext(), newConfig.materialStyle);
-        this.blurRadiusDp = newConfig.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE);
+        this.blurRadiusDp = clampedBlurDp;
         this.bubbleBgEnabled = newConfig.showBubbleBg;
         this.paddingPercent = newConfig.bubblePaddingPercent;
         this.dimAlpha = newConfig.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE);
-        this.cornerRadiusPercent = Math.max(0, Math.min(50, newConfig.iconCornerRadius));
+        int newCorner = Math.max(0, Math.min(50, newConfig.iconCornerRadius));
+        boolean cornerChanged = (this.cornerRadiusPercent != newCorner);
+        this.cornerRadiusPercent = newCorner;
         opticDrawable.setStyle(activeStyle);
         opticDrawable.setCornerRadiusPercent(this.cornerRadiusPercent);
-        invalidateOutline();
-        if (opticView != null) {
-            opticView.invalidateOutline();
-        }
-        if (ghostView != null) {
-            ghostView.invalidateOutline();
+        if (cornerChanged || sigChanged) {
+            invalidateOutline();
+            if (opticView != null) {
+                opticView.invalidateOutline();
+            }
+            if (ghostView != null) {
+                ghostView.invalidateOutline();
+            }
         }
         applyIconPadding();
-        loadItemIcon();
+        if (iconChanged) {
+            lastIconConfigSignature = iconSig;
+            loadItemIcon();
+        }
         setIconAlpha(newConfig.iconAlpha);
         ensureBlurAndRefreshBackground();
     }
 
     /** 影响本气泡渲染的配置字段签名（模糊/压暗/磨砂/玻璃/留白/圆角/透明度/图标裁切与底垫） */
-    private static long configSignature(@NonNull HyperOpenConfig c) {
+    private static long configSignature(@NonNull HyperOpenConfig c, float effectiveBlurDp) {
         long h = 17;
         h = h * 31 + c.materialStyle;
+        h = h * 31 + Float.floatToIntBits(effectiveBlurDp);
         h = h * 31 + c.bubbleBlurRadius;
         h = h * 31 + Float.floatToIntBits(c.bubbleDimAlpha);
         h = h * 31 + (c.bubbleMaterialFollowGlobal ? 1 : 0);
@@ -255,6 +285,17 @@ public class CircularBubbleView extends FrameLayout {
         h = h * 31 + c.bubblePaddingPercent;
         h = h * 31 + c.iconCornerRadius;
         h = h * 31 + Float.floatToIntBits(c.iconAlpha);
+        h = h * 31 + c.appIconCropMode;
+        h = h * 31 + (c.glyphPadEnabled ? 1 : 0);
+        h = h * 31 + c.glyphPadColor;
+        h = h * 31 + c.glyphPadMode;
+        return h;
+    }
+
+    /** 仅影响图标位图裁切与矢量底垫的配置字段签名 */
+    private static long iconConfigSignature(@NonNull HyperOpenConfig c) {
+        long h = 17;
+        h = h * 31 + Math.max(0, Math.min(50, c.iconCornerRadius));
         h = h * 31 + c.appIconCropMode;
         h = h * 31 + (c.glyphPadEnabled ? 1 : 0);
         h = h * 31 + c.glyphPadColor;
@@ -288,6 +329,11 @@ public class CircularBubbleView extends FrameLayout {
     @Override
     protected void onDetachedFromWindow() {
         cancelFolderDimAnimator();
+        releaseGhostNode();
+        if (ghostView != null) {
+            ghostView.clearBlurEffect();
+            ghostView.hasDrawnGhost = false;
+        }
         if (opticView != null) {
             HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(opticView);
         }
@@ -462,8 +508,10 @@ public class CircularBubbleView extends FrameLayout {
 
     /** 气泡留白区域背景压暗 (0.0 ~ 1.0)；留白 0%（气泡关闭）时实际应用为 0 */
     public void setDimAlpha(float alpha) {
-        this.dimAlpha = alpha;
-        applyEffectiveDim();
+        if (Math.abs(this.dimAlpha - alpha) > 0.001f) {
+            this.dimAlpha = alpha;
+            applyEffectiveDim();
+        }
     }
 
     /** 按气泡开关应用压暗：气泡材质关闭时压暗跟随停用 */
@@ -475,6 +523,9 @@ public class CircularBubbleView extends FrameLayout {
         float clamped = Math.max(0f, radiusDp);
         if (Math.abs(this.blurRadiusDp - clamped) > 0.01f) {
             this.blurRadiusDp = clamped;
+            if (this.config != null) {
+                this.lastConfigSignature = configSignature(this.config, this.blurRadiusDp);
+            }
             ensureBlurAndRefreshBackground();
         }
     }
@@ -538,9 +589,21 @@ public class CircularBubbleView extends FrameLayout {
             HyperOSMaterialFactory.SystemNativeGlassAdapter.clearGlass(opticView);
             opticDrawable.setNativeGlassActive(false);
         }
+        releaseGhostNode();
         if (ghostView != null) {
             ghostView.clearBlurEffect();
+            ghostView.hasDrawnGhost = false;
             ghostView.invalidate();
+        }
+    }
+
+    private void releaseGhostNode() {
+        if (ghostNode != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ghostNode.discardDisplayList();
+            }
+            ghostNode = null;
+            ghostSizePx = 0f;
         }
     }
 
@@ -748,7 +811,7 @@ public class CircularBubbleView extends FrameLayout {
             // 仅在需要绘制虚影或需要清除旧虚影时失效，避免常态鱼眼微调触发昂贵的逐气泡模糊。
             if (ghostView != null && (isSubBubble
                     || fisheyeScale > 1.005f
-                    || ghostView.hasBlurEffect())) {
+                    || ghostView.hasActiveGhost())) {
                 ghostView.invalidate();
             }
         }
@@ -801,8 +864,10 @@ public class CircularBubbleView extends FrameLayout {
 
     /** 显式清空幻影视图的硬件模糊滤镜与画面内容，消除残影 */
     public void clearGhost() {
+        releaseGhostNode();
         if (ghostView != null) {
             ghostView.clearBlurEffect();
+            ghostView.hasDrawnGhost = false;
             ghostView.invalidate();
         }
     }
@@ -912,6 +977,7 @@ public class CircularBubbleView extends FrameLayout {
      */
     private class GhostView extends View {
         private float lastBlurPx = -1f;
+        private boolean hasDrawnGhost = false;
 
         GhostView(Context context) {
             super(context);
@@ -939,11 +1005,25 @@ public class CircularBubbleView extends FrameLayout {
             return lastBlurPx >= 0f;
         }
 
+        boolean hasActiveGhost() {
+            return hasDrawnGhost || hasBlurEffect();
+        }
+
+        private void discardGhostNodeDisplayList() {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                    && ghostNode != null
+                    && ghostNode.hasDisplayList()) {
+                ghostNode.discardDisplayList();
+            }
+        }
+
         @Override
         protected void onDraw(@NonNull Canvas canvas) {
             super.onDraw(canvas);
             if (ghostLayer == null || !bubbleBgEnabled || getWidth() <= 0 || getHeight() <= 0) {
                 clearBlurEffect();
+                hasDrawnGhost = false;
+                discardGhostNodeDisplayList();
                 return;
             }
             // 本视图随气泡父级被缩放；GhostView 自身的 getScaleX() 恒为 1，
@@ -956,22 +1036,38 @@ public class CircularBubbleView extends FrameLayout {
             if (!shouldDraw) {
                 // 常态未放大且非子气泡，彻底移除硬件模糊滤镜，不绘制任何内容（录制空 DisplayList 消除残影）
                 clearBlurEffect();
+                hasDrawnGhost = false;
+                discardGhostNodeDisplayList();
                 return;
             }
             if (ghostLayer.getBlurRadiusPx() <= 0f) {
                 clearBlurEffect();
+                hasDrawnGhost = false;
+                discardGhostNodeDisplayList();
                 return;
             }
-            updateBlurEffect(ghostLayer.getBlurRadiusPx());
-            canvas.save();
-            canvas.translate(getWidth() / 2f, getHeight() / 2f);
-            canvas.scale(1f / s, 1f / s);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                ghostLayer.drawGhost(canvas, CircularBubbleView.this);
+                // API 33+：模糊仅由 IconGhostLayer 的 RenderNode 执行单次 GPU 模糊，移除 GhostView 重复 RenderEffect
+                clearBlurEffect();
+                canvas.save();
+                canvas.translate(getWidth() / 2f, getHeight() / 2f);
+                canvas.scale(1f / s, 1f / s);
+                hasDrawnGhost = ghostLayer.drawGhost(canvas, CircularBubbleView.this);
+                canvas.restore();
             } else {
-                ghostLayer.drawDirect(canvas, CircularBubbleView.this, s);
+                // API 31~32：先试绘重叠邻居，有重叠时启用 GhostView RenderEffect 模糊，无重叠时清滤镜
+                canvas.save();
+                canvas.translate(getWidth() / 2f, getHeight() / 2f);
+                canvas.scale(1f / s, 1f / s);
+                boolean drawn = ghostLayer.drawDirect(canvas, CircularBubbleView.this, s);
+                canvas.restore();
+                hasDrawnGhost = drawn;
+                if (drawn) {
+                    updateBlurEffect(ghostLayer.getBlurRadiusPx());
+                } else {
+                    clearBlurEffect();
+                }
             }
-            canvas.restore();
         }
     }
 }

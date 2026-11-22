@@ -144,6 +144,12 @@ import java.util.UUID
  * 配置包导入导出启动器以及全局对话框。
  */
 
+private class PersistTracker {
+    var debounceJob: kotlinx.coroutines.Job? = null
+    var hasPending: Boolean = false
+    var pendingWriteShortcuts: Boolean = false
+}
+
 @Composable
 fun HyperOpenApp(
     activity: MainActivity? = null,
@@ -299,11 +305,186 @@ fun HyperOpenApp(
 
     // ── 配置导入 / 导出：SAF 选文件，主线程先拍快照，读写与解析都在 IO 线程 ──
     val configScope = rememberCoroutineScope()
+    val persistTracker = remember { PersistTracker() }
+
+    fun persist(writeShortcuts: Boolean = true) {
+        persistTracker.debounceJob?.cancel()
+        persistTracker.debounceJob = null
+        val needShortcuts = writeShortcuts || persistTracker.pendingWriteShortcuts
+        persistTracker.hasPending = false
+        persistTracker.pendingWriteShortcuts = false
+
+        val c = HyperOpenConfig.loadFromApp(ctx, needShortcuts)
+        c.materialStyle = materialStyle
+        c.offsetY = offsetY.toInt()
+        c.regionDiameter = regionDiameter.toInt()
+        c.showRegionBg = showRegionBg
+        c.showHeaderPill = showHeaderPill
+        c.showHeaderPillBg = showHeaderPillBg
+        c.headerTopMargin = headerTopMargin.toInt()
+        c.headerTitleSize = headerTitleSize.toInt()
+        c.headerSubtitleSize = headerSubtitleSize.toInt()
+        c.headerBlurRadius = headerBlurRadius.toInt()
+        c.headerTextCentered = headerTextCentered
+        c.iconSize = iconSize.toInt()
+        c.maxIconCount = maxIconCount.toInt()
+        c.layoutStyle = layoutStyle
+        c.stockSystemRegion = stockSystemRegion
+        c.ringSectorMode = ringSectorMode
+        c.sectorLineColor = sectorLineColor
+        c.sectorLineAlpha = sectorLineAlpha
+        c.sectorDashLength = sectorDashLength.toInt()
+        c.sectorDashGap = sectorDashGap.toInt()
+        c.sectorLineWidth = sectorLineWidth
+        c.sectorHighlightEnabled = sectorHighlightEnabled
+        c.animDurationMs = animDurationMs.toInt()
+        c.panelExpandAnimType = panelExpandAnimType
+        c.panelExpandStaggerMs = panelExpandStaggerMs.toInt()
+        c.dismissAnimEnabled = dismissAnimEnabled
+        c.panelCollapseAnimType = panelCollapseAnimType
+        c.panelCollapseDurationMs = panelCollapseDurationMs.toInt()
+        c.panelCollapseStaggerMs = panelCollapseStaggerMs.toInt()
+        c.panelSelectedPopScale = panelSelectedPopScale
+        c.globalHintColorMode = globalHintColorMode
+        c.globalHintCustomColor = globalHintCustomColor
+        c.defaultHintTextStroke = defaultHintTextStroke.toInt()
+        c.defaultHintTextShadow = defaultHintTextShadow.toInt()
+        c.defaultHintTextWeight = defaultHintTextWeight
+        c.defaultHintTextLetterSpacing = defaultHintTextLetterSpacing
+        c.defaultShowHintTitle = defaultShowHintTitle
+        c.defaultShowHintSubtitle = defaultShowHintSubtitle
+        c.folderHoverDelayMs = folderHoverDelayMs.toInt()
+        c.folderChildDisplayRangeScale = folderChildDisplayRangeScale
+        c.folderChildDirectionMode = folderChildDirectionMode
+        c.folderChildDirectionOffsetDeg = folderChildDirectionOffsetDeg
+        c.folderChildOrderMode = folderChildOrderMode
+        c.folderChildMinGapDp = folderChildMinGapDp.toInt()
+        c.folderChildSizeScale = folderChildSizeScale
+        c.folderChildExpandAnimType = folderChildExpandAnimType
+        c.folderChildExpandDurationMs = folderChildExpandDurationMs.toInt()
+        c.folderChildExpandStaggerMs = folderChildExpandStaggerMs.toInt()
+        c.folderChildCollapseAnimType = folderChildCollapseAnimType
+        c.folderChildCollapseDurationMs = folderChildCollapseDurationMs.toInt()
+        c.folderChildCollapseStaggerMs = folderChildCollapseStaggerMs.toInt()
+        c.folderChildStartScale = folderChildStartScale
+        c.folderChildOvershoot = folderChildOvershoot
+        c.maxScale = maxScale
+        c.influenceRadius = influenceRadius.toInt()
+        c.iconAlpha = iconAlpha
+        c.fisheyeZoomAlpha = fisheyeZoomAlpha
+        c.fisheyeOtherAlpha = fisheyeOtherAlpha
+        c.iconCornerRadius = iconCornerRadius.toInt().coerceIn(0, 50)
+        c.fullscreenBlurMaskAlpha = fullscreenBlurMaskAlpha
+        c.fullscreenDimAlpha = fullscreenDimAlpha
+        c.headerDimAlpha = headerDimAlpha
+        c.regionDimAlpha = regionDimAlpha
+        c.bubbleDimAlpha = bubbleDimAlpha
+        c.showDelayMs = showDelayMs.toInt()
+        c.disableSystemEnterAnim = disableSystemEnterAnim
+        c.faceUnlockQuickOpen = faceUnlockQuickOpen
+        c.bleUnlockQuickOpen = bleUnlockQuickOpen
+        c.hapticEnabled = hapticEnabled
+        c.hapticStrength = hapticStrength.toInt()
+        c.hapticDurationMs = hapticDurationMs.toInt()
+        c.hapticMode = hapticMode
+        c.hapticStockWaveExpand = hapticStockWaveExpand
+        c.hapticBrakePulse = hapticBrakePulse
+        c.hapticDoubleGapMs = hapticDoubleGapMs.toInt()
+        c.hapticSlideEnabled = hapticSlideEnabled
+        c.hapticSlideStrength = hapticSlideStrength.toInt()
+        c.hapticSlideDurationMs = hapticSlideDurationMs.toInt()
+        c.hapticSlideMode = hapticSlideMode
+        c.hapticStockWaveSlide = hapticStockWaveSlide
+        c.hapticSlideBrakePulse = hapticSlideBrakePulse
+        c.hapticSlideDoubleGapMs = hapticSlideDoubleGapMs.toInt()
+        c.regionBlurRadius = regionBlurRadius.toInt()
+        c.iconSpacingOffset = iconSpacingOffset.toInt()
+        c.showBubbleBg = showBubbleBg
+        c.bubblePaddingPercent = bubblePaddingPercent.toInt()
+        c.bubbleBlurRadius = bubbleBlurRadius.toInt()
+        c.glyphPadEnabled = glyphPadEnabled
+        c.glyphPadColor = glyphPadColor
+        c.glyphPadMode = glyphPadMode
+        c.glassPreset = glassPreset
+        c.glassRefractIor = glassRefractIor
+        c.glassThickness = glassThickness
+        c.glassSpecular = glassSpecular
+        c.glassMatteAlpha = glassMatteAlpha
+        c.glassBorderLight = glassBorderLight
+        c.glassBackgroundSaturation = glassBackgroundSaturation
+        c.glassBackgroundBrightness = glassBackgroundBrightness
+        c.glassBackgroundBurn = glassBackgroundBurn
+        c.glassMatteWhiteMix = glassMatteWhiteMix
+        c.glassMatteColorMix = glassMatteColorMix
+        c.glassMatteColorPower = glassMatteColorPower
+        c.glassEdgeRange = glassEdgeRange
+        c.glassEdgePower = glassEdgePower
+        c.glassReflectOffset = glassReflectOffset
+        c.globalBlurRadius = globalBlurRadius.toInt()
+        c.globalDimAlpha = globalDimAlpha
+        c.bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal
+        c.regionMaterialFollowGlobal = regionMaterialFollowGlobal
+        c.headerMaterialFollowGlobal = headerMaterialFollowGlobal
+        c.bubbleGlassMatteAlpha = bubbleGlassMatteAlpha
+        c.regionGlassMatteAlpha = regionGlassMatteAlpha
+        c.headerGlassMatteAlpha = headerGlassMatteAlpha
+        c.themeMode = themeMode
+        c.monetColors = monetColors
+        c.barBlur = barBlur
+        c.floatingNavBar = floatingNavBar
+        c.predictiveBack = predictiveBack
+        if (needShortcuts) {
+            c.shortcuts = ArrayList(shortcuts)
+        }
+        c.save(ctx, needShortcuts)
+        configRevision++
+    }
+
+    /** 离散开关/模式点击：取消待执行防抖并以 writeShortcuts=false 立即落盘（跳过快捷项 JSON 重序列化） */
+    fun persistParamsImmediate() {
+        persist(writeShortcuts = false)
+    }
+
+    /** 高频滑块拖动：180ms 防抖合并落盘，且跳过未变 shortcuts_json 重序列化 */
+    fun persistParamsDebounced() {
+        persistTracker.hasPending = true
+        persistTracker.debounceJob?.cancel()
+        persistTracker.debounceJob = configScope.launch {
+            kotlinx.coroutines.delay(180L)
+            if (persistTracker.hasPending) {
+                persist(writeShortcuts = false)
+            }
+        }
+    }
+
+    /** 立即冲刷尚未触发的防抖持久化任务（页面切换、生命周期暂停、配置档案读写前调用） */
+    fun flushPendingPersist() {
+        if (persistTracker.hasPending) {
+            persist(writeShortcuts = persistTracker.pendingWriteShortcuts)
+        }
+    }
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE ||
+                event == androidx.lifecycle.Lifecycle.Event.ON_STOP
+            ) {
+                flushPendingPersist()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            flushPendingPersist()
+        }
+    }
 
     val exportProfilesLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
         if (uri != null) {
+            flushPendingPersist()
             val targetIds = pendingExportTargetIdsCsv
                 ?.split("|")
                 ?.filter { it.isNotEmpty() }
@@ -351,6 +532,7 @@ fun HyperOpenApp(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
+            flushPendingPersist()
             configScope.launch(Dispatchers.IO) {
                 val preview = runCatching {
                     val text = ConfigBackup.readFrom(ctx, uri)
@@ -497,129 +679,11 @@ fun HyperOpenApp(
         }
     }
 
-    fun persist() {
-        val c = HyperOpenConfig.loadFromApp(ctx)
-        c.materialStyle = materialStyle
-        c.offsetY = offsetY.toInt()
-        c.regionDiameter = regionDiameter.toInt()
-        c.showRegionBg = showRegionBg
-        c.showHeaderPill = showHeaderPill
-        c.showHeaderPillBg = showHeaderPillBg
-        c.headerTopMargin = headerTopMargin.toInt()
-        c.headerTitleSize = headerTitleSize.toInt()
-        c.headerSubtitleSize = headerSubtitleSize.toInt()
-        c.headerBlurRadius = headerBlurRadius.toInt()
-        c.headerTextCentered = headerTextCentered
-        c.iconSize = iconSize.toInt()
-        c.maxIconCount = maxIconCount.toInt()
-        c.layoutStyle = layoutStyle
-        c.stockSystemRegion = stockSystemRegion
-        c.ringSectorMode = ringSectorMode
-        c.sectorLineColor = sectorLineColor
-        c.sectorLineAlpha = sectorLineAlpha
-        c.sectorDashLength = sectorDashLength.toInt()
-        c.sectorDashGap = sectorDashGap.toInt()
-        c.sectorLineWidth = sectorLineWidth
-        c.sectorHighlightEnabled = sectorHighlightEnabled
-        c.animDurationMs = animDurationMs.toInt()
-        c.panelExpandAnimType = panelExpandAnimType
-        c.panelExpandStaggerMs = panelExpandStaggerMs.toInt()
-        c.dismissAnimEnabled = dismissAnimEnabled
-        c.panelCollapseAnimType = panelCollapseAnimType
-        c.panelCollapseDurationMs = panelCollapseDurationMs.toInt()
-        c.panelCollapseStaggerMs = panelCollapseStaggerMs.toInt()
-        c.panelSelectedPopScale = panelSelectedPopScale
-        c.globalHintColorMode = globalHintColorMode
-        c.globalHintCustomColor = globalHintCustomColor
-        c.defaultHintTextStroke = defaultHintTextStroke.toInt()
-        c.defaultHintTextShadow = defaultHintTextShadow.toInt()
-        c.defaultHintTextWeight = defaultHintTextWeight
-        c.defaultHintTextLetterSpacing = defaultHintTextLetterSpacing
-        c.defaultShowHintTitle = defaultShowHintTitle
-        c.defaultShowHintSubtitle = defaultShowHintSubtitle
-        c.folderHoverDelayMs = folderHoverDelayMs.toInt()
-        c.folderChildDisplayRangeScale = folderChildDisplayRangeScale
-        c.folderChildDirectionMode = folderChildDirectionMode
-        c.folderChildDirectionOffsetDeg = folderChildDirectionOffsetDeg
-        c.folderChildOrderMode = folderChildOrderMode
-        c.folderChildMinGapDp = folderChildMinGapDp.toInt()
-        c.folderChildSizeScale = folderChildSizeScale
-        c.folderChildExpandAnimType = folderChildExpandAnimType
-        c.folderChildExpandDurationMs = folderChildExpandDurationMs.toInt()
-        c.folderChildExpandStaggerMs = folderChildExpandStaggerMs.toInt()
-        c.folderChildCollapseAnimType = folderChildCollapseAnimType
-        c.folderChildCollapseDurationMs = folderChildCollapseDurationMs.toInt()
-        c.folderChildCollapseStaggerMs = folderChildCollapseStaggerMs.toInt()
-        c.folderChildStartScale = folderChildStartScale
-        c.folderChildOvershoot = folderChildOvershoot
-        c.maxScale = maxScale
-        c.influenceRadius = influenceRadius.toInt()
-        c.iconAlpha = iconAlpha
-        c.fisheyeZoomAlpha = fisheyeZoomAlpha
-        c.fisheyeOtherAlpha = fisheyeOtherAlpha
-        c.iconCornerRadius = iconCornerRadius.toInt().coerceIn(0, 50)
-        c.fullscreenBlurMaskAlpha = fullscreenBlurMaskAlpha
-        c.fullscreenDimAlpha = fullscreenDimAlpha
-        c.headerDimAlpha = headerDimAlpha
-        c.regionDimAlpha = regionDimAlpha
-        c.bubbleDimAlpha = bubbleDimAlpha
-        c.showDelayMs = showDelayMs.toInt()
-        c.disableSystemEnterAnim = disableSystemEnterAnim
-        c.faceUnlockQuickOpen = faceUnlockQuickOpen
-        c.bleUnlockQuickOpen = bleUnlockQuickOpen
-        c.hapticEnabled = hapticEnabled
-        c.hapticStrength = hapticStrength.toInt()
-        c.hapticDurationMs = hapticDurationMs.toInt()
-        c.hapticMode = hapticMode
-        c.hapticStockWaveExpand = hapticStockWaveExpand
-        c.hapticBrakePulse = hapticBrakePulse
-        c.hapticDoubleGapMs = hapticDoubleGapMs.toInt()
-        c.hapticSlideEnabled = hapticSlideEnabled
-        c.hapticSlideStrength = hapticSlideStrength.toInt()
-        c.hapticSlideDurationMs = hapticSlideDurationMs.toInt()
-        c.hapticSlideMode = hapticSlideMode
-        c.hapticStockWaveSlide = hapticStockWaveSlide
-        c.hapticSlideBrakePulse = hapticSlideBrakePulse
-        c.hapticSlideDoubleGapMs = hapticSlideDoubleGapMs.toInt()
-        c.regionBlurRadius = regionBlurRadius.toInt()
-        c.iconSpacingOffset = iconSpacingOffset.toInt()
-        c.showBubbleBg = showBubbleBg
-        c.bubblePaddingPercent = bubblePaddingPercent.toInt()
-        c.bubbleBlurRadius = bubbleBlurRadius.toInt()
-        c.glyphPadEnabled = glyphPadEnabled
-        c.glyphPadColor = glyphPadColor
-        c.glyphPadMode = glyphPadMode
-        c.glassPreset = glassPreset
-        c.glassRefractIor = glassRefractIor
-        c.glassThickness = glassThickness
-        c.glassSpecular = glassSpecular
-        c.glassMatteAlpha = glassMatteAlpha
-        c.glassBorderLight = glassBorderLight
-        c.glassBackgroundSaturation = glassBackgroundSaturation
-        c.glassBackgroundBrightness = glassBackgroundBrightness
-        c.glassBackgroundBurn = glassBackgroundBurn
-        c.glassMatteWhiteMix = glassMatteWhiteMix
-        c.glassMatteColorMix = glassMatteColorMix
-        c.glassMatteColorPower = glassMatteColorPower
-        c.glassEdgeRange = glassEdgeRange
-        c.glassEdgePower = glassEdgePower
-        c.glassReflectOffset = glassReflectOffset
-        c.globalBlurRadius = globalBlurRadius.toInt()
-        c.globalDimAlpha = globalDimAlpha
-        c.bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal
-        c.regionMaterialFollowGlobal = regionMaterialFollowGlobal
-        c.headerMaterialFollowGlobal = headerMaterialFollowGlobal
-        c.bubbleGlassMatteAlpha = bubbleGlassMatteAlpha
-        c.regionGlassMatteAlpha = regionGlassMatteAlpha
-        c.headerGlassMatteAlpha = headerGlassMatteAlpha
-        c.themeMode = themeMode
-        c.monetColors = monetColors
-        c.barBlur = barBlur
-        c.floatingNavBar = floatingNavBar
-        c.predictiveBack = predictiveBack
-        c.shortcuts = ArrayList(shortcuts)
-        c.save(ctx)
-        configRevision++
+    // 切换底栏 page 或二级页 subPage 时强制冲刷待执行的防抖持久化，确保绝不丢失最后一次滑块修改
+    DisposableEffect(page, subPage) {
+        onDispose {
+            flushPendingPersist()
+        }
     }
 
     val shortcutsTreeState = rememberShortcutsTreeState(shortcuts = shortcuts, onShortcutsChanged = { persist() })
@@ -629,7 +693,7 @@ fun HyperOpenApp(
         val cap = computeLayoutCapacity()
         if (maxIconCount > cap) {
             maxIconCount = cap.toFloat()
-            persist()
+            persistParamsImmediate()
         }
     }
 
@@ -773,6 +837,7 @@ fun HyperOpenApp(
     }
 
     fun createConfigProfile(name: String) {
+        flushPendingPersist()
         persist()
         configScope.launch(Dispatchers.IO) {
             val outcome = runCatching {
@@ -806,6 +871,7 @@ fun HyperOpenApp(
         backupCurrentFirst: Boolean,
     ) {
         val activeSnapshotName = configProfiles.firstOrNull { it.id == activeConfigProfileId }?.name
+        flushPendingPersist()
         if (backupCurrentFirst) {
             persist()
         }
@@ -871,7 +937,7 @@ fun HyperOpenApp(
                             val cap = computeLayoutCapacity()
                             if (maxIconCount > cap) {
                                 maxIconCount = cap.toFloat()
-                                persist()
+                                persistParamsImmediate()
                                 true
                             } else {
                                 false
@@ -919,6 +985,7 @@ fun HyperOpenApp(
         preserveSoftGlassMetadata: Boolean,
     ) {
         val isTargetActive = profile.id == activeConfigProfileId
+        flushPendingPersist()
         persist()
         configScope.launch(Dispatchers.IO) {
             val outcome = runCatching {
@@ -1031,6 +1098,7 @@ fun HyperOpenApp(
         includeShortcuts: Boolean,
         exportCurrentIfEmpty: Boolean,
     ) {
+        flushPendingPersist()
         pendingExportTargetIdsCsv = targetIds?.joinToString("|")
         pendingExportIncludeShortcuts = includeShortcuts
         pendingExportCurrentLive = exportCurrentIfEmpty
@@ -1157,7 +1225,7 @@ fun HyperOpenApp(
             applyAppUiPrefs = false,
         )
         // 恢复默认参数：保留现有快捷项目列表与 App 主题/底栏偏好不变，仅重置外观、几何、物理、震动与等待时间等面板参数
-        persist()
+        persistParamsImmediate()
     }
 
     // 拦截系统返回键与手势返回：在二级页或多选时优先处理
@@ -1235,7 +1303,7 @@ fun HyperOpenApp(
         // 跟随全局开关、全局模糊/压暗与气泡磨砂浓度变化时，列表卡片的气泡材质必须同步刷新
         bubbleMaterialFollowGlobal, globalBlurRadius, globalDimAlpha, bubbleGlassMatteAlpha, bubbleBlurRadius
     ) {
-        HyperOpenConfig.loadFromApp(ctx).apply {
+        HyperOpenConfig.loadFromApp(ctx, false).apply {
             this.materialStyle = materialStyle
             this.bubbleDimAlpha = bubbleDimAlpha
             this.iconCornerRadius = iconCornerRadius.toInt().coerceIn(0, 50)
@@ -1349,7 +1417,10 @@ fun HyperOpenApp(
                     if (subPage == 0 && page == 0) {
                         ParamsTabBar(
                             selectedIndex = paramsTab,
-                            onSelected = { paramsTab = it },
+                            onSelected = {
+                                flushPendingPersist()
+                                paramsTab = it
+                            },
                         )
                     }
                 }
@@ -1367,7 +1438,10 @@ fun HyperOpenApp(
                         shortcutsTreeState = shortcutsTreeState,
                         configProfiles = configProfiles,
                         configProfileSelectionState = configProfileSelectionState,
-                        onPageSelect = { page = it },
+                        onPageSelect = {
+                            flushPendingPersist()
+                            page = it
+                        },
                         onConfigProfileCopy = ::copySelectedConfigProfiles,
                     )
                 }
@@ -1385,11 +1459,11 @@ fun HyperOpenApp(
                             contentPadding = pagePadding,
                             lazyListState = themeListState,
                             themeMode = themeMode,
-                            onThemeMode = { themeMode = it; persist() },
+                            onThemeMode = { themeMode = it; persistParamsImmediate() },
                             monet = monetColors,
-                            onMonet = { monetColors = it; persist() },
+                            onMonet = { monetColors = it; persistParamsImmediate() },
                             floatingNavBar = floatingNavBar,
-                            onFloatingNavBar = { floatingNavBar = it; persist() },
+                            onFloatingNavBar = { floatingNavBar = it; persistParamsImmediate() },
                         )
                     }
                     2 -> {
@@ -1425,7 +1499,7 @@ fun HyperOpenApp(
                         // 整段预览会话抽为局部组合 lambda（编译为独立合成方法，避免 Scaffold content 方法体超 64KB）
                         val previewContent: @Composable () -> Unit = {
                         // 指纹快捷方式整体预览与长按自由排版界面
-                        val currentConfig = HyperOpenConfig.loadFromApp(ctx).apply {
+                        val currentConfig = HyperOpenConfig.loadFromApp(ctx, false).apply {
                             this.materialStyle = materialStyle
                             this.offsetY = offsetY.toInt()
                             this.regionDiameter = regionDiameter.toInt()
@@ -1631,7 +1705,7 @@ fun HyperOpenApp(
                                         onPanelVisibleChanged = { previewPanelVisible = it },
                                         onHeaderTopMarginChanged = {
                                             headerTopMargin = it
-                                            persist()
+                                            persistParamsImmediate()
                                         },
                                     ).also { previewViewRef = it }
                                 },
@@ -1654,35 +1728,35 @@ fun HyperOpenApp(
                             contentPadding = pagePadding,
                             lazyListState = softGlassListState,
                             glassPreset = glassPreset,
-                            onGlassPreset = { glassPreset = it; persist() },
+                            onGlassPreset = { glassPreset = it; persistParamsImmediate() },
                             glassRefractIor = glassRefractIor,
-                            onGlassRefractIor = { glassRefractIor = it; persist() },
+                            onGlassRefractIor = { glassRefractIor = it; persistParamsDebounced() },
                             glassThickness = glassThickness,
-                            onGlassThickness = { glassThickness = it; persist() },
+                            onGlassThickness = { glassThickness = it; persistParamsDebounced() },
                             glassSpecular = glassSpecular,
-                            onGlassSpecular = { glassSpecular = it; persist() },
+                            onGlassSpecular = { glassSpecular = it; persistParamsDebounced() },
                             glassMatteAlpha = glassMatteAlpha,
-                            onGlassMatteAlpha = { glassMatteAlpha = it; persist() },
+                            onGlassMatteAlpha = { glassMatteAlpha = it; persistParamsDebounced() },
                             glassBorderLight = glassBorderLight,
-                            onGlassBorderLight = { glassBorderLight = it; persist() },
+                            onGlassBorderLight = { glassBorderLight = it; persistParamsDebounced() },
                             glassBackgroundSaturation = glassBackgroundSaturation,
-                            onGlassBackgroundSaturation = { glassBackgroundSaturation = it; persist() },
+                            onGlassBackgroundSaturation = { glassBackgroundSaturation = it; persistParamsDebounced() },
                             glassBackgroundBrightness = glassBackgroundBrightness,
-                            onGlassBackgroundBrightness = { glassBackgroundBrightness = it; persist() },
+                            onGlassBackgroundBrightness = { glassBackgroundBrightness = it; persistParamsDebounced() },
                             glassBackgroundBurn = glassBackgroundBurn,
-                            onGlassBackgroundBurn = { glassBackgroundBurn = it; persist() },
+                            onGlassBackgroundBurn = { glassBackgroundBurn = it; persistParamsDebounced() },
                             glassMatteWhiteMix = glassMatteWhiteMix,
-                            onGlassMatteWhiteMix = { glassMatteWhiteMix = it; persist() },
+                            onGlassMatteWhiteMix = { glassMatteWhiteMix = it; persistParamsDebounced() },
                             glassMatteColorMix = glassMatteColorMix,
-                            onGlassMatteColorMix = { glassMatteColorMix = it; persist() },
+                            onGlassMatteColorMix = { glassMatteColorMix = it; persistParamsDebounced() },
                             glassMatteColorPower = glassMatteColorPower,
-                            onGlassMatteColorPower = { glassMatteColorPower = it; persist() },
+                            onGlassMatteColorPower = { glassMatteColorPower = it; persistParamsDebounced() },
                             glassEdgeRange = glassEdgeRange,
-                            onGlassEdgeRange = { glassEdgeRange = it; persist() },
+                            onGlassEdgeRange = { glassEdgeRange = it; persistParamsDebounced() },
                             glassEdgePower = glassEdgePower,
-                            onGlassEdgePower = { glassEdgePower = it; persist() },
+                            onGlassEdgePower = { glassEdgePower = it; persistParamsDebounced() },
                             glassReflectOffset = glassReflectOffset,
-                            onGlassReflectOffset = { glassReflectOffset = it; persist() },
+                            onGlassReflectOffset = { glassReflectOffset = it; persistParamsDebounced() },
                             onResetToDefaultPreset = {
                                 glassPreset = HyperOpenConfig.GLASS_PRESET_DEFAULT
                                 glassRefractIor = 1.12f
@@ -1699,7 +1773,7 @@ fun HyperOpenApp(
                                 glassEdgeRange = 50f
                                 glassEdgePower = 4f
                                 glassReflectOffset = 600f
-                                persist()
+                                persistParamsImmediate()
                             },
                         )
                     }
@@ -1708,13 +1782,13 @@ fun HyperOpenApp(
                             contentPadding = pagePadding,
                             lazyListState = blurMaterialListState,
                             globalBlurRadius = globalBlurRadius,
-                            onGlobalBlurRadius = { globalBlurRadius = it; persist() },
+                            onGlobalBlurRadius = { globalBlurRadius = it; persistParamsDebounced() },
                             globalDimAlpha = globalDimAlpha,
-                            onGlobalDimAlpha = { globalDimAlpha = it; persist() },
+                            onGlobalDimAlpha = { globalDimAlpha = it; persistParamsDebounced() },
                             onResetToDefaults = {
                                 globalBlurRadius = 25f
                                 globalDimAlpha = 0f
-                                persist()
+                                persistParamsImmediate()
                             },
                         )
                     }
@@ -1723,57 +1797,57 @@ fun HyperOpenApp(
                         val paramsPageContent: @Composable () -> Unit = {
                             fun buildPanelMotionSettings() = PanelMotionSettings(
                                 animDurationMs = animDurationMs,
-                                onAnimDurationMs = { animDurationMs = it; persist() },
+                                onAnimDurationMs = { animDurationMs = it; persistParamsDebounced() },
                                 expandAnimType = panelExpandAnimType,
-                                onExpandAnimType = { panelExpandAnimType = it; persist() },
+                                onExpandAnimType = { panelExpandAnimType = it; persistParamsImmediate() },
                                 expandStaggerMs = panelExpandStaggerMs,
-                                onExpandStaggerMs = { panelExpandStaggerMs = it; persist() },
+                                onExpandStaggerMs = { panelExpandStaggerMs = it; persistParamsDebounced() },
                                 dismissEnabled = dismissAnimEnabled,
-                                onDismissEnabled = { dismissAnimEnabled = it; persist() },
+                                onDismissEnabled = { dismissAnimEnabled = it; persistParamsImmediate() },
                                 collapseAnimType = panelCollapseAnimType,
-                                onCollapseAnimType = { panelCollapseAnimType = it; persist() },
+                                onCollapseAnimType = { panelCollapseAnimType = it; persistParamsImmediate() },
                                 collapseDurationMs = panelCollapseDurationMs,
-                                onCollapseDurationMs = { panelCollapseDurationMs = it; persist() },
+                                onCollapseDurationMs = { panelCollapseDurationMs = it; persistParamsDebounced() },
                                 collapseStaggerMs = panelCollapseStaggerMs,
-                                onCollapseStaggerMs = { panelCollapseStaggerMs = it; persist() },
+                                onCollapseStaggerMs = { panelCollapseStaggerMs = it; persistParamsDebounced() },
                                 selectedPopScale = panelSelectedPopScale,
-                                onSelectedPopScale = { panelSelectedPopScale = it; persist() },
+                                onSelectedPopScale = { panelSelectedPopScale = it; persistParamsDebounced() },
                             )
                             fun buildFolderLayoutSettings() = FolderLayoutSettings(
                                 iconSize = iconSize,
-                                onIconSize = { iconSize = it; clampIconCountToCapacity(); persist() },
+                                onIconSize = { iconSize = it; clampIconCountToCapacity(); persistParamsDebounced() },
                                 displayRangeScale = folderChildDisplayRangeScale,
-                                onDisplayRangeScale = { folderChildDisplayRangeScale = it; persist() },
+                                onDisplayRangeScale = { folderChildDisplayRangeScale = it; persistParamsDebounced() },
                                 directionMode = folderChildDirectionMode,
-                                onDirectionMode = { folderChildDirectionMode = it; persist() },
+                                onDirectionMode = { folderChildDirectionMode = it; persistParamsImmediate() },
                                 directionOffsetDeg = folderChildDirectionOffsetDeg,
-                                onDirectionOffsetDeg = { folderChildDirectionOffsetDeg = it; persist() },
+                                onDirectionOffsetDeg = { folderChildDirectionOffsetDeg = it; persistParamsDebounced() },
                                 minGapDp = folderChildMinGapDp,
-                                onMinGapDp = { folderChildMinGapDp = it; persist() },
+                                onMinGapDp = { folderChildMinGapDp = it; persistParamsDebounced() },
                                 sizeScale = folderChildSizeScale,
-                                onSizeScale = { folderChildSizeScale = it; persist() },
+                                onSizeScale = { folderChildSizeScale = it; persistParamsDebounced() },
                             )
                             fun buildFolderMotionSettings() = FolderMotionSettings(
                                 hoverDelayMs = folderHoverDelayMs,
-                                onHoverDelayMs = { folderHoverDelayMs = it; persist() },
+                                onHoverDelayMs = { folderHoverDelayMs = it; persistParamsDebounced() },
                                 expandAnimType = folderChildExpandAnimType,
-                                onExpandAnimType = { folderChildExpandAnimType = it; persist() },
+                                onExpandAnimType = { folderChildExpandAnimType = it; persistParamsImmediate() },
                                 expandDurationMs = folderChildExpandDurationMs,
-                                onExpandDurationMs = { folderChildExpandDurationMs = it; persist() },
+                                onExpandDurationMs = { folderChildExpandDurationMs = it; persistParamsDebounced() },
                                 expandStaggerMs = folderChildExpandStaggerMs,
-                                onExpandStaggerMs = { folderChildExpandStaggerMs = it; persist() },
+                                onExpandStaggerMs = { folderChildExpandStaggerMs = it; persistParamsDebounced() },
                                 collapseAnimType = folderChildCollapseAnimType,
-                                onCollapseAnimType = { folderChildCollapseAnimType = it; persist() },
+                                onCollapseAnimType = { folderChildCollapseAnimType = it; persistParamsImmediate() },
                                 collapseDurationMs = folderChildCollapseDurationMs,
-                                onCollapseDurationMs = { folderChildCollapseDurationMs = it; persist() },
+                                onCollapseDurationMs = { folderChildCollapseDurationMs = it; persistParamsDebounced() },
                                 collapseStaggerMs = folderChildCollapseStaggerMs,
-                                onCollapseStaggerMs = { folderChildCollapseStaggerMs = it; persist() },
+                                onCollapseStaggerMs = { folderChildCollapseStaggerMs = it; persistParamsDebounced() },
                                 orderMode = folderChildOrderMode,
-                                onOrderMode = { folderChildOrderMode = it; persist() },
+                                onOrderMode = { folderChildOrderMode = it; persistParamsImmediate() },
                                 startScale = folderChildStartScale,
-                                onStartScale = { folderChildStartScale = it; persist() },
+                                onStartScale = { folderChildStartScale = it; persistParamsDebounced() },
                                 overshoot = folderChildOvershoot,
-                                onOvershoot = { folderChildOvershoot = it; persist() },
+                                onOvershoot = { folderChildOvershoot = it; persistParamsDebounced() },
                             )
                             fun buildMaterialSurfaceSettings() = MaterialSurfaceSettings(
                                 materialStyle = materialStyle,
@@ -1788,102 +1862,102 @@ fun HyperOpenApp(
                                     } else {
                                         materialStyle = it
                                     }
-                                    persist()
+                                    persistParamsImmediate()
                                 },
-                                onOpenSoftGlassPage = { subPage = 5 },
-                                onOpenBlurMaterialPage = { subPage = 6 },
+                                onOpenSoftGlassPage = { flushPendingPersist(); subPage = 5 },
+                                onOpenBlurMaterialPage = { flushPendingPersist(); subPage = 6 },
                                 bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal,
-                                onBubbleMaterialFollowGlobal = { bubbleMaterialFollowGlobal = it; persist() },
+                                onBubbleMaterialFollowGlobal = { bubbleMaterialFollowGlobal = it; persistParamsImmediate() },
                                 regionMaterialFollowGlobal = regionMaterialFollowGlobal,
-                                onRegionMaterialFollowGlobal = { regionMaterialFollowGlobal = it; persist() },
+                                onRegionMaterialFollowGlobal = { regionMaterialFollowGlobal = it; persistParamsImmediate() },
                                 headerMaterialFollowGlobal = headerMaterialFollowGlobal,
-                                onHeaderMaterialFollowGlobal = { headerMaterialFollowGlobal = it; persist() },
+                                onHeaderMaterialFollowGlobal = { headerMaterialFollowGlobal = it; persistParamsImmediate() },
                                 bubbleGlassMatteAlpha = bubbleGlassMatteAlpha,
-                                onBubbleGlassMatteAlpha = { bubbleGlassMatteAlpha = it; persist() },
+                                onBubbleGlassMatteAlpha = { bubbleGlassMatteAlpha = it; persistParamsDebounced() },
                                 regionGlassMatteAlpha = regionGlassMatteAlpha,
-                                onRegionGlassMatteAlpha = { regionGlassMatteAlpha = it; persist() },
+                                onRegionGlassMatteAlpha = { regionGlassMatteAlpha = it; persistParamsDebounced() },
                                 headerGlassMatteAlpha = headerGlassMatteAlpha,
-                                onHeaderGlassMatteAlpha = { headerGlassMatteAlpha = it; persist() },
+                                onHeaderGlassMatteAlpha = { headerGlassMatteAlpha = it; persistParamsDebounced() },
                                 fullscreenBlurMaskAlpha = fullscreenBlurMaskAlpha,
-                                onFullscreenBlurMaskAlpha = { fullscreenBlurMaskAlpha = it; persist() },
+                                onFullscreenBlurMaskAlpha = { fullscreenBlurMaskAlpha = it; persistParamsDebounced() },
                                 fullscreenDimAlpha = fullscreenDimAlpha,
-                                onFullscreenDimAlpha = { fullscreenDimAlpha = it; persist() },
+                                onFullscreenDimAlpha = { fullscreenDimAlpha = it; persistParamsDebounced() },
                                 headerDimAlpha = headerDimAlpha,
-                                onHeaderDimAlpha = { headerDimAlpha = it; persist() },
+                                onHeaderDimAlpha = { headerDimAlpha = it; persistParamsDebounced() },
                                 regionDimAlpha = regionDimAlpha,
-                                onRegionDimAlpha = { regionDimAlpha = it; persist() },
+                                onRegionDimAlpha = { regionDimAlpha = it; persistParamsDebounced() },
                                 bubbleDimAlpha = bubbleDimAlpha,
-                                onBubbleDimAlpha = { bubbleDimAlpha = it; persist() },
+                                onBubbleDimAlpha = { bubbleDimAlpha = it; persistParamsDebounced() },
                                 regionBlurRadius = regionBlurRadius,
-                                onRegionBlurRadius = { regionBlurRadius = it; persist() },
+                                onRegionBlurRadius = { regionBlurRadius = it; persistParamsDebounced() },
                                 showBubbleBg = showBubbleBg,
-                                onShowBubbleBg = { showBubbleBg = it; persist() },
+                                onShowBubbleBg = { showBubbleBg = it; persistParamsImmediate() },
                                 bubblePaddingPercent = bubblePaddingPercent,
-                                onBubblePaddingPercent = { bubblePaddingPercent = it; persist() },
+                                onBubblePaddingPercent = { bubblePaddingPercent = it; persistParamsDebounced() },
                                 bubbleBlurRadius = bubbleBlurRadius,
-                                onBubbleBlurRadius = { bubbleBlurRadius = it; persist() },
+                                onBubbleBlurRadius = { bubbleBlurRadius = it; persistParamsDebounced() },
                             )
                             fun buildHeaderHintSettings() = HeaderHintSettings(
                                 showHeaderPill = showHeaderPill,
-                                onShowHeaderPill = { showHeaderPill = it; persist() },
+                                onShowHeaderPill = { showHeaderPill = it; persistParamsImmediate() },
                                 showHeaderPillBg = showHeaderPillBg,
-                                onShowHeaderPillBg = { showHeaderPillBg = it; persist() },
+                                onShowHeaderPillBg = { showHeaderPillBg = it; persistParamsImmediate() },
                                 headerTopMargin = headerTopMargin,
-                                onHeaderTopMargin = { headerTopMargin = it; persist() },
+                                onHeaderTopMargin = { headerTopMargin = it; persistParamsDebounced() },
                                 headerTitleSize = headerTitleSize,
-                                onHeaderTitleSize = { headerTitleSize = it; persist() },
+                                onHeaderTitleSize = { headerTitleSize = it; persistParamsDebounced() },
                                 headerSubtitleSize = headerSubtitleSize,
-                                onHeaderSubtitleSize = { headerSubtitleSize = it; persist() },
+                                onHeaderSubtitleSize = { headerSubtitleSize = it; persistParamsDebounced() },
                                 headerBlurRadius = headerBlurRadius,
-                                onHeaderBlurRadius = { headerBlurRadius = it; persist() },
+                                onHeaderBlurRadius = { headerBlurRadius = it; persistParamsDebounced() },
                                 headerTextCentered = headerTextCentered,
-                                onHeaderTextCentered = { headerTextCentered = it; persist() },
+                                onHeaderTextCentered = { headerTextCentered = it; persistParamsImmediate() },
                                 globalHintColorMode = globalHintColorMode,
-                                onGlobalHintColorMode = { globalHintColorMode = it; persist() },
+                                onGlobalHintColorMode = { globalHintColorMode = it; persistParamsImmediate() },
                                 globalHintCustomColor = globalHintCustomColor,
-                                onGlobalHintCustomColor = { globalHintCustomColor = it; persist() },
+                                onGlobalHintCustomColor = { globalHintCustomColor = it; persistParamsImmediate() },
                                 defaultHintTextStroke = defaultHintTextStroke,
-                                onDefaultHintTextStroke = { defaultHintTextStroke = it; persist() },
+                                onDefaultHintTextStroke = { defaultHintTextStroke = it; persistParamsDebounced() },
                                 defaultHintTextShadow = defaultHintTextShadow,
-                                onDefaultHintTextShadow = { defaultHintTextShadow = it; persist() },
+                                onDefaultHintTextShadow = { defaultHintTextShadow = it; persistParamsDebounced() },
                                 defaultHintTextWeight = defaultHintTextWeight,
-                                onDefaultHintTextWeight = { defaultHintTextWeight = it; persist() },
+                                onDefaultHintTextWeight = { defaultHintTextWeight = it; persistParamsImmediate() },
                                 defaultHintTextLetterSpacing = defaultHintTextLetterSpacing,
-                                onDefaultHintTextLetterSpacing = { defaultHintTextLetterSpacing = it; persist() },
+                                onDefaultHintTextLetterSpacing = { defaultHintTextLetterSpacing = it; persistParamsDebounced() },
                                 defaultShowHintTitle = defaultShowHintTitle,
-                                onDefaultShowHintTitle = { defaultShowHintTitle = it; persist() },
+                                onDefaultShowHintTitle = { defaultShowHintTitle = it; persistParamsImmediate() },
                                 defaultShowHintSubtitle = defaultShowHintSubtitle,
-                                onDefaultShowHintSubtitle = { defaultShowHintSubtitle = it; persist() },
+                                onDefaultShowHintSubtitle = { defaultShowHintSubtitle = it; persistParamsImmediate() },
                             )
                             fun buildHapticSettings() = HapticSettings(
                                 hapticEnabled = hapticEnabled,
-                                onHapticEnabled = { hapticEnabled = it; persist() },
+                                onHapticEnabled = { hapticEnabled = it; persistParamsImmediate() },
                                 hapticStrength = hapticStrength,
-                                onHapticStrength = { hapticStrength = it; persist() },
+                                onHapticStrength = { hapticStrength = it; persistParamsDebounced() },
                                 hapticDurationMs = hapticDurationMs,
-                                onHapticDurationMs = { hapticDurationMs = it; persist() },
+                                onHapticDurationMs = { hapticDurationMs = it; persistParamsDebounced() },
                                 hapticMode = hapticMode,
-                                onHapticMode = { hapticMode = it; persist() },
+                                onHapticMode = { hapticMode = it; persistParamsImmediate() },
                                 hapticSlideEnabled = hapticSlideEnabled,
-                                onHapticSlideEnabled = { hapticSlideEnabled = it; persist() },
+                                onHapticSlideEnabled = { hapticSlideEnabled = it; persistParamsImmediate() },
                                 hapticSlideStrength = hapticSlideStrength,
-                                onHapticSlideStrength = { hapticSlideStrength = it; persist() },
+                                onHapticSlideStrength = { hapticSlideStrength = it; persistParamsDebounced() },
                                 hapticSlideDurationMs = hapticSlideDurationMs,
-                                onHapticSlideDurationMs = { hapticSlideDurationMs = it; persist() },
+                                onHapticSlideDurationMs = { hapticSlideDurationMs = it; persistParamsDebounced() },
                                 hapticSlideMode = hapticSlideMode,
-                                onHapticSlideMode = { hapticSlideMode = it; persist() },
+                                onHapticSlideMode = { hapticSlideMode = it; persistParamsImmediate() },
                                 hapticStockWaveExpand = hapticStockWaveExpand,
-                                onHapticStockWaveExpand = { hapticStockWaveExpand = it; persist() },
+                                onHapticStockWaveExpand = { hapticStockWaveExpand = it; persistParamsImmediate() },
                                 hapticStockWaveSlide = hapticStockWaveSlide,
-                                onHapticStockWaveSlide = { hapticStockWaveSlide = it; persist() },
+                                onHapticStockWaveSlide = { hapticStockWaveSlide = it; persistParamsImmediate() },
                                 hapticBrakePulse = hapticBrakePulse,
-                                onHapticBrakePulse = { hapticBrakePulse = it; persist() },
+                                onHapticBrakePulse = { hapticBrakePulse = it; persistParamsImmediate() },
                                 hapticDoubleGapMs = hapticDoubleGapMs,
-                                onHapticDoubleGapMs = { hapticDoubleGapMs = it; persist() },
+                                onHapticDoubleGapMs = { hapticDoubleGapMs = it; persistParamsDebounced() },
                                 hapticSlideBrakePulse = hapticSlideBrakePulse,
-                                onHapticSlideBrakePulse = { hapticSlideBrakePulse = it; persist() },
+                                onHapticSlideBrakePulse = { hapticSlideBrakePulse = it; persistParamsImmediate() },
                                 hapticSlideDoubleGapMs = hapticSlideDoubleGapMs,
-                                onHapticSlideDoubleGapMs = { hapticSlideDoubleGapMs = it; persist() },
+                                onHapticSlideDoubleGapMs = { hapticSlideDoubleGapMs = it; persistParamsDebounced() },
                             )
                             ParamsPage(
                                 contentPadding = innerPadding,
@@ -1896,55 +1970,55 @@ fun HyperOpenApp(
                                 headerHint = buildHeaderHintSettings(),
                                 haptic = buildHapticSettings(),
                                 offsetY = offsetY,
-                                onOffsetY = { offsetY = it; persist() },
+                                onOffsetY = { offsetY = it; persistParamsDebounced() },
                                 regionDiameter = regionDiameter,
-                                onRegionDiameter = { regionDiameter = it; clampIconCountToCapacity(); persist() },
+                                onRegionDiameter = { regionDiameter = it; clampIconCountToCapacity(); persistParamsDebounced() },
                                 iconSpacingOffset = iconSpacingOffset,
-                                onIconSpacingOffset = { iconSpacingOffset = it; clampIconCountToCapacity(); persist() },
+                                onIconSpacingOffset = { iconSpacingOffset = it; clampIconCountToCapacity(); persistParamsDebounced() },
                                 showRegionBg = showRegionBg,
-                                onShowRegionBg = { showRegionBg = it; persist() },
+                                onShowRegionBg = { showRegionBg = it; persistParamsImmediate() },
                                 maxIconCount = maxIconCount,
-                                onMaxIconCount = { maxIconCount = it; persist() },
+                                onMaxIconCount = { maxIconCount = it; persistParamsDebounced() },
                                 iconCapacity = iconCapacity,
                                 enabledShortcutsCount = enabledShortcutsCount,
                                 layoutStyle = layoutStyle,
-                                onLayoutStyle = { layoutStyle = it; clampIconCountToCapacity(); persist() },
+                                onLayoutStyle = { layoutStyle = it; clampIconCountToCapacity(); persistParamsImmediate() },
                                 stockSystemRegion = stockSystemRegion,
-                                onStockSystemRegion = { stockSystemRegion = it; persist() },
+                                onStockSystemRegion = { stockSystemRegion = it; persistParamsImmediate() },
                                 ringSectorMode = ringSectorMode,
-                                onRingSectorMode = { ringSectorMode = it; persist() },
+                                onRingSectorMode = { ringSectorMode = it; persistParamsImmediate() },
                                 sectorLineColor = sectorLineColor,
-                                onSectorLineColor = { sectorLineColor = it; persist() },
+                                onSectorLineColor = { sectorLineColor = it; persistParamsImmediate() },
                                 sectorLineAlpha = sectorLineAlpha,
-                                onSectorLineAlpha = { sectorLineAlpha = it; persist() },
+                                onSectorLineAlpha = { sectorLineAlpha = it; persistParamsDebounced() },
                                 sectorDashLength = sectorDashLength,
-                                onSectorDashLength = { sectorDashLength = it; persist() },
+                                onSectorDashLength = { sectorDashLength = it; persistParamsDebounced() },
                                 sectorDashGap = sectorDashGap,
-                                onSectorDashGap = { sectorDashGap = it; persist() },
+                                onSectorDashGap = { sectorDashGap = it; persistParamsDebounced() },
                                 sectorLineWidth = sectorLineWidth,
-                                onSectorLineWidth = { sectorLineWidth = it; persist() },
+                                onSectorLineWidth = { sectorLineWidth = it; persistParamsDebounced() },
                                 sectorHighlightEnabled = sectorHighlightEnabled,
-                                onSectorHighlightEnabled = { sectorHighlightEnabled = it; persist() },
+                                onSectorHighlightEnabled = { sectorHighlightEnabled = it; persistParamsImmediate() },
                                 maxScale = maxScale,
-                                onMaxScale = { maxScale = it; persist() },
+                                onMaxScale = { maxScale = it; persistParamsDebounced() },
                                 influenceRadius = influenceRadius,
-                                onInfluenceRadius = { influenceRadius = it; persist() },
+                                onInfluenceRadius = { influenceRadius = it; persistParamsDebounced() },
                                 iconAlpha = iconAlpha,
-                                onIconAlpha = { iconAlpha = it; persist() },
+                                onIconAlpha = { iconAlpha = it; persistParamsDebounced() },
                                 fisheyeZoomAlpha = fisheyeZoomAlpha,
-                                onFisheyeZoomAlpha = { fisheyeZoomAlpha = it; persist() },
+                                onFisheyeZoomAlpha = { fisheyeZoomAlpha = it; persistParamsDebounced() },
                                 fisheyeOtherAlpha = fisheyeOtherAlpha,
-                                onFisheyeOtherAlpha = { fisheyeOtherAlpha = it; persist() },
+                                onFisheyeOtherAlpha = { fisheyeOtherAlpha = it; persistParamsDebounced() },
                                 iconCornerRadius = iconCornerRadius,
-                                onIconCornerRadius = { iconCornerRadius = it; persist() },
+                                onIconCornerRadius = { iconCornerRadius = it; persistParamsDebounced() },
                                 showDelayMs = showDelayMs,
-                                onShowDelayMs = { showDelayMs = it; persist() },
+                                onShowDelayMs = { showDelayMs = it; persistParamsDebounced() },
                                 disableSystemEnterAnim = disableSystemEnterAnim,
-                                onDisableSystemEnterAnim = { disableSystemEnterAnim = it; persist() },
+                                onDisableSystemEnterAnim = { disableSystemEnterAnim = it; persistParamsImmediate() },
                                 faceUnlockQuickOpen = faceUnlockQuickOpen,
-                                onFaceUnlockQuickOpen = { faceUnlockQuickOpen = it; persist() },
+                                onFaceUnlockQuickOpen = { faceUnlockQuickOpen = it; persistParamsImmediate() },
                                 bleUnlockQuickOpen = bleUnlockQuickOpen,
-                                onBleUnlockQuickOpen = { bleUnlockQuickOpen = it; persist() },
+                                onBleUnlockQuickOpen = { bleUnlockQuickOpen = it; persistParamsImmediate() },
                             )
                         }
                         val pagesContent: @Composable () -> Unit = {
@@ -2047,6 +2121,7 @@ fun HyperOpenApp(
                                     onApplyProfile = ::applyConfigProfile,
                                     onSyncProfile = ::syncConfigProfile,
                                     onRequestPickImportFile = {
+                                        flushPendingPersist()
                                         importProfilesLauncher.launch(
                                             arrayOf(
                                                 "application/json",

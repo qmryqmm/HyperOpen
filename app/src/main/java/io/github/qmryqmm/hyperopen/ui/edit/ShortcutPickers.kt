@@ -635,8 +635,121 @@ data class AppInfoItem(
     val packageName: String,
     val appName: String,
     val isSystem: Boolean,
-    val icon: android.graphics.drawable.Drawable?,
+    val icon: android.graphics.drawable.Drawable? = null,
 )
+
+/**
+ * 进程内轻量应用元数据与图标缩略图缓存：
+ * 1) 扫描应用列表时仅缓存包名、应用名、是否系统应用等轻量元数据，不一次性预加载 300+ 个应用的 Drawable 驻留内存；
+ * 2) 列表可见行图标按需在 Dispatchers.IO 加载并渲染为 96×96 ImageBitmap，通过 LruCache 复用，消除主线程组合期同步绘图卡顿。
+ */
+private object InstalledAppsCache {
+    private const val CACHE_TTL_MS = 60_000L
+    private const val ICON_THUMB_SIZE_PX = 96
+    private val lock = Any()
+
+    @Volatile
+    private var cachedApps: List<AppInfoItem>? = null
+
+    @Volatile
+    private var cachedAtMs: Long = 0L
+
+    private val iconThumbCache =
+        object : android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(100) {}
+
+    fun getCachedAppsIfFresh(): List<AppInfoItem>? {
+        val list = cachedApps ?: return null
+        if (System.currentTimeMillis() - cachedAtMs > CACHE_TTL_MS) return null
+        return list
+    }
+
+    fun loadInstalledApps(context: Context): List<AppInfoItem> {
+        getCachedAppsIfFresh()?.let { return it }
+        val pm = context.packageManager
+        val installedPackages = pm.getInstalledPackages(PackageManager.GET_META_DATA)
+        val list = installedPackages.mapNotNull { pi ->
+            val appInfo = pi.applicationInfo ?: return@mapNotNull null
+            val pkg = pi.packageName
+            val name = try {
+                appInfo.loadLabel(pm).toString().ifBlank { pkg }
+            } catch (_: Throwable) {
+                pkg
+            }
+            val isSys = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
+                (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+            AppInfoItem(pkg, name, isSys)
+        }.distinctBy { it.packageName }
+            .sortedWith(compareBy({ it.appName.lowercase() }, { it.packageName }))
+        synchronized(lock) {
+            cachedApps = list
+            cachedAtMs = System.currentTimeMillis()
+        }
+        return list
+    }
+
+    fun getCachedIconThumb(packageName: String): androidx.compose.ui.graphics.ImageBitmap? {
+        synchronized(iconThumbCache) {
+            return iconThumbCache.get(packageName)
+        }
+    }
+
+    fun loadIconThumb(context: Context, packageName: String): androidx.compose.ui.graphics.ImageBitmap? {
+        getCachedIconThumb(packageName)?.let { return it }
+        return try {
+            val drawable = context.packageManager.getApplicationIcon(packageName)
+            val bmp = Bitmap.createBitmap(
+                ICON_THUMB_SIZE_PX,
+                ICON_THUMB_SIZE_PX,
+                Bitmap.Config.ARGB_8888,
+            )
+            val canvas = android.graphics.Canvas(bmp)
+            drawable.setBounds(0, 0, ICON_THUMB_SIZE_PX, ICON_THUMB_SIZE_PX)
+            drawable.draw(canvas)
+            val imageBitmap = bmp.toComposeImageBitmap()
+            synchronized(iconThumbCache) {
+                iconThumbCache.put(packageName, imageBitmap)
+            }
+            imageBitmap
+        } catch (_: Throwable) {
+            null
+        }
+    }
+}
+
+@Composable
+private fun AppPickerRowIcon(
+    packageName: String,
+    appName: String,
+) {
+    val ctx = LocalContext.current
+    var thumb by remember(packageName) {
+        mutableStateOf(InstalledAppsCache.getCachedIconThumb(packageName))
+    }
+    LaunchedEffect(packageName) {
+        if (thumb == null) {
+            thumb = withContext(Dispatchers.IO) {
+                InstalledAppsCache.loadIconThumb(ctx, packageName)
+            }
+        }
+    }
+    val currentThumb = thumb
+    if (currentThumb != null) {
+        Image(
+            painter = remember(currentThumb) { BitmapPainter(currentThumb) },
+            contentDescription = appName,
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(8.dp)),
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MiuixTheme.colorScheme.surfaceVariant),
+        )
+    }
+}
 
 @Composable
 fun AppListPickerDialog(
@@ -646,31 +759,16 @@ fun AppListPickerDialog(
     val ctx = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
     var filterTab by remember { mutableIntStateOf(0) } // 0=全部, 1=用户应用, 2=系统应用
-    var allApps by remember { mutableStateOf<List<AppInfoItem>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    var allApps by remember { mutableStateOf(InstalledAppsCache.getCachedAppsIfFresh().orEmpty()) }
+    var isLoading by remember { mutableStateOf(allApps.isEmpty()) }
 
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            val pm = ctx.packageManager
-            val installedPackages = pm.getInstalledPackages(PackageManager.GET_META_DATA)
-            val list = installedPackages.mapNotNull { pi ->
-                val appInfo = pi.applicationInfo ?: return@mapNotNull null
-                val pkg = pi.packageName
-                val name = appInfo.loadLabel(pm).toString().ifBlank { pkg }
-                val isSys = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
-                    (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-                val icon = try {
-                    appInfo.loadIcon(pm)
-                } catch (t: Throwable) {
-                    null
-                }
-                AppInfoItem(pkg, name, isSys, icon)
-            }.distinctBy { it.packageName }
-                .sortedWith(compareBy({ it.appName.lowercase() }, { it.packageName }))
-            withContext(Dispatchers.Main) {
-                allApps = list
-                isLoading = false
+        if (allApps.isEmpty()) {
+            val list = withContext(Dispatchers.IO) {
+                InstalledAppsCache.loadInstalledApps(ctx)
             }
+            allApps = list
+            isLoading = false
         }
     }
 
@@ -754,29 +852,10 @@ fun AppListPickerDialog(
                                     .padding(vertical = 8.dp, horizontal = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                if (app.icon != null) {
-                                    val bmp = remember(app.packageName) {
-                                        val b = android.graphics.Bitmap.createBitmap(96, 96, android.graphics.Bitmap.Config.ARGB_8888)
-                                        val c = android.graphics.Canvas(b)
-                                        app.icon.setBounds(0, 0, 96, 96)
-                                        app.icon.draw(c)
-                                        b.toComposeImageBitmap()
-                                    }
-                                    Image(
-                                        painter = BitmapPainter(bmp),
-                                        contentDescription = app.appName,
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(RoundedCornerShape(8.dp)),
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(MiuixTheme.colorScheme.surfaceVariant),
-                                    )
-                                }
+                                AppPickerRowIcon(
+                                    packageName = app.packageName,
+                                    appName = app.appName,
+                                )
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -843,8 +922,8 @@ fun ActivityPickerDialog(
     var selectedApp by remember { mutableStateOf<AppInfoItem?>(null) }
     var appSearch by remember { mutableStateOf("") }
     var filterTab by remember { mutableIntStateOf(0) } // 0=全部, 1=用户应用, 2=系统应用
-    var allApps by remember { mutableStateOf<List<AppInfoItem>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    var allApps by remember { mutableStateOf(InstalledAppsCache.getCachedAppsIfFresh().orEmpty()) }
+    var isLoading by remember { mutableStateOf(allApps.isEmpty()) }
 
     var activities by remember { mutableStateOf<List<ActivityInfoItem>>(emptyList()) }
     var actLoading by remember { mutableStateOf(false) }
@@ -852,27 +931,12 @@ fun ActivityPickerDialog(
     var actFilter by remember { mutableIntStateOf(0) } // 0=全部, 1=已导出, 2=未导出
 
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            val pm = ctx.packageManager
-            val installedPackages = pm.getInstalledPackages(PackageManager.GET_META_DATA)
-            val list = installedPackages.mapNotNull { pi ->
-                val appInfo = pi.applicationInfo ?: return@mapNotNull null
-                val pkg = pi.packageName
-                val name = appInfo.loadLabel(pm).toString().ifBlank { pkg }
-                val isSys = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
-                    (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-                val icon = try {
-                    appInfo.loadIcon(pm)
-                } catch (t: Throwable) {
-                    null
-                }
-                AppInfoItem(pkg, name, isSys, icon)
-            }.distinctBy { it.packageName }
-                .sortedWith(compareBy({ it.appName.lowercase() }, { it.packageName }))
-            withContext(Dispatchers.Main) {
-                allApps = list
-                isLoading = false
+        if (allApps.isEmpty()) {
+            val list = withContext(Dispatchers.IO) {
+                InstalledAppsCache.loadInstalledApps(ctx)
             }
+            allApps = list
+            isLoading = false
         }
     }
 
@@ -1000,29 +1064,10 @@ fun ActivityPickerDialog(
                                         .padding(vertical = 8.dp, horizontal = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    if (item.icon != null) {
-                                        val bmp = remember(item.packageName) {
-                                            val b = android.graphics.Bitmap.createBitmap(96, 96, android.graphics.Bitmap.Config.ARGB_8888)
-                                            val c = android.graphics.Canvas(b)
-                                            item.icon.setBounds(0, 0, 96, 96)
-                                            item.icon.draw(c)
-                                            b.toComposeImageBitmap()
-                                        }
-                                        Image(
-                                            painter = BitmapPainter(bmp),
-                                            contentDescription = item.appName,
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .clip(RoundedCornerShape(8.dp)),
-                                        )
-                                    } else {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(MiuixTheme.colorScheme.surfaceVariant),
-                                        )
-                                    }
+                                    AppPickerRowIcon(
+                                        packageName = item.packageName,
+                                        appName = item.appName,
+                                    )
                                     Spacer(Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {

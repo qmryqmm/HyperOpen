@@ -123,21 +123,26 @@ public class HyperOpenConfig {
     }
 
     public int materialStyle = MATERIAL_GAUSSIAN_BLUR;
-    /** 设置界面风格（仅 App 内生效）：UI_STYLE_MATERIAL / UI_STYLE_MIUIX */
+    /**
+     * 设置界面风格（历史兼容字段，当前 App 统一使用 Miuix Compose UI，仅保留用于旧版 SharedPreferences / ConfigBackup 读写兼容）
+     */
+    @Deprecated
     public int uiStyle = UI_STYLE_MATERIAL;
     /** 主题模式（仅 App 内生效）：THEME_FOLLOW_SYSTEM / THEME_LIGHT / THEME_DARK */
     public int themeMode = THEME_FOLLOW_SYSTEM;
     /** Monet 动态取色（仅 App 内 Material 轨生效） */
     public boolean monetColors = false;
-    /** 顶栏/底栏毛玻璃 */
+    /** 顶栏/底栏毛玻璃（历史兼容字段，当前 UI 栏毛玻璃固定由 Miuix 主题驱动，保留用于旧配置读写兼容） */
     public boolean barBlur = true;
     /** 悬浮底栏 */
     public boolean floatingNavBar = false;
-    /** 预测性返回手势（Android 13+） */
+    /** 预测性返回手势（Android 13+，历史兼容字段，当前由系统与 BackHandler 统一接管，保留用于配置读写兼容） */
     public boolean predictiveBack = true;
-    /** 横移返回手势 */
+    /** 横移返回手势（历史兼容字段，当前 UI 未直接消费，保留用于旧配置读写兼容） */
+    @Deprecated
     public boolean edgeBack = true;
-    /** 页面切换手势：PAGE_GESTURE_OFF / PAGE_GESTURE_HORIZONTAL */
+    /** 页面切换手势（历史兼容字段，当前 UI 未直接消费，保留用于旧配置读写兼容）：PAGE_GESTURE_OFF / PAGE_GESTURE_HORIZONTAL */
+    @Deprecated
     public int pageSwitchGesture = PAGE_GESTURE_HORIZONTAL;
     public int offsetY = 100;          // dp
     public int regionDiameter = 220;   // dp
@@ -301,13 +306,13 @@ public class HyperOpenConfig {
     /** 图标气泡留白区域高斯模糊半径 (0 ~ 50 dp，默认 25 dp，0 为关闭模糊，样式与圆形视界底衬一致) */
     public int bubbleBlurRadius = 25;
 
-    /** 应用图标裁切方案 (CROP_BITMAP_CIRCLE / CROP_ADAPTIVE_EXPAND) */
+    /** 应用图标全局默认裁切方案 (CROP_BITMAP_CIRCLE / CROP_ADAPTIVE_EXPAND；单项 ShortcutItem.appIconCropMode 优先，此字段作为全局回退与旧配置兼容保留) */
     public int appIconCropMode = CROP_ADAPTIVE_EXPAND;
-    /** Miuix 矢量图标是否启用圆形底垫 */
+    /** Miuix 矢量图标全局默认底垫开关（历史兼容字段，现已改为按单项 ShortcutItem.glyphPadEnabled 独立配置，保留用于旧配置与 ConfigBackup 兼容） */
     public boolean glyphPadEnabled = true;
-    /** Miuix 矢量图标底垫颜色 (ARGB) */
+    /** Miuix 矢量图标全局默认底垫颜色 (ARGB；历史兼容字段，现已改为按单项 ShortcutItem.glyphPadColor 独立配置，保留用于旧配置与 ConfigBackup 兼容) */
     public int glyphPadColor = 0xFF2A82E4;
-    /** Miuix 矢量图标底垫质感模式 (GLYPH_PAD_MODE_SOLID / TRANSLUCENT / INVERTED) */
+    /** Miuix 矢量图标底垫质感模式 (GLYPH_PAD_MODE_SOLID / TRANSLUCENT / INVERTED；历史兼容字段，现已由 ShortcutItem.glyphPadAlpha 取代，保留用于旧配置与 ConfigBackup 兼容) */
     public int glyphPadMode = GLYPH_PAD_MODE_TRANSLUCENT;
     /** 图标呼吸/激活外发光辉光动效（已移除，保留字段兼容旧配置读取） */
     @Deprecated
@@ -1063,9 +1068,19 @@ public class HyperOpenConfig {
     }
 
     /**
-     * 模块配置 Activity 加载配置
+     * 模块配置 Activity 加载配置（默认包含快捷方式列表反序列化）
      */
     public static HyperOpenConfig loadFromApp(Context context) {
+        return loadFromApp(context, true);
+    }
+
+    /**
+     * 模块配置 Activity 加载配置
+     *
+     * @param loadShortcuts true 时解析 shortcuts_json；false 时跳过 JSON 反序列化（供仅更新面板参数的快速保存或预览镜像使用）
+     */
+    @SuppressWarnings("deprecation")
+    public static HyperOpenConfig loadFromApp(Context context, boolean loadShortcuts) {
         // Direct Boot：配置统一存 DE 存储（旧版 CE 数据由 DePrefs 一次性迁移）
         SharedPreferences sp = io.github.qmryqmm.hyperopen.util.DePrefs.get(context, PREF_NAME);
         HyperOpenConfig config = new HyperOpenConfig();
@@ -1214,8 +1229,10 @@ public class HyperOpenConfig {
         config.healBlurBaselineIfNeeded();
         adaptUnsupportedSoftGlass(config);
 
-        String jsonStr = safeGetString(sp, "shortcuts_json", null);
-        config.shortcuts = parseShortcutsJson(jsonStr);
+        if (loadShortcuts) {
+            String jsonStr = safeGetString(sp, "shortcuts_json", null);
+            config.shortcuts = parseShortcutsJson(jsonStr);
+        }
         return config;
     }
 
@@ -1595,9 +1612,20 @@ public class HyperOpenConfig {
     }
 
     /**
-     * 保存配置 (支持全局只读分享给 SystemUI + 实时广播通知)
+     * 保存配置 (支持全局只读分享给 SystemUI + 实时广播通知，默认同步写入 shortcuts_json)
      */
     public void save(Context context) {
+        save(context, true);
+    }
+
+    /**
+     * 保存配置 (支持全局只读分享给 SystemUI + 实时广播通知)
+     *
+     * @param writeShortcuts true 时将 {@link #shortcuts} 序列化写入 {@code shortcuts_json}；
+     *                       false 时保留 SharedPreferences 中已有的 {@code shortcuts_json}，避免纯参数滑块调整时重复序列化全部快捷项
+     */
+    @SuppressWarnings("deprecation")
+    public void save(Context context, boolean writeShortcuts) {
         if (context == null) {
             return;
         }
@@ -1605,7 +1633,7 @@ public class HyperOpenConfig {
         final Context appCtx = context.getApplicationContext() != null
                 ? context.getApplicationContext() : context;
         final SharedPreferences sp = io.github.qmryqmm.hyperopen.util.DePrefs.get(appCtx, PREF_NAME);
-        sp.edit()
+        SharedPreferences.Editor editor = sp.edit()
             .putInt("material_style", materialStyle)
             .putInt("ui_style", uiStyle)
             .putInt("theme_mode", themeMode)
@@ -1736,9 +1764,15 @@ public class HyperOpenConfig {
             .putBoolean("header_material_follow_global", headerMaterialFollowGlobal)
             .putFloat("bubble_glass_matte_alpha", bubbleGlassMatteAlpha)
             .putFloat("region_glass_matte_alpha", regionGlassMatteAlpha)
-            .putFloat("header_glass_matte_alpha", headerGlassMatteAlpha)
-            .putString("shortcuts_json", serializeShortcutsJson(shortcuts))
-            .apply();
+            .putFloat("header_glass_matte_alpha", headerGlassMatteAlpha);
+        if (writeShortcuts) {
+            editor.putString("shortcuts_json", serializeShortcutsJson(shortcuts));
+        } else if (!sp.contains("shortcuts_json")) {
+            List<ShortcutItem> fallback = (shortcuts != null && !shortcuts.isEmpty())
+                    ? shortcuts : getDefaultShortcuts();
+            editor.putString("shortcuts_json", serializeShortcutsJson(fallback));
+        }
+        editor.apply();
 
         // 在后台单线程串行执行器上等待 SharedPreferencesImpl 完成写盘（经写锁屏障），
         // 再恢复 DE 只读权限并通知 SystemUI，避免 apply() 异步落盘把文件权重置回 0660。

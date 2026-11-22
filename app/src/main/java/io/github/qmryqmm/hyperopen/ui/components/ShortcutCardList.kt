@@ -908,6 +908,12 @@ fun ShortcutIconBox(item: ShortcutItem) {
  * 一切渲染逻辑与实机 100% 同源，任何渲染改动自动同步。
  * 预览图标与实机使用同一套窗口级材质，保证柔光玻璃和高斯模糊实时同步。
  */
+/** 将可能包含大段 Base64 或长 JSON 的字段折叠为「长度:哈希」摘要，避免每次重组拼接数十 KB 的 viewKey 字符串 */
+private fun compactKeyToken(value: String?): String {
+    if (value.isNullOrEmpty()) return "0:0"
+    return "${value.length}:${value.hashCode()}"
+}
+
 @Composable
 fun ShortcutBubbleIcon(
     item: ShortcutItem,
@@ -918,7 +924,7 @@ fun ShortcutBubbleIcon(
 ) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val liveConfig = LocalHyperOpenConfig.current
-    val cfg = config ?: liveConfig ?: remember(ctx) { HyperOpenConfig.loadFromApp(ctx) }
+    val cfg = config ?: liveConfig ?: remember(ctx) { HyperOpenConfig.loadFromApp(ctx, false) }
     val density = androidx.compose.ui.platform.LocalDensity.current
     val sizePx = with(density) { size.roundToPx() }
     val resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(ctx, cfg.materialStyle)
@@ -926,7 +932,11 @@ fun ShortcutBubbleIcon(
     // 图标相关配置变化时整体重建视图（图标解析缓存由 IconGlyphFactory 提供）；
     // 其余参数（模糊/压暗/留白/圆角/透明度/选中）经 update 实时热同步，与真实容器的热更新链一致
     val viewKey = listOf(
-        item.id, item.iconPackage, item.iconGlyph, item.actionType, item.actionPayload,
+        item.id,
+        compactKeyToken(item.iconPackage),
+        compactKeyToken(item.iconGlyph),
+        item.actionType,
+        compactKeyToken(item.actionPayload),
         item.appIconCropMode, item.glyphPadEnabled, item.glyphPadColor, item.glyphPadAlpha,
         item.tintColor, sizePx, resolvedStyle,
         cfg.appIconCropMode, cfg.glyphPadEnabled, cfg.glyphPadColor, cfg.glyphPadMode,
@@ -942,13 +952,6 @@ fun ShortcutBubbleIcon(
             modifier = modifier.size(size),
             update = { v ->
                 v.updateConfig(cfg)
-                v.setMaterialStyle(resolvedStyle)
-                v.setBlurRadius(cfg.effectiveBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE).toFloat())
-                v.setDimAlpha(cfg.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE))
-                v.setBubbleBgEnabled(cfg.showBubbleBg)
-                v.setBubblePaddingPercent(cfg.bubblePaddingPercent)
-                v.setCornerRadiusPercent(cfg.iconCornerRadius)
-                v.setIconAlpha(cfg.iconAlpha)
                 v.setSelectedState(isSelected)
             },
         )

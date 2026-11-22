@@ -77,13 +77,31 @@ public final class IconGlyphFactory {
         return s != null && s.startsWith(CUSTOM_IMAGE_PREFIX) && s.length() > CUSTOM_IMAGE_PREFIX.length();
     }
 
+    private static final int MAX_CUSTOM_ICON_DECODE_PX = 256;
+
     @Nullable
     public static Drawable decodeCustomImageDrawable(@Nullable Context ctx, @Nullable String spec) {
         if (ctx == null || !isCustomImage(spec)) return null;
         try {
             String b64 = spec.substring(CUSTOM_IMAGE_PREFIX.length()).trim();
             byte[] bytes = Base64.decode(b64, Base64.DEFAULT);
-            Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+            BitmapFactory.Options boundsOpts = new BitmapFactory.Options();
+            boundsOpts.inJustDecodeBounds = true;
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.length, boundsOpts);
+            int srcW = boundsOpts.outWidth;
+            int srcH = boundsOpts.outHeight;
+            if (srcW <= 0 || srcH <= 0) {
+                return null;
+            }
+            int sampleSize = 1;
+            while ((srcW / sampleSize) > MAX_CUSTOM_ICON_DECODE_PX
+                    || (srcH / sampleSize) > MAX_CUSTOM_ICON_DECODE_PX) {
+                sampleSize <<= 1;
+            }
+            BitmapFactory.Options decodeOpts = new BitmapFactory.Options();
+            decodeOpts.inSampleSize = sampleSize;
+            decodeOpts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+            Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length, decodeOpts);
             if (bmp != null) {
                 return new BitmapDrawable(ctx.getResources(), bmp);
             }

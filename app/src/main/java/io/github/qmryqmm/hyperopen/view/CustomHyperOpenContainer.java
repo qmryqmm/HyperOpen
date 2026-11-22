@@ -230,17 +230,11 @@ public class CustomHyperOpenContainer extends FrameLayout {
             }
             // 顶部提示参数（位置、文字大小、居中、模糊与背景）热生效
             applyHeaderPillStyleAndLayout();
-            // 气泡材质、模糊半径、留白比例、圆角比例与透明度热生效
+            // 气泡材质、模糊半径、留白比例、圆角比例与透明度热生效（合并为单次刷新）
+            float bubbleBlurDp = componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE);
             for (CircularBubbleView b : bubbles) {
-                b.updateConfig(config);
                 b.setGhostLayer(ghostLayer);
-                b.setMaterialStyle(resolvedStyle);
-                b.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
-                b.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE));
-                b.setBubbleBgEnabled(config.showBubbleBg);
-                b.setBubblePaddingPercent(config.bubblePaddingPercent);
-                b.setCornerRadiusPercent(config.iconCornerRadius);
-                b.setIconAlpha(config.iconAlpha);
+                b.updateConfig(config, bubbleBlurDp, false);
             }
             // 幻影层模糊半径 / 最大倍率热生效
             refreshGhostLayerParams();
@@ -860,8 +854,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
         }
 
         int targetCount = Math.min(points.size(), activeItems.size());
+        float bubbleBlurDp = componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE);
         if (canReuseExistingBubbles(activeItems, iconSizeInt)) {
-            // 复用已有气泡实例：仅更新目标坐标、Margin 与模糊通道，消除展开时的 View 树重建开销
+            // 复用已有气泡实例：仅更新目标坐标、Margin 与模糊通道，合并中间刷新，消除展开时的 View 树重建与重复重绘开销
             int reuseCount = Math.min(targetCount, bubbles.size());
             for (int i = 0; i < reuseCount; i++) {
                 CircularBubbleView bubble = bubbles.get(i);
@@ -872,15 +867,6 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 bubble.targetX = finalX;
                 bubble.targetY = finalY;
                 bubble.setGhostLayer(ghostLayer);
-                bubble.updateConfig(config);
-                bubble.setMaterialStyle(resolvedStyle);
-                bubble.setBlurRadius(componentBlurRadiusDp(HyperOpenConfig.COMPONENT_BUBBLE));
-                bubble.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE));
-                bubble.setBubbleBgEnabled(config.showBubbleBg);
-                bubble.setBubblePaddingPercent(config.bubblePaddingPercent);
-                bubble.setCornerRadiusPercent(config.iconCornerRadius);
-                bubble.setIconAlpha(config.iconAlpha);
-                bubble.ensureBlurAndRefreshBackground();
 
                 LayoutParams bLp = (LayoutParams) bubble.getLayoutParams();
                 int newLeft = (int) (finalX - iconSizePx / 2f);
@@ -892,6 +878,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                     bLp.topMargin = newTop;
                     bubble.setLayoutParams(bLp);
                 }
+                bubble.updateConfig(config, bubbleBlurDp, true);
             }
         } else {
             dismissFolderSubBubbles(false);

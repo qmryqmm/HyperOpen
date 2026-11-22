@@ -1191,18 +1191,11 @@ class HyperOpenPreviewView(
         }
         applyHeaderPillStyleAndLayout()
         refreshFloatingBackButtonBackground()
+        val bubbleBlurDp = stackedBlurDp(HyperOpenConfig.COMPONENT_BUBBLE)
         for (b in bubbleViews) {
-            // 与真实侧 setupBubbles 复用分支的 setter 全集保持一致（含材质/模糊/留白/玻璃刷新）
+            // 与真实侧 setupBubbles 复用分支同源，合并中间冗余刷新
             b.setGhostLayer(ghostLayer)
-            b.updateConfig(config)
-            b.setMaterialStyle(resolvedStyle)
-            b.setBlurRadius(stackedBlurDp(HyperOpenConfig.COMPONENT_BUBBLE))
-            b.setBubbleBgEnabled(config.showBubbleBg)
-            b.setBubblePaddingPercent(config.bubblePaddingPercent)
-            b.setDimAlpha(config.effectiveDimAlpha(HyperOpenConfig.COMPONENT_BUBBLE))
-            b.setCornerRadiusPercent(config.iconCornerRadius)
-            b.setIconAlpha(config.iconAlpha)
-            b.ensureBlurAndRefreshBackground()
+            b.updateConfig(config, bubbleBlurDp, false)
         }
         // 幻影层模糊半径 / 最大倍率热生效（与真机 refreshGhostLayerParams 同源）
         refreshGhostLayerParams()
