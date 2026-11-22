@@ -1,5 +1,7 @@
 package io.github.qmryqmm.hyperopen.view;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.Color;
@@ -71,12 +73,20 @@ public class CustomHyperOpenContainer extends FrameLayout {
     private CircularBubbleView activeFolderBubble = null;
     private float activeFolderDismissRadius = 0f;
     private final List<CircularBubbleView> folderSubBubbles = new ArrayList<>();
+    private final List<CircularBubbleView> collapsingSubBubbles = new ArrayList<>();
     private CircularBubbleView currentSelectedSubBubble = null;
+    private boolean hasLastTouch = false;
+    private float lastTouchX = 0f;
+    private float lastTouchY = 0f;
+    private volatile boolean isDismissing = false;
+    private int dismissGeneration = 0;
+    private Runnable pendingDismissAction = null;
+    private Runnable pendingHostDismissCallback = null;
 
     private final Runnable folderHoverRunnable = new Runnable() {
         @Override
         public void run() {
-            if (pendingFolderBubble != null && pendingFolderBubble == currentSelectedBubble) {
+            if (!isDismissing && pendingFolderBubble != null && pendingFolderBubble == currentSelectedBubble) {
                 expandFolder(pendingFolderBubble);
             }
         }
@@ -92,7 +102,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
         @Override
         public void run() {
             movePending.set(false);
-            if (getVisibility() == View.VISIBLE) {
+            if (getVisibility() == View.VISIBLE && !isDismissing) {
                 onFingerMove(pendingTouchX, pendingTouchY);
             }
         }
@@ -536,7 +546,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
         int titleSp = config != null ? Math.max(12, Math.min(26, config.headerTitleSize)) : 17;
         int subtitleSp = config != null ? Math.max(9, Math.min(18, config.headerSubtitleSize)) : 11;
         boolean centered = config == null || config.headerTextCentered;
-        int topMarginDp = config != null ? Math.max(20, Math.min(420, config.headerTopMargin)) : 100;
+        int topMarginDp = config != null ? Math.max(24, Math.min(360, config.headerTopMargin)) : 100;
 
         if (headerTitle != null) {
             headerTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSp);
@@ -637,6 +647,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
                     || a.glyphPadColor != b.glyphPadColor
                     || Float.compare(a.glyphPadAlpha, b.glyphPadAlpha) != 0
                     || a.appIconCropMode != b.appIconCropMode
+                    || a.userId != b.userId
+                    || a.shellUseRoot != b.shellUseRoot
+                    || a.followGlobalHintStyle != b.followGlobalHintStyle
                     || a.hintTextColor != b.hintTextColor
                     || Float.compare(a.hintTextAlpha, b.hintTextAlpha) != 0
                     || a.hintTextColorSub != b.hintTextColorSub
@@ -657,6 +670,35 @@ public class CustomHyperOpenContainer extends FrameLayout {
      * 设置指纹中心并根据最新配置构建网格与散开动画
      */
     public void setupAndExpand(float fodX, float fodY) {
+        // 强制终止任何残留退场动画并推进 generation，防止旧退场回调误关新一轮面板；
+        // 先抢救执行尚未触发的选中动作（若有），绝不丢失快捷方式。
+        Runnable interruptedAction = pendingDismissAction;
+        pendingDismissAction = null;
+        pendingHostDismissCallback = null;
+        isDismissing = false;
+        dismissGeneration++;
+        hasLastTouch = false;
+        lastTouchX = fodX;
+        lastTouchY = fodY;
+        removeCallbacks(folderHoverRunnable);
+        pendingFolderBubble = null;
+        dismissFolderSubBubbles(false);
+        movePending.set(false);
+        removeCallbacks(coalescedMoveTask);
+        for (int i = 0, n = bubbles.size(); i < n; i++) {
+            CircularBubbleView b = bubbles.get(i);
+            b.animate().setListener(null).setUpdateListener(null).cancel();
+            b.endExternalScaleAnimation();
+            b.clearFisheyeTakeover();
+            b.setSelectedState(false);
+            b.applyScale(1.0f);
+            b.resetFolderDim();
+            b.setIconAlpha(config != null ? config.iconAlpha : 1.0f);
+        }
+        if (interruptedAction != null) {
+            interruptedAction.run();
+        }
+
         this.fodCenterX = fodX;
         this.fodCenterY = fodY;
         this.currentSelectedBubble = null;
@@ -845,6 +887,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 }
             }
         } else {
+            dismissFolderSubBubbles(false);
             bubblesContainer.removeAllViews();
             bubbles.clear();
             lastBuiltIconSizePx = iconSizeInt;
@@ -887,6 +930,116 @@ public class CustomHyperOpenContainer extends FrameLayout {
         BubblePanelAnimator.playExpand(bubbles, fodCenterX, fodCenterY, config);
     }
 
+    /** 当前是否正处于退场动画收尾阶段（供 SystemUI Hook 在退场期放行 ACTION_DOWN 并吞掉残余事件）。 */
+    public boolean isDismissing() {
+        return isDismissing;
+    }
+
+    /** 当前选中的一级气泡视图。 */
+    public CircularBubbleView getCurrentSelectedBubble() {
+        return currentSelectedBubble;
+    }
+
+    /** 当前实际选中的可执行快捷方式（子气泡优先；屏蔽折叠/空区里的文件夹本身）。 */
+    public ShortcutItem resolveSelectedShortcut() {
+        if (currentSelectedSubBubble != null && currentSelectedSubBubble.item != null) {
+            return currentSelectedSubBubble.item;
+        }
+        if (currentSelectedBubble != null && currentSelectedBubble.item != null) {
+            if (ShortcutItem.ACTION_FOLDER.equals(currentSelectedBubble.item.actionType)) {
+                return null;
+            }
+            return currentSelectedBubble.item;
+        }
+        return null;
+    }
+
+    /**
+     * 两阶段退场的第一阶段：仅取消悬停展开与待执行移动任务，并立即清理子气泡与收拢中子气泡；
+     * 绝不清空 currentSelectedBubble、绝不缩回主气泡、绝不调用 resetBubbles() 或销毁主气泡模糊。
+     */
+    public void prepareForDismiss() {
+        removeCallbacks(folderHoverRunnable);
+        pendingFolderBubble = null;
+        movePending.set(false);
+        removeCallbacks(coalescedMoveTask);
+        dismissFolderSubBubbles(false);
+    }
+
+    /**
+     * 执行两阶段退场：
+     * 1) 在清理前快照 selectedItem（屏蔽 ACTION_FOLDER）与 selectedBubble；
+     * 2) prepareForDismiss() 清理子气泡与待定任务，保留主气泡选中放大态与模糊；
+     * 3) 递增 dismissGeneration 并通过 AtomicBoolean 守卫确保选中快捷方式必执行且最多执行一次。
+     */
+    public void startDismiss(boolean isUp, final Runnable onHostDismissComplete) {
+        if (isDismissing) {
+            return;
+        }
+        final ShortcutItem selectedItem = isUp ? resolveSelectedShortcut() : null;
+        final CircularBubbleView selectedBubble = (isUp && selectedItem != null) ? currentSelectedBubble : null;
+        if (isUp && selectedItem != null) {
+            triggerHaptic();
+        }
+
+        prepareForDismiss();
+
+        isDismissing = true;
+        final int gen = ++dismissGeneration;
+        final AtomicBoolean executed = new AtomicBoolean(false);
+        final Context ctx = getContext();
+        final Context appCtx = ctx != null && ctx.getApplicationContext() != null ? ctx.getApplicationContext() : ctx;
+        final Runnable executeOnce = () -> {
+            if (selectedItem != null && executed.compareAndSet(false, true) && appCtx != null) {
+                selectedItem.executeAsync(appCtx);
+            }
+        };
+        this.pendingDismissAction = executeOnce;
+        this.pendingHostDismissCallback = onHostDismissComplete;
+
+        Runnable finishCallback = () -> finishDismissInternal(gen);
+        if (config != null && config.dismissAnimEnabled && !bubbles.isEmpty() && getVisibility() == View.VISIBLE) {
+            BubblePanelAnimator.playDismiss(bubbles, selectedBubble, fodCenterX, fodCenterY, config, finishCallback);
+        } else {
+            finishCallback.run();
+        }
+    }
+
+    /** 收到新 ACTION_DOWN 时立即终止旧退场动画并幂等完成旧收尾（执行未完成动作 + 关闭旧窗口）。 */
+    public void forceFinishPendingDismiss() {
+        if (!isDismissing && pendingDismissAction == null && pendingHostDismissCallback == null) {
+            return;
+        }
+        finishDismissInternal(dismissGeneration);
+    }
+
+    /** 安全模式卸载 Hook 时丢弃待执行快捷动作，避免在异常恢复路径误启动应用。 */
+    public void discardPendingDismissOnUninstall() {
+        pendingDismissAction = null;
+        pendingHostDismissCallback = null;
+        isDismissing = false;
+        dismissGeneration++;
+    }
+
+    private void finishDismissInternal(int expectedGen) {
+        if (expectedGen != dismissGeneration) {
+            return;
+        }
+        Runnable action = pendingDismissAction;
+        Runnable hostDismiss = pendingHostDismissCallback;
+        pendingDismissAction = null;
+        pendingHostDismissCallback = null;
+        isDismissing = false;
+        dismissGeneration++;
+        resetBubbles();
+        if (action != null) {
+            action.run();
+        }
+        if (hostDismiss != null) {
+            hostDismiss.run();
+        }
+    }
+
     /**
      * 播放松手时的向心收拢与选中弹跳退场动画（120ms）：
      * 选中项放大微弹淡出，其余项向中心回缩飞散，结束后回调 onComplete
@@ -906,6 +1059,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
      * 零 Runnable 对象分配。
      */
     public void scheduleFingerMove(float rawX, float rawY) {
+        if (isDismissing) {
+            return;
+        }
         this.pendingTouchX = rawX;
         this.pendingTouchY = rawY;
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -1016,6 +1172,13 @@ public class CustomHyperOpenContainer extends FrameLayout {
      * 手指滑动时调用：计算实时鱼眼动力学与命中目标
      */
     public void onFingerMove(float touchX, float touchY) {
+        if (isDismissing) {
+            return;
+        }
+        this.lastTouchX = touchX;
+        this.lastTouchY = touchY;
+        this.hasLastTouch = true;
+
         // 如果当前处于文件夹子气泡展开状态，优先处理子菜单选中判定
         if (activeFolderBubble != null && !folderSubBubbles.isEmpty()) {
             handleFolderSubBubbleMove(touchX, touchY);
@@ -1123,15 +1286,11 @@ public class CustomHyperOpenContainer extends FrameLayout {
     }
 
     /**
-     * 提取当前选中的快捷方式（支持二级文件夹子项选中）、触发触觉反馈并立即复位气泡状态
+     * 提取当前选中的快捷方式（支持二级文件夹子项选中、屏蔽文件夹自身）、触发触觉反馈并立即复位气泡状态
      */
     public ShortcutItem consumeSelectedAndReset() {
-        ShortcutItem selected = null;
-        if (currentSelectedSubBubble != null) {
-            selected = currentSelectedSubBubble.item;
-            triggerHaptic();
-        } else if (currentSelectedBubble != null) {
-            selected = currentSelectedBubble.item;
+        ShortcutItem selected = resolveSelectedShortcut();
+        if (selected != null) {
             triggerHaptic();
         }
         resetBubbles();
@@ -1148,7 +1307,20 @@ public class CustomHyperOpenContainer extends FrameLayout {
         }
     }
 
+    @Override
+    protected void onDetachedFromWindow() {
+        resetBubbles();
+        super.onDetachedFromWindow();
+    }
+
     public void resetBubbles() {
+        Runnable interruptedAction = pendingDismissAction;
+        pendingDismissAction = null;
+        pendingHostDismissCallback = null;
+        isDismissing = false;
+        dismissGeneration++;
+        hasLastTouch = false;
+
         removeCallbacks(folderHoverRunnable);
         pendingFolderBubble = null;
         dismissFolderSubBubbles(false);
@@ -1157,6 +1329,9 @@ public class CustomHyperOpenContainer extends FrameLayout {
         setAlpha(1.0f);
         for (int i = 0, n = bubbles.size(); i < n; i++) {
             CircularBubbleView b = bubbles.get(i);
+            b.animate().setListener(null).setUpdateListener(null).cancel();
+            b.endExternalScaleAnimation();
+            b.clearFisheyeTakeover();
             b.setSelectedState(false);
             b.applyScale(1.0f);
             b.resetFolderDim();
@@ -1179,58 +1354,132 @@ public class CustomHyperOpenContainer extends FrameLayout {
         if (sectorOverlay != null) {
             sectorOverlay.setHighlight(-1, 0, false);
         }
+        if (interruptedAction != null) {
+            interruptedAction.run();
+        }
+    }
+
+    private boolean isSectorModeActive() {
+        if (config == null) return false;
+        if (config.layoutStyle == HyperOpenConfig.LAYOUT_RING
+                && config.ringSectorMode && ringSectorSpec != null) {
+            return true;
+        }
+        return config.layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK
+                && config.stockSystemRegion && !stockSpecs.isEmpty();
+    }
+
+    private void showFolderEmptyHeader(CircularBubbleView folderBubble) {
+        if (headerTitle == null || headerSubtitle == null) return;
+        HintTextStyler.reset(headerTitle, true, config);
+        HintTextStyler.reset(headerSubtitle, false, config);
+        String folderTitle = (folderBubble != null && folderBubble.item != null
+                && folderBubble.item.title != null && !folderBubble.item.title.isEmpty())
+                ? folderBubble.item.title
+                : "文件夹";
+        headerTitle.setText(folderTitle);
+        headerSubtitle.setText("移出关闭文件夹");
     }
 
     /**
      * 悬停达到阈值时就地展开文件夹二级气泡
      */
-    private void expandFolder(CircularBubbleView folderBubble) {
-        if (folderBubble == null || folderBubble.item == null) return;
-        List<ShortcutItem> children = folderBubble.item.parseFolderChildren();
+    private void expandFolder(final CircularBubbleView folderBubble) {
+        if (folderBubble == null || folderBubble.item == null || isDismissing) return;
+        List<ShortcutItem> rawChildren = folderBubble.item.parseFolderChildren();
+        final List<ShortcutItem> children = new ArrayList<>(rawChildren.size());
+        for (ShortcutItem child : rawChildren) {
+            if (child != null && child.enabled) {
+                children.add(child);
+            }
+        }
         if (children.isEmpty()) return;
+
+        pendingFolderBubble = null;
+        final float initialTouchDist = (hasLastTouch && isSectorModeActive())
+                ? (float) Math.hypot(lastTouchX - folderBubble.targetX, lastTouchY - folderBubble.targetY)
+                : 0f;
+        final float targetZoom = config != null ? config.maxScale : 1.5f;
 
         // 先把文件夹图标完全放大到鱼眼峰值（maxScale），放大动画播完后再展开子项：
         // 避免「边放大边展开」导致子项起点位置与文件夹最终位置错位、观感突兀
-        folderBubble.animate().cancel();
+        folderBubble.animate().setListener(null).setUpdateListener(null).cancel();
         folderBubble.animateFolderDim(false, 120L);
         folderBubble.animate()
-            .scaleX(config != null ? config.maxScale : 1.5f)
-            .scaleY(config != null ? config.maxScale : 1.5f)
+            .scaleX(targetZoom)
+            .scaleY(targetZoom)
             .setDuration(120)
             .setInterpolator(new android.view.animation.DecelerateInterpolator())
             .setUpdateListener(anim -> {
                 folderBubble.syncBlurCornerRadiusWithViewScale();
                 folderBubble.syncGhost();
             })
-            .withEndAction(() -> {
-                // 松手 / 选中已复位后不再展开（防竞态：放大动画期间用户抬手）
-                if (currentSelectedBubble != folderBubble || activeFolderBubble != null) return;
-                // 同步 fisheyeScale 字段，保证后续 applyScale 判定基准正确
-                folderBubble.applyScale(config != null ? config.maxScale : 1.5f);
-                performFolderExpansion(folderBubble, children);
+            .setListener(new AnimatorListenerAdapter() {
+                private boolean canceled = false;
+                private boolean done = false;
+
+                @Override
+                public void onAnimationCancel(Animator animation) {
+                    canceled = true;
+                }
+
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    if (done) return;
+                    done = true;
+                    folderBubble.animate().setListener(null);
+                    // 松手 / 选中已复位后不再展开（防竞态：放大动画期间用户抬手或滑离）
+                    if (canceled || isDismissing || currentSelectedBubble != folderBubble || activeFolderBubble != null) {
+                        return;
+                    }
+                    // 同步 fisheyeScale 字段，保证后续 applyScale 判定基准正确
+                    folderBubble.applyScale(targetZoom);
+                    performFolderExpansion(folderBubble, children, initialTouchDist);
+                }
             })
             .start();
     }
 
     /** 文件夹图标完全放大后的实际展开：其余普通图标线性恢复原大小（保持变暗），子项从文件夹中心扇形展开 */
-    private void performFolderExpansion(CircularBubbleView folderBubble, List<ShortcutItem> children) {
+    private void performFolderExpansion(CircularBubbleView folderBubble, List<ShortcutItem> children, float initialTouchDist) {
         dismissFolderSubBubbles(false);
         activeFolderBubble = folderBubble;
         ghostLayer.setExcludedSource(folderBubble);
+        showFolderEmptyHeader(folderBubble);
         triggerSlideHaptic();
 
         // 其余一级气泡：线性恢复原本大小（鱼眼放大收回 1.0），并在子项展开时长内同步渐变弱化
         long dimDuration = Math.max(0L, config != null ? config.folderChildExpandDurationMs : 180L);
-        for (CircularBubbleView b : bubbles) {
+        for (final CircularBubbleView b : bubbles) {
             if (b != folderBubble) {
-                b.animate().cancel();
+                b.animate().setListener(null).setUpdateListener(null).cancel();
+                b.prepareExternalScaleTarget(1.0f, false);
                 b.animate()
                     .scaleX(1.0f)
                     .scaleY(1.0f)
                     .setDuration(140)
                     .setInterpolator(new android.view.animation.LinearInterpolator())
                     .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
-                    .withEndAction(() -> { b.applyScale(1.0f); b.ensureBlurAndRefreshBackground(); })
+                    .setListener(new AnimatorListenerAdapter() {
+                        private boolean canceled = false;
+                        private boolean done = false;
+
+                        @Override
+                        public void onAnimationCancel(Animator animation) {
+                            canceled = true;
+                        }
+
+                        @Override
+                        public void onAnimationEnd(Animator animation) {
+                            if (done) return;
+                            done = true;
+                            b.animate().setListener(null);
+                            b.endExternalScaleAnimation();
+                            if (!canceled && !b.isFisheyeScaleActive()) {
+                                b.ensureBlurAndRefreshBackground();
+                            }
+                        }
+                    })
                     .start();
                 b.animateFolderDim(true, dimDuration, folderBubble::syncGhost);
             } else {
@@ -1269,7 +1518,16 @@ public class CustomHyperOpenContainer extends FrameLayout {
             if (d > maxChildDist) maxChildDist = d;
         }
         float parentIconSizePx = dpToPx((float) cfg.iconSize);
-        activeFolderDismissRadius = Math.max(parentIconSizePx * 2.8f, maxChildDist + childIconSizePx * 1.3f);
+        float baseDismissRadius = Math.max(parentIconSizePx * 2.8f, maxChildDist + childIconSizePx * 1.3f);
+        if (isSectorModeActive()) {
+            float liveDist = hasLastTouch
+                    ? (float) Math.hypot(lastTouchX - folderBubble.targetX, lastTouchY - folderBubble.targetY)
+                    : 0f;
+            float sectorGuard = Math.max(initialTouchDist, liveDist) + parentIconSizePx * 1.2f;
+            activeFolderDismissRadius = Math.max(baseDismissRadius, sectorGuard);
+        } else {
+            activeFolderDismissRadius = baseDismissRadius;
+        }
         List<CircularBubbleView> createdSubs = new ArrayList<>(count);
 
         for (int i = 0; i < count; i++) {
@@ -1348,17 +1606,31 @@ public class CustomHyperOpenContainer extends FrameLayout {
                 triggerSlideHaptic();
             }
         } else {
-            if (currentSelectedSubBubble != null) {
+            boolean clearedSub = currentSelectedSubBubble != null;
+            if (clearedSub) {
                 currentSelectedSubBubble.setSelectedState(false);
                 currentSelectedSubBubble = null;
             }
-            // 检查手指是否移回主文件夹气泡；若距离主气泡过远，关闭子菜单
+            // 检查手指是否移回主文件夹气泡；若距离主气泡过远，关闭子菜单并当帧重判一级气泡
             float distFromFolder = (activeFolderBubble != null)
                 ? (float) Math.hypot(touchX - activeFolderBubble.targetX, touchY - activeFolderBubble.targetY)
                 : Float.MAX_VALUE;
             float dismissThreshold = Math.max(iconSizePx * 2.8f, activeFolderDismissRadius);
             if (distFromFolder > dismissThreshold) {
                 dismissFolderSubBubbles(true);
+                if (currentSelectedBubble != null) {
+                    currentSelectedBubble.setSelectedState(false);
+                    currentSelectedBubble = null;
+                }
+                HintTextStyler.reset(headerTitle, true, config);
+                HintTextStyler.reset(headerSubtitle, false, config);
+                headerTitle.setText("滑动选择快捷方式");
+                headerSubtitle.setText("移至目标图标后松手直接打开");
+                onFingerMove(touchX, touchY);
+                return;
+            }
+            if (clearedSub) {
+                showFolderEmptyHeader(activeFolderBubble);
             }
         }
     }
@@ -1370,6 +1642,16 @@ public class CustomHyperOpenContainer extends FrameLayout {
      *                 false 时立即移除（松手退场 / 切换文件夹重新展开，外层动画已在进行）。
      */
     private void dismissFolderSubBubbles(boolean animated) {
+        if (!animated && !collapsingSubBubbles.isEmpty()) {
+            List<CircularBubbleView> collapsing = new ArrayList<>(collapsingSubBubbles);
+            collapsingSubBubbles.clear();
+            for (CircularBubbleView sub : collapsing) {
+                sub.animate().setListener(null).setUpdateListener(null).cancel();
+                sub.endExternalScaleAnimation();
+                sub.resetBlur();
+                bubblesContainer.removeView(sub);
+            }
+        }
         if (folderSubBubbles.isEmpty()) return;
         CircularBubbleView folder = activeFolderBubble;
         final java.util.List<CircularBubbleView> subs = new java.util.ArrayList<>(folderSubBubbles);
@@ -1381,17 +1663,21 @@ public class CustomHyperOpenContainer extends FrameLayout {
 
         if (!animated) {
             for (CircularBubbleView sub : subs) {
-                sub.animate().cancel();
+                sub.animate().setListener(null).setUpdateListener(null).cancel();
+                sub.endExternalScaleAnimation();
                 sub.resetBlur();
                 bubblesContainer.removeView(sub);
             }
         } else {
+            collapsingSubBubbles.addAll(subs);
             CircularBubbleView collapseTarget = folder != null ? folder : subs.get(0);
             FolderChildAnimator.playCollapse(subs, collapseTarget, config, () -> {
                 for (CircularBubbleView sub : subs) {
-                    sub.animate().cancel();
+                    sub.animate().setListener(null).setUpdateListener(null).cancel();
+                    sub.endExternalScaleAnimation();
                     sub.resetBlur();
                     bubblesContainer.removeView(sub);
+                    collapsingSubBubbles.remove(sub);
                 }
             });
         }
@@ -1400,9 +1686,10 @@ public class CustomHyperOpenContainer extends FrameLayout {
         // 有动画的关闭走平滑过渡（与收拢动画同步），立即关闭保持瞬态复位
         long collapseDuration = Math.max(0L, config != null ? config.folderChildCollapseDurationMs : 140L);
         float targetAlpha = config != null ? config.iconAlpha : 1.0f;
-        for (CircularBubbleView b : bubbles) {
-            b.animate().cancel();
+        for (final CircularBubbleView b : bubbles) {
+            b.animate().setListener(null).setUpdateListener(null).cancel();
             if (animated) {
+                b.prepareExternalScaleTarget(1.0f, false);
                 b.animate()
                     .scaleX(1.0f)
                     .scaleY(1.0f)
@@ -1412,14 +1699,32 @@ public class CustomHyperOpenContainer extends FrameLayout {
                         b.syncBlurCornerRadiusWithViewScale();
                         b.clearGhost();
                     })
-                    .withEndAction(() -> {
-                        b.applyScale(1.0f);
-                        b.ensureBlurAndRefreshBackground();
-                        b.clearGhost();
+                    .setListener(new AnimatorListenerAdapter() {
+                        private boolean canceled = false;
+                        private boolean done = false;
+
+                        @Override
+                        public void onAnimationCancel(Animator animation) {
+                            canceled = true;
+                        }
+
+                        @Override
+                        public void onAnimationEnd(Animator animation) {
+                            if (done) return;
+                            done = true;
+                            b.animate().setListener(null);
+                            b.endExternalScaleAnimation();
+                            if (!canceled && !b.isFisheyeScaleActive()) {
+                                b.ensureBlurAndRefreshBackground();
+                                b.clearGhost();
+                            }
+                        }
                     })
                     .start();
                 b.animateFolderRestore(targetAlpha, collapseDuration);
             } else {
+                b.endExternalScaleAnimation();
+                b.clearFisheyeTakeover();
                 b.applyScale(1.0f);
                 b.ensureBlurAndRefreshBackground();
                 b.clearGhost();

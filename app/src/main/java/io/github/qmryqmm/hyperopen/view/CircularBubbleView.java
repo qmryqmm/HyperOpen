@@ -44,6 +44,12 @@ public class CircularBubbleView extends FrameLayout {
     @Nullable
     private ValueAnimator folderDimAnimator;
     private boolean isSelected = false;
+    /** 外部 ViewPropertyAnimator 是否正在驱动本气泡缩放（避免与实时鱼眼 applyScale 互搏） */
+    private boolean externalScaleAnimating = false;
+    /** 外部缩放动画是否同时伴随入场位移/透明度（被打断时需一并归位以免卡在半偏移/半透明） */
+    private boolean externalScaleIncludesExpandTransform = false;
+    /** 外部动画期间实时鱼眼是否已接管缩放（防止延迟结束回调把图标弹回 1.0x） */
+    private boolean fisheyeTookOverScale = false;
 
     private int activeStyle;
     private final int sizePx;
@@ -207,6 +213,13 @@ public class CircularBubbleView extends FrameLayout {
         this.cornerRadiusPercent = Math.max(0, Math.min(50, newConfig.iconCornerRadius));
         opticDrawable.setStyle(activeStyle);
         opticDrawable.setCornerRadiusPercent(this.cornerRadiusPercent);
+        invalidateOutline();
+        if (opticView != null) {
+            opticView.invalidateOutline();
+        }
+        if (ghostView != null) {
+            ghostView.invalidateOutline();
+        }
         applyIconPadding();
         loadItemIcon();
         setIconAlpha(newConfig.iconAlpha);
@@ -505,7 +518,9 @@ public class CircularBubbleView extends FrameLayout {
     }
 
     public void resetBlur() {
-        animate().cancel();
+        animate().setListener(null).setUpdateListener(null).cancel();
+        endExternalScaleAnimation();
+        this.fisheyeTookOverScale = false;
         resetFolderDim();
         this.isSelected = false;
         this.fisheyeScale = 1.0f;
@@ -656,8 +671,64 @@ public class CircularBubbleView extends FrameLayout {
         }
     }
 
+    /**
+     * 标记外部 ViewPropertyAnimator 开始驱动本气泡缩放。
+     *
+     * @param includesExpandTransform true 表示动画同时驱动 translation/alpha（如面板/子项入场），
+     *                                若中途被实时鱼眼打断需同步复位位移与透明度。
+     */
+    public void beginExternalScaleAnimation(boolean includesExpandTransform) {
+        this.externalScaleAnimating = true;
+        this.externalScaleIncludesExpandTransform = includesExpandTransform;
+        this.fisheyeTookOverScale = false;
+    }
+
+    /**
+     * 准备让外部动画将本气泡平滑缩放至目标倍率（保留 View 当前 scaleX/Y 作为动画起点，
+     * 仅同步内部目标值，避免同帧相同目标的鱼眼调用误打断动画）。
+     */
+    public void prepareExternalScaleTarget(float targetScale, boolean includesExpandTransform) {
+        this.fisheyeScale = targetScale;
+        this.currentScale = targetScale;
+        this.externalScaleAnimating = true;
+        this.externalScaleIncludesExpandTransform = includesExpandTransform;
+        this.fisheyeTookOverScale = false;
+    }
+
+    /** 结束外部缩放动画追踪状态。 */
+    public void endExternalScaleAnimation() {
+        this.externalScaleAnimating = false;
+        this.externalScaleIncludesExpandTransform = false;
+    }
+
+    /** 当前气泡是否正处于活跃的触摸选中或鱼眼放大接管态。 */
+    public boolean isFisheyeScaleActive() {
+        return fisheyeTookOverScale || isSelected || fisheyeScale > 1.005f;
+    }
+
+    /** 退出触摸态/显式复位时清除鱼眼接管标记。 */
+    public void clearFisheyeTakeover() {
+        this.fisheyeTookOverScale = false;
+    }
+
     public void applyScale(float scale) {
-        if (Math.abs(this.fisheyeScale - scale) > 0.0005f) {
+        boolean scaleChanged = Math.abs(this.fisheyeScale - scale) > 0.0005f;
+        if (externalScaleAnimating) {
+            if (!scaleChanged) {
+                return;
+            }
+            fisheyeTookOverScale = true;
+            boolean restoreExpandTransform = externalScaleIncludesExpandTransform;
+            externalScaleAnimating = false;
+            externalScaleIncludesExpandTransform = false;
+            animate().setListener(null).setUpdateListener(null).cancel();
+            if (restoreExpandTransform) {
+                setTranslationX(0f);
+                setTranslationY(0f);
+                setAlpha(1f);
+            }
+        }
+        if (scaleChanged || Math.abs(getScaleX() - scale) > 0.0005f) {
             this.fisheyeScale = scale;
             applyEffectiveScale();
         }

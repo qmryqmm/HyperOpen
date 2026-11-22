@@ -354,13 +354,30 @@ public class ShortcutItem {
     }
 
     /**
-     * 解析文件夹子项列表
+     * 解析文件夹子项列表；异常或为空时直接返回空列表（绝不回退到默认顶层快捷方式）。
      */
     public List<ShortcutItem> parseFolderChildren() {
-        if (!ACTION_FOLDER.equals(actionType) || actionPayload == null || actionPayload.trim().isEmpty()) {
+        List<ShortcutItem> list = new ArrayList<>();
+        if (!ACTION_FOLDER.equals(actionType) || actionPayload == null) {
+            return list;
+        }
+        String trimmed = actionPayload.trim();
+        if (trimmed.isEmpty()) {
+            return list;
+        }
+        try {
+            org.json.JSONArray arr = new org.json.JSONArray(trimmed);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject obj = arr.optJSONObject(i);
+                if (obj != null) {
+                    list.add(ShortcutItem.fromJson(obj));
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "解析文件夹子项 JSON 失败，返回空列表", t);
             return new ArrayList<>();
         }
-        return io.github.qmryqmm.hyperopen.config.HyperOpenConfig.parseShortcutsJson(actionPayload);
+        return list;
     }
 
     /**

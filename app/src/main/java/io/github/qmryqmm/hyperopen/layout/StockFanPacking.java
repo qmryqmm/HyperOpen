@@ -28,13 +28,27 @@ public class StockFanPacking {
         public final float angleRad;
         /** 扇区中心角度（角度制） */
         public final float angleDeg;
+        /** 中心取消区小圆半径（px，小于该半径不命中任何扇区） */
+        public final float smallRadius;
+        /** 本扇区起始角（度） */
+        public final float sectorStartDeg;
+        /** 本扇区张角（度） */
+        public final float sectorSweepDeg;
 
         public StockItemSpec(PointF center, RectF itemRect, Region region, float angleRad, float angleDeg) {
+            this(center, itemRect, region, angleRad, angleDeg, 0f, angleDeg - 30f, 60f);
+        }
+
+        public StockItemSpec(PointF center, RectF itemRect, Region region, float angleRad, float angleDeg,
+                             float smallRadius, float sectorStartDeg, float sectorSweepDeg) {
             this.center = center;
             this.itemRect = itemRect;
             this.region = region;
             this.angleRad = angleRad;
             this.angleDeg = angleDeg;
+            this.smallRadius = smallRadius;
+            this.sectorStartDeg = sectorStartDeg;
+            this.sectorSweepDeg = sectorSweepDeg;
         }
     }
 
@@ -125,7 +139,10 @@ public class StockFanPacking {
             Region sectorRegion = new Region();
             sectorRegion.setPath(outerPath, clipRegion);
 
-            result.add(new StockItemSpec(center, itemRect, sectorRegion, curAngleRad, curAngleDeg));
+            result.add(new StockItemSpec(
+                center, itemRect, sectorRegion, curAngleRad, curAngleDeg,
+                smallRadius, sectorStartAngle, angleStep
+            ));
         }
 
         return result;
@@ -167,27 +184,34 @@ public class StockFanPacking {
             }
         }
 
-        // 2. 角度射线判定（对齐系统原生无边界手势：只要离开指纹中心一段距离，按当前角度所在的扇区角范围直接命中）：
-        // 即使手指滑动到屏幕最顶端、边缘甚至超出任何 Region 边界，依然能准确判定对应的快捷项！
+        // 2. 角度射线判定（超出大圆弧 Region 边界时兜底，但严禁穿透小圆取消区与向下取消区）：
+        // 必须满足 distFromFod >= smallRadius、dy <= 0（仅指纹上方半区）且角度落在扇面有效张角范围内。
         float dx = x - fodX;
         float dy = y - fodY;
         float distFromFod = (float) Math.hypot(dx, dy);
-        if (distFromFod >= 40f && dy <= 50f) {
-            // 计算当前手指相对于指纹中心的角度（-180° ~ 180°）
+        float minValidRadius = specs.get(0).smallRadius;
+        if (distFromFod >= minValidRadius && dy <= 0f) {
+            float fanStartDeg = specs.get(0).sectorStartDeg;
+            StockItemSpec lastSpec = specs.get(specs.size() - 1);
+            float fanSweepDeg = (lastSpec.sectorStartDeg + lastSpec.sectorSweepDeg) - fanStartDeg;
             float touchAngleDeg = (float) Math.toDegrees(Math.atan2(dy, dx));
-            int bestIdx = -1;
-            float minAngleDiff = Float.MAX_VALUE;
-            for (int i = 0; i < specs.size(); i++) {
-                StockItemSpec spec = specs.get(i);
-                float diff = Math.abs(touchAngleDeg - spec.angleDeg);
-                if (diff > 180f) diff = 360f - diff;
-                if (diff < minAngleDiff) {
-                    minAngleDiff = diff;
-                    bestIdx = i;
+            float offsetFromFanStart = ((touchAngleDeg - fanStartDeg) % 360f + 360f) % 360f;
+            if (offsetFromFanStart <= fanSweepDeg + 0.01f) {
+                int bestIdx = -1;
+                float minAngleDiff = Float.MAX_VALUE;
+                for (int i = 0; i < specs.size(); i++) {
+                    StockItemSpec spec = specs.get(i);
+                    if (distFromFod < spec.smallRadius) continue;
+                    float diff = Math.abs(touchAngleDeg - spec.angleDeg);
+                    if (diff > 180f) diff = 360f - diff;
+                    if (diff < minAngleDiff) {
+                        minAngleDiff = diff;
+                        bestIdx = i;
+                    }
                 }
-            }
-            if (bestIdx >= 0) {
-                return bestIdx;
+                if (bestIdx >= 0) {
+                    return bestIdx;
+                }
             }
         }
 

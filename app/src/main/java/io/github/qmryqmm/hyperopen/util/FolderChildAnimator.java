@@ -1,5 +1,7 @@
 package io.github.qmryqmm.hyperopen.util;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.view.animation.AccelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.OvershootInterpolator;
@@ -17,6 +19,30 @@ public final class FolderChildAnimator {
 
     private FolderChildAnimator() {}
 
+    private static AnimatorListenerAdapter createExpandEndListener(final CircularBubbleView child) {
+        return new AnimatorListenerAdapter() {
+            private boolean canceled = false;
+            private boolean done = false;
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+                canceled = true;
+            }
+
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                if (done) return;
+                done = true;
+                child.animate().setListener(null);
+                child.endExternalScaleAnimation();
+                if (!canceled && !child.isFisheyeScaleActive()) {
+                    child.applyScale(1f);
+                    child.ensureBlurAndRefreshBackground();
+                }
+            }
+        };
+    }
+
     public static void playExpand(List<? extends CircularBubbleView> children,
                                   CircularBubbleView folder,
                                   HyperOpenConfig config,
@@ -31,8 +57,10 @@ public final class FolderChildAnimator {
 
         for (int i = 0; i < ordered.size(); i++) {
             CircularBubbleView child = ordered.get(i);
-            child.animate().cancel();
+            child.animate().setListener(null).setUpdateListener(null).cancel();
             if (duration == 0) {
+                child.endExternalScaleAnimation();
+                child.clearFisheyeTakeover();
                 child.setTranslationX(0f);
                 child.setTranslationY(0f);
                 child.setScaleX(1f);
@@ -42,6 +70,7 @@ public final class FolderChildAnimator {
                 continue;
             }
 
+            child.prepareExternalScaleTarget(1f, true);
             if (type == HyperOpenConfig.FOLDER_CHILD_EXPAND_FADE_SCALE) {
                 child.setTranslationX(0f);
                 child.setTranslationY(0f);
@@ -60,6 +89,7 @@ public final class FolderChildAnimator {
                             child.syncBlurCornerRadiusWithViewScale();
                             child.syncGhost();
                         })
+                        .setListener(createExpandEndListener(child))
                         .start();
                 continue;
             }
@@ -81,6 +111,7 @@ public final class FolderChildAnimator {
                             child.syncBlurCornerRadiusWithViewScale();
                             child.syncGhost();
                         })
+                        .setListener(createExpandEndListener(child))
                         .start();
             } else {
                 float startScale = config != null
@@ -107,6 +138,7 @@ public final class FolderChildAnimator {
                             child.syncBlurCornerRadiusWithViewScale();
                             child.syncGhost();
                         })
+                        .setListener(createExpandEndListener(child))
                         .start();
             }
         }
@@ -140,9 +172,23 @@ public final class FolderChildAnimator {
         };
 
         for (int i = 0; i < children.size(); i++) {
-            CircularBubbleView child = children.get(i);
-            child.animate().cancel();
+            final CircularBubbleView child = children.get(i);
+            child.animate().setListener(null).setUpdateListener(null).cancel();
+            child.endExternalScaleAnimation();
             child.resetBlur();
+
+            AnimatorListenerAdapter endListener = new AnimatorListenerAdapter() {
+                private boolean done = false;
+
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    if (done) return;
+                    done = true;
+                    child.animate().setListener(null);
+                    finishOne.run();
+                }
+            };
+
             if (type == HyperOpenConfig.FOLDER_CHILD_COLLAPSE_FADE_SCALE) {
                 child.animate()
                         .scaleX(0.2f)
@@ -152,7 +198,7 @@ public final class FolderChildAnimator {
                         .setDuration(duration)
                         .setStartDelay(i * (long) stagger)
                         .setUpdateListener(anim -> child.syncBlurCornerRadiusWithViewScale())
-                        .withEndAction(finishOne)
+                        .setListener(endListener)
                         .start();
             } else {
                 float toX = folder.targetX - child.targetX;
@@ -170,7 +216,7 @@ public final class FolderChildAnimator {
                         .setDuration(duration)
                         .setStartDelay(delay)
                         .setUpdateListener(anim -> child.syncBlurCornerRadiusWithViewScale())
-                        .withEndAction(finishOne)
+                        .setListener(endListener)
                         .start();
             }
         }

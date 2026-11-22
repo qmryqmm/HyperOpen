@@ -109,6 +109,12 @@ public class HyperOpenHook {
     /** KeyguardViewMediator#handleKeyguardDone() Hook 是否已安装成功 */
     private static volatile boolean handleKeyguardDoneHooked = false;
 
+    /** 当前活跃主指 ID（防止第二指搭边再抬主指导致触点瞬间跳变） */
+    private static volatile int activePointerId = MotionEvent.INVALID_POINTER_ID;
+
+    /** UP/CANCEL 收尾任务已投递到主线程但尚未执行的跨线程竞态标记 */
+    private static volatile boolean sFinishPosted = false;
+
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
         final ClassLoader cl = lpparam.classLoader;
 
@@ -116,6 +122,8 @@ public class HyperOpenHook {
         HANDLES.clear();
         handleKeyguardDoneHooked = false;
         BLE_OR_TRUST_UNLOCKING_IN_DONE.remove();
+        activePointerId = MotionEvent.INVALID_POINTER_ID;
+        sFinishPosted = false;
         active = true;
 
         // 配置异步刷新完成后（主线程回调），把新配置推给所有未处于展示态的容器。
@@ -173,8 +181,9 @@ public class HyperOpenHook {
                     CustomHyperOpenContainer container = (CustomHyperOpenContainer)
                         XposedHelpers.getAdditionalInstanceField(view, "customContainer");
 
-                    // 若容器已处于展示状态，则无需重复初始化（也不重复下发模糊 / 窗口事务）
-                    if (container != null && container.getVisibility() == View.VISIBLE) {
+                    // 若容器已处于展示状态且未在退场中，则无需重复初始化（也不重复下发模糊 / 窗口事务）；
+                    // 若正处于退场动画收尾期被新一轮展开打断，则放行进入后续 setupAndExpand 抢救并重开面板。
+                    if (container != null && container.getVisibility() == View.VISIBLE && !container.isDismissing()) {
                         return;
                     }
 
@@ -254,6 +263,19 @@ public class HyperOpenHook {
                         XposedHelpers.callMethod(view, "cleanQuickOpenItemList");
                     } catch (Throwable ignored) {}
 
+                    // 移除并置空宿主 mQuickLoadingView（三版本通用）：
+                    // 阻止原生加载圆环残留，并避免旧版 dismiss() 因 mQuickLoadingView 非空走 150ms 渐隐阻塞窗口。
+                    try {
+                        Object loadingView = XposedHelpers.getObjectField(view, "mQuickLoadingView");
+                        if (loadingView instanceof View) {
+                            View lv = (View) loadingView;
+                            if (lv.getParent() instanceof ViewGroup) {
+                                ((ViewGroup) lv.getParent()).removeView(lv);
+                            }
+                        }
+                        XposedHelpers.setObjectField(view, "mQuickLoadingView", null);
+                    } catch (Throwable ignored) {}
+
                     // 隐藏原生的所有其它子 View (标题、副标题、教学提示等)
                     for (int i = 0; i < view.getChildCount(); i++) {
                         View child = view.getChildAt(i);
@@ -325,6 +347,7 @@ public class HyperOpenHook {
                     // 异步上报实机真实 FOD 中心坐标至模块配置，供 App 预览 1:1 绝对对齐
                     HyperOpenConfig.reportRealFodCenterAsync(view.getContext(), fodX, fodY);
 
+                    sFinishPosted = false;
                     container.setVisibility(View.VISIBLE);
                     container.bringToFront();
                     container.setupAndExpand(fodX, fodY);
@@ -380,65 +403,91 @@ public class HyperOpenHook {
                         final CustomHyperOpenContainer container = (CustomHyperOpenContainer)
                             XposedHelpers.getAdditionalInstanceField(frameLayout, "customContainer");
 
-                        // 只有在自定义快捷面板处于展示态时，才拦截后续手势
-                        if (container == null || container.getVisibility() != View.VISIBLE) return;
-
                         MotionEvent event = (MotionEvent) param.args[0];
                         int action = event.getActionMasked();
-                        final float rawX = event.getRawX();
-                        final float rawY = event.getRawY();
+
+                        // 无论面板是否已展开，先记录并追踪主指 activePointerId；
+                        // 收到 ACTION_DOWN 时绝不拦截，并在退场期优先终止/完成旧退场再交由宿主响应。
+                        if (action == MotionEvent.ACTION_DOWN) {
+                            activePointerId = event.getPointerId(0);
+                            if (container != null && (container.isDismissing() || sFinishPosted)) {
+                                io.github.qmryqmm.hyperopen.util.IpcExecutor.runOnMain(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        sFinishPosted = false;
+                                        container.forceFinishPendingDismiss();
+                                    }
+                                });
+                            }
+                            return;
+                        }
+
+                        // 只有在自定义快捷面板处于展示态时，才拦截后续手势
+                        if (container == null || container.getVisibility() != View.VISIBLE) {
+                            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                                activePointerId = MotionEvent.INVALID_POINTER_ID;
+                            }
+                            return;
+                        }
+
+                        // 退场期间：绝不拦截 ACTION_DOWN（已在上方放行），仅吞掉 MOVE/UP/CANCEL 及多余多指事件
+                        if (container.isDismissing() || sFinishPosted) {
+                            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                                activePointerId = MotionEvent.INVALID_POINTER_ID;
+                                try {
+                                    XposedHelpers.setBooleanField(iconView, "isCatchDownEvent", false);
+                                } catch (Throwable ignored) {}
+                            }
+                            if (action == MotionEvent.ACTION_MOVE
+                                    || action == MotionEvent.ACTION_UP
+                                    || action == MotionEvent.ACTION_CANCEL
+                                    || action == MotionEvent.ACTION_POINTER_DOWN
+                                    || action == MotionEvent.ACTION_POINTER_UP) {
+                                param.setResult(null);
+                            }
+                            return;
+                        }
+
+                        if (action == MotionEvent.ACTION_POINTER_DOWN) {
+                            if (activePointerId == MotionEvent.INVALID_POINTER_ID && event.getPointerCount() > 0) {
+                                activePointerId = event.getPointerId(event.getActionIndex());
+                            }
+                            param.setResult(null);
+                            return;
+                        }
 
                         if (action == MotionEvent.ACTION_MOVE) {
+                            int pointerIndex = activePointerId != MotionEvent.INVALID_POINTER_ID
+                                ? event.findPointerIndex(activePointerId) : -1;
+                            if (pointerIndex < 0) {
+                                if (event.getPointerCount() <= 0) {
+                                    param.setResult(null);
+                                    return;
+                                }
+                                pointerIndex = 0;
+                                activePointerId = event.getPointerId(0);
+                            }
+                            final float rawX = event.getRawX(pointerIndex);
+                            final float rawY = event.getRawY(pointerIndex);
                             // 折叠 120Hz/240Hz 高频触摸采样：每帧最多在主线程执行一次鱼眼计算，零 Runnable 分配
                             container.scheduleFingerMove(rawX, rawY);
                             param.setResult(null); // 拦截原生滑动处理，避免原生逻辑干扰
+                        } else if (action == MotionEvent.ACTION_POINTER_UP) {
+                            int actionIndex = event.getActionIndex();
+                            int upPointerId = event.getPointerId(actionIndex);
+                            if (upPointerId != activePointerId) {
+                                // 第二指搭边后先抬起：吞掉事件，继续精确追踪原主指，防止提前关窗或跳变
+                                param.setResult(null);
+                                return;
+                            }
+                            // 主指抬起（第二指仍搭边）：立即以主指结束本次选择并退场，绝不切换到边缘手指造成触点跳变
+                            activePointerId = MotionEvent.INVALID_POINTER_ID;
+                            dispatchHookFinish(iconView, quickOpenView, container, true);
+                            param.setResult(null);
                         } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                             final boolean isUp = (action == MotionEvent.ACTION_UP);
-                            // 对齐原生 MiuiGxzwIconView$2：松手或取消时必须将 isCatchDownEvent 复位为 false
-                            try {
-                                XposedHelpers.setBooleanField(iconView, "isCatchDownEvent", false);
-                            } catch (Throwable ignored) {}
-
-                            Runnable finishTask = new Runnable() {
-                                @Override
-                                public void run() {
-                                    // 对齐原生 Lambda4：通知 MiuiGxzwIconView 手指已抬起，确保传感器/动画状态完整收尾
-                                    try {
-                                        XposedHelpers.callMethod(iconView, "onTouchUp", true);
-                                    } catch (Throwable ignored) {}
-
-                                    ShortcutItem selected = null;
-                                    if (isUp) {
-                                        selected = container.consumeSelectedAndReset();
-                                    } else {
-                                        container.resetBubbles();
-                                    }
-
-                                    final ShortcutItem finalSelected = selected;
-                                    Runnable doDismiss = () -> {
-                                        try {
-                                            dismissCompat(quickOpenView);
-                                        } catch (Throwable t) {
-                                            Log.e(TAG, "调用 dismiss 异常", t);
-                                        }
-                                        if (finalSelected != null) {
-                                            finalSelected.executeAsync(frameLayout.getContext());
-                                        }
-                                    };
-
-                                    HyperOpenConfig cfg = HyperOpenConfig.getCached();
-                                    if (cfg != null && cfg.dismissAnimEnabled) {
-                                        container.playDismissAnimation(doDismiss);
-                                    } else {
-                                        doDismiss.run();
-                                    }
-                                }
-                            };
-                            if (Looper.myLooper() == Looper.getMainLooper()) {
-                                finishTask.run();
-                            } else {
-                                frameLayout.post(finishTask);
-                            }
+                            activePointerId = MotionEvent.INVALID_POINTER_ID;
+                            dispatchHookFinish(iconView, quickOpenView, container, isUp);
                             param.setResult(null);
                         }
                     } catch (Throwable t) {
@@ -753,6 +802,48 @@ public class HyperOpenHook {
             }
         } catch (Throwable t) {
             Log.w(TAG, "Hook shouldListenForFingerprintWhenUnlocked 失败", t);
+        }
+    }
+
+    private static void dispatchHookFinish(
+            final Object iconView,
+            final Object quickOpenView,
+            final CustomHyperOpenContainer container,
+            final boolean isUp) {
+        // 对齐原生 MiuiGxzwIconView$2：松手或取消时必须将 isCatchDownEvent 复位为 false
+        try {
+            XposedHelpers.setBooleanField(iconView, "isCatchDownEvent", false);
+        } catch (Throwable ignored) {}
+
+        Runnable finishTask = new Runnable() {
+            @Override
+            public void run() {
+                sFinishPosted = false;
+                if (!active || container.getVisibility() != View.VISIBLE || container.isDismissing()) {
+                    return;
+                }
+                // 对齐原生 Lambda4：通知 MiuiGxzwIconView 手指已抬起，确保传感器/动画状态完整收尾
+                try {
+                    XposedHelpers.callMethod(iconView, "onTouchUp", true);
+                } catch (Throwable ignored) {}
+
+                container.startDismiss(isUp, new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            dismissCompat(quickOpenView);
+                        } catch (Throwable t) {
+                            Log.e(TAG, "调用 dismiss 异常", t);
+                        }
+                    }
+                });
+            }
+        };
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            finishTask.run();
+        } else {
+            sFinishPosted = true;
+            io.github.qmryqmm.hyperopen.util.IpcExecutor.runOnMain(finishTask);
         }
     }
 
@@ -1283,7 +1374,8 @@ public class HyperOpenHook {
         }
         try {
             if (m.getParameterTypes().length == 1) {
-                m.invoke(host, 0);
+                // 传 1 立即移除宿主窗口，避免 150ms 透明窗口残留阻塞后续点击
+                m.invoke(host, 1);
             } else {
                 m.invoke(host);
             }
@@ -1398,10 +1490,15 @@ public class HyperOpenHook {
      */
     private static void resetHostState(FrameLayout view, String why) {
         if (view == null) return;
+        sFinishPosted = false;
+        activePointerId = MotionEvent.INVALID_POINTER_ID;
 
         CustomHyperOpenContainer container = getContainer(view);
         if (container != null) {
             try {
+                if ("uninstall".equals(why)) {
+                    container.discardPendingDismissOnUninstall();
+                }
                 container.resetBubbles();
             } catch (Throwable t) {
                 Log.w(TAG, "复位气泡失败(" + why + ")", t);
@@ -1659,6 +1756,8 @@ public class HyperOpenHook {
         active = false;
         handleKeyguardDoneHooked = false;
         BLE_OR_TRUST_UNLOCKING_IN_DONE.remove();
+        activePointerId = MotionEvent.INVALID_POINTER_ID;
+        sFinishPosted = false;
 
         if (!wasActive && HANDLES.isEmpty()) {
             return 0;

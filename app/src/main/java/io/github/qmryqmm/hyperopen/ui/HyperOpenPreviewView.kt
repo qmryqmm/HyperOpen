@@ -1,5 +1,7 @@
 package io.github.qmryqmm.hyperopen.ui
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Point
@@ -16,6 +18,7 @@ import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import java.util.concurrent.atomic.AtomicBoolean
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
 import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory
 import io.github.qmryqmm.hyperopen.layout.ArcFanPacking
@@ -132,12 +135,18 @@ class HyperOpenPreviewView(
     private var fingerprintButton: View? = null
     /** 退场动画期间的标记，避免重复触发 */
     private var isDismissing: Boolean = false
+    private var dismissGeneration: Int = 0
+    private var pendingDismissComplete: (() -> Unit)? = null
 
     private var currentSelectedBubble: CircularBubbleView? = null
     private var pendingFolderBubble: CircularBubbleView? = null
     private var activeFolderBubble: CircularBubbleView? = null
     private var activeFolderDismissRadius: Float = 0f
     private val folderSubBubbles = mutableListOf<CircularBubbleView>()
+    private val collapsingSubBubbles = mutableListOf<CircularBubbleView>()
+    private var hasLastTouch: Boolean = false
+    private var lastTouchX: Float = 0f
+    private var lastTouchY: Float = 0f
     /** 图标幻影层：气泡压盖时在玻璃内显示邻居磨砂虚影（除自身录制，与真机同源） */
     private val ghostLayer = io.github.qmryqmm.hyperopen.view.IconGhostLayer(bubbleViews, folderSubBubbles, 1.5f)
     private var currentSelectedSubBubble: CircularBubbleView? = null
@@ -189,6 +198,9 @@ class HyperOpenPreviewView(
     private var sessionSnapshot: List<LayoutSig> = emptyList()
     // 各快捷项进入会话时的原始偏移（item 与 MainActivity 列表共享对象，放弃修改时据此还原字段）
     private var pristineOffsets: Map<String, FloatArray> = emptyMap()
+    private var pristineHeaderTopMargin: Int = config.headerTopMargin.coerceIn(24, 360)
+    private var sessionSnapshotHeaderTopMargin: Int = config.headerTopMargin.coerceIn(24, 360)
+    private var tentativeHeaderTopMargin: Int? = null
 
     init {
         snapEnabled = loadSnapEnabled()
@@ -321,8 +333,12 @@ class HyperOpenPreviewView(
         // 5. 在首次测量前提前建立蜂窝气泡视图树
         setupLayout()
 
-        // 6. 全屏虚线层插入后，把顶部提示重新提到最上层，避免虚线穿过提示胶囊
+        // 6. 全屏虚线层插入后，把顶部提示提到内容之上，并确保悬浮控制按钮位于最顶层（不被 headerPill 遮挡）
         topHeaderContainer.bringToFront()
+        floatingBackButton?.bringToFront()
+        snapToggleButton?.bringToFront()
+        alwaysShowToggleButton?.bringToFront()
+        executeToggleButton?.bringToFront()
         fingerprintButton?.bringToFront()
     }
 
@@ -570,14 +586,50 @@ class HyperOpenPreviewView(
         }
     }
 
+    /** 两阶段退场第一阶段：仅取消悬停/长按任务并立即清理子气泡，保留主气泡选中放大态与模糊。 */
+    fun prepareForDismiss() {
+        removeCallbacks(folderHoverRunnable)
+        removeCallbacks(longPressRunnable)
+        removeCallbacks(headerHeightLongPressRunnable)
+        pendingFolderBubble = null
+        pendingPressBubble = null
+        dismissFolderSubBubbles(animated = false)
+    }
+
+    /** 立即结束正在进行的退场动画（清理面板并确保未执行动作最多执行一次）。 */
+    private fun finishPendingDismissNow() {
+        val pending = pendingDismissComplete
+        pendingDismissComplete = null
+        isDismissing = false
+        dismissGeneration++
+        for (b in bubbleViews) {
+            b.animate().setListener(null).setUpdateListener(null).cancel()
+            b.endExternalScaleAnimation()
+            b.clearFisheyeTakeover()
+        }
+        panelVisible = false
+        setPanelChromeVisible(false)
+        resetHoverSelection()
+        BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
+        updateFingerprintButtonState()
+        pending?.invoke()
+    }
+
     /** 展开面板：播放与真实同源的入场动画，并通知 Compose 层恢复毛玻璃。 */
     private fun showPanel(animated: Boolean) {
+        if (isDismissing || pendingDismissComplete != null) {
+            finishPendingDismissNow()
+        }
         isDismissing = false
+        dismissGeneration++
+        hasLastTouch = false
         panelVisible = true
         updateFingerprintButtonState()
         setPanelChromeVisible(true)
         removeCallbacks(finishExpandGateRunnable)
         if (animated) {
+            // 与真机面板弹出时机对齐：展开瞬间触发一次配置触觉反馈
+            triggerHaptic()
             val expandMs = Math.max(0, config.animDurationMs)
             panelExpandAnimating = expandMs > 0
             hasPendingHover = false
@@ -585,18 +637,6 @@ class HyperOpenPreviewView(
             if (panelExpandAnimating) {
                 postDelayed(finishExpandGateRunnable, expandMs.toLong() + 100L)
             }
-            // 动画期间逐帧同步模糊斑点（缩放/位移/透明度）
-            val dur = Math.max(0, config.animDurationMs).toLong() + 120L
-            post(object : Runnable {
-                var elapsed = 0L
-                override fun run() {
-                    if (!panelVisible) return
-                    if (elapsed < dur) {
-                        elapsed += 16L
-                        postDelayed(this, 16L)
-                    }
-                }
-            })
         } else {
             panelExpandAnimating = false
             hasPendingHover = false
@@ -604,45 +644,63 @@ class HyperOpenPreviewView(
         }
     }
 
-    /** 收起面板：播放与真实同源的退场动画，播完回到隐藏态并重新显示指纹按钮。 */
-    private fun hidePanel(animated: Boolean, onDismissFinished: (() -> Unit)? = null) {
-        if (isDismissing) return
+    /** 收起面板：两阶段退场（先快照并清理子气泡，退场回调中再复位主气泡与状态）。 */
+    private fun hidePanel(
+        animated: Boolean,
+        selectedBubble: CircularBubbleView? = null,
+        onDismissFinished: (() -> Unit)? = null,
+    ) {
+        if (isDismissing) {
+            if (!animated) {
+                finishPendingDismissNow()
+            }
+            return
+        }
         removeCallbacks(finishExpandGateRunnable)
         panelExpandAnimating = false
         hasPendingHover = false
         // 排版模式下先退出，避免退场动画与拖拽状态冲突
         if (isEditMode) exitEditMode()
-        resetHoverSelection()
-        dismissFolderSubBubbles()
-        if (animated && config.dismissAnimEnabled) {
+
+        val snapshotBubble = selectedBubble
+            ?: if (resolveSelectedShortcut() != null) currentSelectedBubble else null
+
+        prepareForDismiss()
+        isDismissing = false
+        val gen = ++dismissGeneration
+        val executed = AtomicBoolean(false)
+        val executeOnce: () -> Unit = {
+            if (executed.compareAndSet(false, true)) {
+                onDismissFinished?.invoke()
+            }
+        }
+
+        if (animated && config.dismissAnimEnabled && bubbleViews.isNotEmpty()) {
             isDismissing = true
+            pendingDismissComplete = executeOnce
             BubblePanelAnimator.playDismiss(
-                bubbleViews, currentSelectedBubble, lastFodX, lastFodY, config
+                bubbleViews, snapshotBubble, lastFodX, lastFodY, config
             ) {
+                if (gen != dismissGeneration) return@playDismiss
+                pendingDismissComplete = null
                 isDismissing = false
+                dismissGeneration++
                 panelVisible = false
                 updateFingerprintButtonState()
                 setPanelChromeVisible(false)
+                resetHoverSelection()
                 BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
-                onDismissFinished?.invoke()
+                executeOnce()
             }
-            val dur = 200L
-            post(object : Runnable {
-                var elapsed = 0L
-                override fun run() {
-                    if (!isDismissing) return
-                    if (elapsed < dur) {
-                        elapsed += 16L
-                        postDelayed(this, 16L)
-                    }
-                }
-            })
         } else {
+            pendingDismissComplete = null
+            isDismissing = false
             panelVisible = false
             updateFingerprintButtonState()
             setPanelChromeVisible(false)
+            resetHoverSelection()
             BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
-            onDismissFinished?.invoke()
+            executeOnce()
         }
     }
 
@@ -663,7 +721,12 @@ class HyperOpenPreviewView(
         if (::sectorOverlay.isInitialized) {
             sectorOverlay.visibility = if (visible) View.VISIBLE else View.GONE
         }
-        snapToggleButton?.let { if (!visible) it.visibility = View.GONE }
+        snapToggleButton?.let {
+            if (!visible) {
+                it.animate().cancel()
+                it.visibility = View.GONE
+            }
+        }
         // 「面板常驻」开关永远可见，便于随时切回按住模式
     }
 
@@ -685,13 +748,25 @@ class HyperOpenPreviewView(
         panelExpandAnimating = false
         hasPendingHover = false
         isTouching = false
+        if (isDismissing || pendingDismissComplete != null) {
+            finishPendingDismissNow()
+        }
         if (enabled) {
             // 常驻：直接显示终态，可继续长按排版 / 滑动预览
             showPanel(animated = false)
         } else {
-            // 回到按住触发：收起面板，露出指纹按钮
-            panelVisible = false
+            // 回到按住触发：先退出编辑模式，再复位悬停并收起面板，防止 isEditMode 卡死导致指纹按钮无响应
+            if (isEditMode) {
+                exitEditMode()
+            }
+            if (isDraggingActive) {
+                isDraggingActive = false
+                draggingBubble = null
+            }
+            resetHoverSelection()
             isDismissing = false
+            dismissGeneration++
+            panelVisible = false
             setPanelChromeVisible(false)
             BubblePanelAnimator.applyHiddenState(bubbleViews, lastFodX, lastFodY)
         }
@@ -709,6 +784,7 @@ class HyperOpenPreviewView(
         freePlacedBubbles.clear()
         for (i in 0 until bubbleViews.size.coerceAtMost(gridPoints.size)) {
             val b = bubbleViews[i]
+            b.animate().setListener(null).setUpdateListener(null).cancel()
             val pt = gridPoints[i]
             b.item.customOffsetX = 0f
             b.item.customOffsetY = 0f
@@ -928,12 +1004,24 @@ class HyperOpenPreviewView(
         removeCallbacks(headerHeightLongPressRunnable)
         removeCallbacks(expandRunnable)
         removeCallbacks(finishExpandGateRunnable)
+        removeCallbacks(folderHoverRunnable)
+        val pending = pendingDismissComplete
+        pendingDismissComplete = null
+        isDismissing = false
+        dismissGeneration++
+        dismissFolderSubBubbles(animated = false)
+        for (b in bubbleViews) {
+            b.animate().setListener(null).setUpdateListener(null).cancel()
+            b.endExternalScaleAnimation()
+            b.clearFisheyeTakeover()
+        }
         previewMaterialControllers.values.forEach { it.release() }
         previewMaterialControllers.clear()
         headerPillBackdrop?.release()
         fingerprintHolding = false
         panelExpandAnimating = false
         hasPendingHover = false
+        pending?.invoke()
         // 注意：detach 时不再自动提交排版（旧实现裸提交未结算的动画中间值，导致返回键退出后图标错位）；
         // 是否保存由 MainActivity 的返回确认弹窗决定：commitLayoutChanges() / discardLayoutChanges()
         super.onDetachedFromWindow()
@@ -1015,6 +1103,7 @@ class HyperOpenPreviewView(
      * 若当前正处于手指按压、悬停放大或长按拖拽排版过程中，绝不重建视图树，避免打断手势或重置缩放。
      */
     fun updateConfig(newConfig: HyperOpenConfig) {
+        tentativeHeaderTopMargin?.let { newConfig.headerTopMargin = it }
         if (isTouching || isEditMode || isDraggingActive) {
             this.config = newConfig
             return
@@ -1060,6 +1149,11 @@ class HyperOpenPreviewView(
             old.glassReflectOffset != newConfig.glassReflectOffset ||
             old.shortcuts.size != newConfig.shortcuts.size
 
+        if (tentativeHeaderTopMargin == null && !isEditMode && !hasUnsavedLayoutChanges()) {
+            val baseMargin = newConfig.headerTopMargin.coerceIn(24, 360)
+            sessionSnapshotHeaderTopMargin = baseMargin
+            pristineHeaderTopMargin = baseMargin
+        }
         this.config = newConfig
         this.resolvedStyle = HyperOSMaterialFactory.resolveActiveStyle(context, config.materialStyle)
         refreshBackdropMask()
@@ -1107,7 +1201,6 @@ class HyperOpenPreviewView(
         refreshGhostLayerParams()
         if (needRebuild || bubbleViews.isEmpty()) {
             setupLayout()
-        } else {
         }
     }
 
@@ -1138,12 +1231,14 @@ class HyperOpenPreviewView(
         lastLayoutW = targetW
         lastLayoutH = targetH
 
+        dismissFolderSubBubbles(animated = false)
         bubblesContainer.removeAllViews()
         bubbleViews.clear()
         freePlacedBubbles.clear()
         activeShortcuts.clear()
         gridPoints.clear()
         currentSelectedBubble = null
+        hasLastTouch = false
 
         val fod = calculateFodCoordinates(targetW.toFloat(), targetH.toFloat())
         val fodX = fod.x
@@ -1354,6 +1449,10 @@ class HyperOpenPreviewView(
             pristineOffsets = activeShortcuts.associate {
                 it.id to floatArrayOf(it.customOffsetX, it.customOffsetY)
             }
+            val baseMargin = config.headerTopMargin.coerceIn(24, 360)
+            sessionSnapshotHeaderTopMargin = baseMargin
+            pristineHeaderTopMargin = baseMargin
+            tentativeHeaderTopMargin = null
         }
 
         // 气泡树重建后按「当前显隐状态」复位，而不是一律回到隐藏态：
@@ -1363,9 +1462,12 @@ class HyperOpenPreviewView(
         if (panelVisible || alwaysShowPanel) {
             panelVisible = true
             isDismissing = false
+            dismissGeneration++
             setPanelChromeVisible(true)
             BubblePanelAnimator.applyShownState(bubbleViews)
         } else {
+            isDismissing = false
+            dismissGeneration++
             setPanelChromeVisible(false)
             BubblePanelAnimator.applyHiddenState(bubbleViews, fodX, fodY)
         }
@@ -1402,51 +1504,36 @@ class HyperOpenPreviewView(
         handleFingerHover(x, y)
     }
 
+    private fun isInFloatingBackButton(x: Float, y: Float): Boolean {
+        val btn = floatingBackButton ?: return false
+        if (btn.visibility != View.VISIBLE) return false
+        val btnLp = btn.layoutParams as? LayoutParams ?: return false
+        val l = btnLp.leftMargin.toFloat()
+        val t = btnLp.topMargin.toFloat()
+        val r = l + btn.width.coerceAtLeast(dpToPx(48f).toInt())
+        val b = t + btn.height.coerceAtLeast(dpToPx(48f).toInt())
+        return x >= l && x <= r && y >= t && y <= b
+    }
+
+    private fun isInControlPill(btn: View?, x: Float, y: Float, slopPx: Float): Boolean {
+        if (btn == null || btn.visibility != View.VISIBLE) return false
+        return x >= btn.left - slopPx && x <= btn.right + slopPx &&
+            y >= btn.top - slopPx && y <= btn.bottom + slopPx
+    }
+
+    private fun isInFloatingControlButtons(x: Float, y: Float): Boolean {
+        val slop = dpToPx(6f)
+        if (isInFloatingBackButton(x, y)) return true
+        if (isInControlPill(snapToggleButton, x, y, slop)) return true
+        if (isInControlPill(alwaysShowToggleButton, x, y, slop)) return true
+        if (isInControlPill(executeToggleButton, x, y, slop)) return true
+        return false
+    }
+
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
-        // 如果点击发生在左上角悬浮返回按钮区域，放行给子 View 处理点击
-        floatingBackButton?.let { btn ->
-            if (btn.visibility == View.VISIBLE) {
-                val btnLp = btn.layoutParams as? LayoutParams
-                if (btnLp != null) {
-                    val l = btnLp.leftMargin
-                    val t = btnLp.topMargin
-                    val r = l + btn.width.coerceAtLeast(dpToPx(48f).toInt())
-                    val b = t + btn.height.coerceAtLeast(dpToPx(48f).toInt())
-                    if (ev.x >= l && ev.x <= r && ev.y >= t && ev.y <= b) {
-                        return false
-                    }
-                }
-            }
-        }
-        // 右上角吸附开关（仅排版模式可见）：放行触摸给按钮自身处理点击
-        snapToggleButton?.let { btn ->
-            if (btn.visibility == View.VISIBLE) {
-                val slop = dpToPx(6f)
-                if (ev.x >= btn.left - slop && ev.x <= btn.right + slop &&
-                    ev.y >= btn.top - slop && ev.y <= btn.bottom + slop) {
-                    return false
-                }
-            }
-        }
-        // 右上角「面板常驻」开关（常显）：放行触摸给按钮自身处理点击
-        alwaysShowToggleButton?.let { btn ->
-            if (btn.visibility == View.VISIBLE) {
-                val slop = dpToPx(6f)
-                if (ev.x >= btn.left - slop && ev.x <= btn.right + slop &&
-                    ev.y >= btn.top - slop && ev.y <= btn.bottom + slop) {
-                    return false
-                }
-            }
-        }
-        // 右上角「松手执行」开关（常显）：放行触摸给按钮自身处理点击
-        executeToggleButton?.let { btn ->
-            if (btn.visibility == View.VISIBLE) {
-                val slop = dpToPx(6f)
-                if (ev.x >= btn.left - slop && ev.x <= btn.right + slop &&
-                    ev.y >= btn.top - slop && ev.y <= btn.bottom + slop) {
-                    return false
-                }
-            }
+        // 悬浮控制按钮区域（返回 / 吸附 / 面板常驻 / 松手执行）：放行给子 View 处理点击
+        if (isInFloatingControlButtons(ev.x, ev.y)) {
+            return false
         }
         // 指纹按钮（面板隐藏态可见）：由预览容器从 DOWN 开始接管整段按压手势，
         // 这样面板展开后同一根手指的 MOVE 仍能继续驱动鱼眼选中，而不是被子 View 吃掉。
@@ -1476,8 +1563,10 @@ class HyperOpenPreviewView(
 
     private fun isHeaderHeightTouch(x: Float, y: Float): Boolean {
         if (!::topHeaderContainer.isInitialized || !::headerPill.isInitialized) return false
+        // 先排除顶部悬浮控制按钮区域，避免返回/右上角胶囊开关被高度拖拽热区截胡
+        if (isInFloatingControlButtons(x, y)) return false
         val horizontalInset = dpToPx(16f)
-        val verticalInset = dpToPx(28f)
+        val verticalInset = dpToPx(12f)
         val left = topHeaderContainer.left + headerPill.left - horizontalInset
         val top = topHeaderContainer.top + headerPill.top - verticalInset
         val right = left + headerPill.width + horizontalInset * 2f
@@ -1489,7 +1578,7 @@ class HyperOpenPreviewView(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 headerDragStartRawY = event.rawY
-                headerDragStartTopMargin = config.headerTopMargin.toFloat()
+                headerDragStartTopMargin = (tentativeHeaderTopMargin ?: config.headerTopMargin).toFloat()
                 removeCallbacks(headerHeightLongPressRunnable)
                 if (isEditMode) {
                     headerHeightDragging = true
@@ -1506,6 +1595,7 @@ class HyperOpenPreviewView(
                     val next = (headerDragStartTopMargin + deltaDp).toInt().coerceIn(24, 360)
                     if (next != config.headerTopMargin) {
                         config.headerTopMargin = next
+                        tentativeHeaderTopMargin = next
                         applyHeaderPillStyleAndLayout()
                     }
                 } else if (Math.abs(event.rawY - headerDragStartRawY) > dpToPx(10f)) {
@@ -1515,7 +1605,6 @@ class HyperOpenPreviewView(
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(headerHeightLongPressRunnable)
                 if (headerHeightDragging) {
-                    onHeaderTopMarginChanged(config.headerTopMargin.toFloat())
                     triggerHaptic()
                 }
                 headerHeightDragging = false
@@ -1529,15 +1618,21 @@ class HyperOpenPreviewView(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val x = event.x
         val y = event.y
+        if (isDismissing) {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                finishPendingDismissNow()
+            } else {
+                return true
+            }
+        }
         // 按在指纹按钮上的整段手势由预览容器接管：展开后 MOVE 继续驱动鱼眼，松手统一收场
         if (fingerprintHolding &&
             (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL)
         ) {
-            val selected = if (event.actionMasked == MotionEvent.ACTION_UP &&
-                executeShortcutOnRelease && !isEditMode
-            ) {
-                resolveSelectedShortcut()
-            } else null
+            val isUp = event.actionMasked == MotionEvent.ACTION_UP
+            val resolvedShortcut = if (isUp && !isEditMode) resolveSelectedShortcut() else null
+            val selectedToRun = if (executeShortcutOnRelease) resolvedShortcut else null
+            val popBubble = if (resolvedShortcut != null) currentSelectedBubble else null
             fingerprintHolding = false
             removeCallbacks(expandRunnable)
             removeCallbacks(finishExpandGateRunnable)
@@ -1545,16 +1640,16 @@ class HyperOpenPreviewView(
             hasPendingHover = false
             isTouching = false
             if (panelVisible && !alwaysShowPanel) {
-                // 与真机一致：退场动画结束后再执行动作
-                hidePanel(animated = true) {
-                    if (selected != null) {
+                // 与真机一致：退场动画结束后再执行动作（屏蔽 ACTION_FOLDER 的执行与确认震动）
+                hidePanel(animated = true, selectedBubble = popBubble) {
+                    if (selectedToRun != null) {
                         triggerHaptic()
-                        selected.executeAsync(context)
+                        selectedToRun.executeAsync(context)
                     }
                 }
-            } else if (selected != null) {
+            } else if (selectedToRun != null) {
                 triggerHaptic()
-                selected.executeAsync(context)
+                selectedToRun.executeAsync(context)
             }
             return true
         }
@@ -1573,9 +1668,9 @@ class HyperOpenPreviewView(
                 removeCallbacks(expandRunnable)
                 removeCallbacks(finishExpandGateRunnable)
                 // showDelayMs == 500 为系统默认：真实侧该值不干预原生 500ms 延迟，
-                // 预览侧直接用配置值（0 = 立即），保证「能感觉」的等待时长对齐
+                // 预览侧直接用配置值（0 = 立即），保证「能感觉」的等待时长对齐；
+                // 展开震动已移至 showPanel()，与真机面板弹出时机对齐。
                 postDelayed(expandRunnable, Math.max(0, config.showDelayMs).toLong())
-                triggerHaptic()
                 return true
             }
             return fingerprintHolding
@@ -1702,12 +1797,13 @@ class HyperOpenPreviewView(
         editBanner.animate().alpha(1f).setDuration(200).start()
 
         snapToggleButton?.let {
+            it.animate().cancel()
             it.text = snapToggleText()
             it.alpha = 0f
             it.visibility = View.VISIBLE
-            // 扇区模式下视觉禁用吸附按钮
-            it.alpha = if (isRingSectorActive()) 0.5f else 1f
-            it.animate().alpha(if (isRingSectorActive()) 0.5f else 1f).setDuration(200).start()
+            // 扇区模式下视觉禁用吸附按钮，从 alpha=0f 淡入目标透明度
+            val targetAlpha = if (isRingSectorActive()) 0.5f else 1f
+            it.animate().alpha(targetAlpha).setDuration(200).start()
         }
 
         HintTextStyler.reset(headerTitle, true, config)
@@ -1744,13 +1840,15 @@ class HyperOpenPreviewView(
         editingHeaderHeight = false
         triggerHaptic()
 
+        editBanner.animate().cancel()
         editBanner.animate().alpha(0f).setDuration(150).withEndAction {
-            editBanner.visibility = View.GONE
+            if (!isEditMode) editBanner.visibility = View.GONE
         }.start()
 
         snapToggleButton?.let { btn ->
+            btn.animate().cancel()
             btn.animate().alpha(0f).setDuration(150).withEndAction {
-                btn.visibility = View.GONE
+                if (!isEditMode) btn.visibility = View.GONE
             }.start()
         }
 
@@ -1822,8 +1920,10 @@ class HyperOpenPreviewView(
         }
     }
 
-    /** 是否存在未保存的排版修改（顺序变化或偏移差 > 0.6dp；容差吸收 .toInt() 取整噪声） */
+    /** 是否存在未保存的排版修改（顺序变化、偏移差 > 0.6dp 或顶部提示垂直边距变动） */
     fun hasUnsavedLayoutChanges(): Boolean {
+        val curTop = (tentativeHeaderTopMargin ?: config.headerTopMargin).coerceIn(24, 360)
+        if (curTop != sessionSnapshotHeaderTopMargin) return true
         if (bubbleViews.isEmpty()) return false
         val cur = captureLayoutSignature()
         if (cur.size != sessionSnapshot.size) return true
@@ -1837,45 +1937,68 @@ class HyperOpenPreviewView(
     }
 
     /**
-     * 提交排版（返回确认弹窗「保存并退出」）：结算动画 → 吸附归位 → 偏移写回 item → 回调 onOrderChanged。
-     * 与旧版 exitEditMode 的保存分支语义等价，但保证读到的都是最终位置而非动画中间值。
+     * 提交排版（返回确认弹窗「保存并退出」）：结算动画 → 归位清零槽位偏移 → 写回 item/headerTopMargin → 回调同步。
      */
     fun commitLayoutChanges() {
-        if (bubbleViews.isEmpty()) return
-        if (isDraggingActive && draggingBubble != null) {
-            finishDragging()
-        }
-        settleBubblePositionsImmediately()
-        if (snapEnabled && freePlacedBubbles.isNotEmpty()) {
-            // 开启吸附时自由摆放的图标归位到蜂窝槽位（lp 立即写槽位，translation 动画仅作视觉过渡）
-            snapAllBubblesToGrid(animated = true)
-        }
-        flushOffsetsToItems()
-        if (snapEnabled) {
-            for (b in bubbleViews) {
-                b.item.customOffsetX = 0f
-                b.item.customOffsetY = 0f
+        val committedMargin = (tentativeHeaderTopMargin ?: config.headerTopMargin).coerceIn(24, 360)
+        config.headerTopMargin = committedMargin
+        val headerMarginChanged = committedMargin != sessionSnapshotHeaderTopMargin
+
+        if (bubbleViews.isNotEmpty()) {
+            if (isDraggingActive && draggingBubble != null) {
+                finishDragging()
+            }
+            settleBubblePositionsImmediately()
+            if (snapEnabled) {
+                // 先清零槽位偏移与 translation，避免后续 flushOffsetsToItems 与 captureLayoutSignature 读到未落定中间值
+                snapAllBubblesToGrid(animated = false)
+            }
+            flushOffsetsToItems()
+            if (snapEnabled) {
+                for (b in bubbleViews) {
+                    b.item.customOffsetX = 0f
+                    b.item.customOffsetY = 0f
+                }
             }
         }
         exitEditMode()
-        onOrderChanged(bubbleViews.map { it.item })
-        sessionSnapshot = captureLayoutSignature()
-        pristineOffsets = bubbleViews.associate {
-            it.item.id to floatArrayOf(it.item.customOffsetX, it.item.customOffsetY)
+        if (headerMarginChanged) {
+            onHeaderTopMarginChanged(committedMargin.toFloat())
         }
+        if (bubbleViews.isNotEmpty()) {
+            onOrderChanged(bubbleViews.map { it.item })
+            sessionSnapshot = captureLayoutSignature()
+            pristineOffsets = bubbleViews.associate {
+                it.item.id to floatArrayOf(it.item.customOffsetX, it.item.customOffsetY)
+            }
+        }
+        tentativeHeaderTopMargin = null
+        sessionSnapshotHeaderTopMargin = committedMargin
+        pristineHeaderTopMargin = committedMargin
     }
 
-    /** 放弃排版修改（返回确认弹窗「放弃」）：把 item 偏移字段还原为进入会话时的原始值（item 与外部列表共享对象，必须还原） */
+    /** 放弃排版修改（返回确认弹窗「放弃」）：还原 item 偏移字段与顶部提示垂直边距，并同步回调。 */
     fun discardLayoutChanges() {
         if (isEditMode) {
             isEditMode = false
+            editingHeaderHeight = false
+            editBanner.animate().cancel()
             editBanner.visibility = View.GONE
+            snapToggleButton?.animate()?.cancel()
             snapToggleButton?.visibility = View.GONE
         }
         for (b in bubbleViews) {
             val p = pristineOffsets[b.item.id] ?: continue
             b.item.customOffsetX = p[0]
             b.item.customOffsetY = p[1]
+        }
+        val revertedMargin = pristineHeaderTopMargin.coerceIn(24, 360)
+        val needRevertHeader = tentativeHeaderTopMargin != null || config.headerTopMargin != revertedMargin
+        tentativeHeaderTopMargin = null
+        config.headerTopMargin = revertedMargin
+        if (needRevertHeader) {
+            applyHeaderPillStyleAndLayout()
+            onHeaderTopMarginChanged(revertedMargin.toFloat())
         }
     }
 
@@ -2086,10 +2209,31 @@ class HyperOpenPreviewView(
         }
     }
 
+    private fun isSectorModeActive(): Boolean {
+        if (isRingSectorActive()) return true
+        return config.layoutStyle == HyperOpenConfig.LAYOUT_SYSTEM_STOCK &&
+            config.stockSystemRegion &&
+            stockSpecs.isNotEmpty()
+    }
+
+    private fun showFolderEmptyHeader(folderBubble: CircularBubbleView?) {
+        if (!::headerTitle.isInitialized || !::headerSubtitle.isInitialized) return
+        HintTextStyler.reset(headerTitle, true, config)
+        HintTextStyler.reset(headerSubtitle, false, config)
+        val folderTitle = folderBubble?.item?.title?.takeIf { it.isNotEmpty() } ?: "文件夹"
+        headerTitle.text = folderTitle
+        headerSubtitle.text = "移出关闭文件夹"
+    }
+
     /**
      * 模拟指纹滑动物理动力学
      */
     private fun handleFingerHover(touchX: Float, touchY: Float) {
+        if (isDismissing) return
+        lastTouchX = touchX
+        lastTouchY = touchY
+        hasLastTouch = true
+
         if (activeFolderBubble != null && folderSubBubbles.isNotEmpty()) {
             handleFolderSubBubbleMove(touchX, touchY)
             return
@@ -2172,6 +2316,20 @@ class HyperOpenPreviewView(
                 HintTextStyler.apply(headerTitle, closest.item, true, config)
                 HintTextStyler.apply(headerSubtitle, closest.item, false, config)
                 triggerSlideHaptic()
+            } else if (
+                closest != null &&
+                ShortcutItem.ACTION_FOLDER.equals(closest.item.actionType) &&
+                !isEditMode &&
+                !isDraggingActive &&
+                pendingPressBubble == null &&
+                activeFolderBubble == null &&
+                pendingFolderBubble != closest
+            ) {
+                // 常驻模式下长按排版计时取消后，若手指仍停留在同一未展开文件夹上，补投递悬停展开计时器
+                pendingFolderBubble = closest
+                removeCallbacks(folderHoverRunnable)
+                val delay = Math.max(100, config.folderHoverDelayMs).toLong()
+                postDelayed(folderHoverRunnable, delay)
             }
         } else {
             removeCallbacks(folderHoverRunnable)
@@ -2190,10 +2348,14 @@ class HyperOpenPreviewView(
     private fun resetHoverSelection() {
         removeCallbacks(folderHoverRunnable)
         pendingFolderBubble = null
-        dismissFolderSubBubbles()
+        dismissFolderSubBubbles(animated = false)
         currentSelectedBubble?.setSelectedState(false)
         currentSelectedBubble = null
+        hasLastTouch = false
         for (b in bubbleViews) {
+            b.animate().setListener(null).setUpdateListener(null).cancel()
+            b.endExternalScaleAnimation()
+            b.clearFisheyeTakeover()
             b.applyScale(1.0f)
             b.resetFolderDim()
             b.setIconAlpha(config.iconAlpha)
@@ -2206,12 +2368,18 @@ class HyperOpenPreviewView(
     }
 
     private fun expandFolder(folderBubble: CircularBubbleView) {
-        val children = folderBubble.item?.parseFolderChildren() ?: return
+        if (isDismissing || isEditMode) return
+        val children = folderBubble.item?.parseFolderChildren()?.filter { it.enabled }.orEmpty()
         if (children.isEmpty()) return
+
+        pendingFolderBubble = null
+        val initialTouchDist = if (hasLastTouch && isSectorModeActive()) {
+            Math.hypot((lastTouchX - folderBubble.targetX).toDouble(), (lastTouchY - folderBubble.targetY).toDouble()).toFloat()
+        } else 0f
 
         // 先把文件夹图标完全放大到鱼眼峰值（maxScale），放大动画播完后再展开子项：
         // 避免「边放大边展开」导致子项起点位置与文件夹最终位置错位、观感突兀
-        folderBubble.animate().cancel()
+        folderBubble.animate().setListener(null).setUpdateListener(null).cancel()
         folderBubble.animateFolderDim(false, 120L)
         folderBubble.animate()
             .scaleX(config.maxScale)
@@ -2222,34 +2390,74 @@ class HyperOpenPreviewView(
                 folderBubble.syncBlurCornerRadiusWithViewScale()
                 folderBubble.syncGhost()
             }
-            .withEndAction {
-                // 松手 / 状态被复位后不再展开（防竞态：放大动画期间用户抬手）
-                if (!isTouching || activeFolderBubble != null) return@withEndAction
-                // 同步 fisheyeScale 字段，保证后续 applyScale 判定基准正确
-                folderBubble.applyScale(config.maxScale)
-                performFolderExpansion(folderBubble, children)
-            }
+            .setListener(object : AnimatorListenerAdapter() {
+                private var canceled = false
+                private var done = false
+
+                override fun onAnimationCancel(animation: Animator) {
+                    canceled = true
+                }
+
+                override fun onAnimationEnd(animation: Animator) {
+                    if (done) return
+                    done = true
+                    folderBubble.animate().setListener(null)
+                    // 松手 / 滑离 / 退场 / 状态复位后不再展开（防竞态）
+                    if (canceled || isDismissing || !isTouching || isEditMode ||
+                        currentSelectedBubble != folderBubble || activeFolderBubble != null
+                    ) {
+                        return
+                    }
+                    // 同步 fisheyeScale 字段，保证后续 applyScale 判定基准正确
+                    folderBubble.applyScale(config.maxScale)
+                    performFolderExpansion(folderBubble, children, initialTouchDist)
+                }
+            })
             .start()
     }
 
     /** 文件夹图标完全放大后的实际展开：其余普通图标恢复原大小（在展开时长内同步渐变变暗），子项从文件夹中心扇形展开 */
-    private fun performFolderExpansion(folderBubble: CircularBubbleView, children: List<ShortcutItem>) {
-        dismissFolderSubBubbles()
+    private fun performFolderExpansion(
+        folderBubble: CircularBubbleView,
+        children: List<ShortcutItem>,
+        initialTouchDist: Float = 0f,
+    ) {
+        dismissFolderSubBubbles(animated = false)
         activeFolderBubble = folderBubble
+        ghostLayer.setExcludedSource(folderBubble)
+        showFolderEmptyHeader(folderBubble)
         triggerSlideHaptic()
 
         val dimDuration = config.folderChildExpandDurationMs.coerceAtLeast(0).toLong()
         for (b in bubbleViews) {
             if (b != folderBubble) {
                 // 其余普通图标：线性恢复原本大小（鱼眼放大收回 1.0），并在子项展开时长内同步渐变弱化
-                b.animate().cancel()
+                b.animate().setListener(null).setUpdateListener(null).cancel()
+                b.prepareExternalScaleTarget(1.0f, false)
                 b.animate()
                     .scaleX(1.0f)
                     .scaleY(1.0f)
                     .setDuration(140)
                     .setInterpolator(android.view.animation.LinearInterpolator())
                     .setUpdateListener { b.syncBlurCornerRadiusWithViewScale() }
-                    .withEndAction { b.applyScale(1.0f); b.ensureBlurAndRefreshBackground() }
+                    .setListener(object : AnimatorListenerAdapter() {
+                        private var canceled = false
+                        private var done = false
+
+                        override fun onAnimationCancel(animation: Animator) {
+                            canceled = true
+                        }
+
+                        override fun onAnimationEnd(animation: Animator) {
+                            if (done) return
+                            done = true
+                            b.animate().setListener(null)
+                            b.endExternalScaleAnimation()
+                            if (!canceled && !b.isFisheyeScaleActive()) {
+                                b.ensureBlurAndRefreshBackground()
+                            }
+                        }
+                    })
                     .start()
                 b.animateFolderDim(true, dimDuration) { folderBubble.syncGhost() }
             } else {
@@ -2286,7 +2494,16 @@ class HyperOpenPreviewView(
             if (d > maxChildDist) maxChildDist = d
         }
         val parentIconSizePx = dpToPx(config.iconSize.toFloat())
-        activeFolderDismissRadius = maxOf(parentIconSizePx * 2.8f, maxChildDist + childIconSizePx * 1.3f)
+        val baseDismissRadius = maxOf(parentIconSizePx * 2.8f, maxChildDist + childIconSizePx * 1.3f)
+        activeFolderDismissRadius = if (isSectorModeActive()) {
+            val liveDist = if (hasLastTouch) {
+                Math.hypot((lastTouchX - folderBubble.targetX).toDouble(), (lastTouchY - folderBubble.targetY).toDouble()).toFloat()
+            } else 0f
+            val sectorGuard = maxOf(initialTouchDist, liveDist) + parentIconSizePx * 1.2f
+            maxOf(baseDismissRadius, sectorGuard)
+        } else {
+            baseDismissRadius
+        }
         val createdSubs = ArrayList<CircularBubbleView>(count)
 
         for (i in 0 until count) {
@@ -2355,7 +2572,7 @@ class HyperOpenPreviewView(
             if (currentSelectedSubBubble != closestSub) {
                 currentSelectedSubBubble?.setSelectedState(false)
 
-                closestSub!!.setSelectedState(true)
+                closestSub.setSelectedState(true)
                 closestSub.bringToFront()
                 currentSelectedSubBubble = closestSub
 
@@ -2364,7 +2581,8 @@ class HyperOpenPreviewView(
                 triggerSlideHaptic()
             }
         } else {
-            if (currentSelectedSubBubble != null) {
+            val clearedSub = currentSelectedSubBubble != null
+            if (clearedSub) {
                 currentSelectedSubBubble?.setSelectedState(false)
                 currentSelectedSubBubble = null
             }
@@ -2376,6 +2594,17 @@ class HyperOpenPreviewView(
             val dismissThreshold = maxOf(iconSizePx * 2.8f, activeFolderDismissRadius)
             if (distFromFolder > dismissThreshold) {
                 dismissFolderSubBubbles(animated = true)
+                currentSelectedBubble?.setSelectedState(false)
+                currentSelectedBubble = null
+                HintTextStyler.reset(headerTitle, true, config)
+                HintTextStyler.reset(headerSubtitle, false, config)
+                headerTitle.text = "滑动选择快捷方式"
+                headerSubtitle.text = "移至目标图标后松手直接打开"
+                handleFingerHover(touchX, touchY)
+                return
+            }
+            if (clearedSub) {
+                showFolderEmptyHeader(folder)
             }
         }
     }
@@ -2387,6 +2616,16 @@ class HyperOpenPreviewView(
      *                 false 时立即移除（松手退场 / 排版 / 切换文件夹等，外层已有动画或需立即复位）。
      */
     private fun dismissFolderSubBubbles(animated: Boolean = false) {
+        if (!animated && collapsingSubBubbles.isNotEmpty()) {
+            val collapsing = ArrayList(collapsingSubBubbles)
+            collapsingSubBubbles.clear()
+            for (sub in collapsing) {
+                sub.animate().setListener(null).setUpdateListener(null).cancel()
+                sub.endExternalScaleAnimation()
+                sub.resetBlur()
+                bubblesContainer.removeView(sub)
+            }
+        }
         if (folderSubBubbles.isEmpty()) return
         val folder = activeFolderBubble
         val subs = ArrayList(folderSubBubbles)
@@ -2394,20 +2633,25 @@ class HyperOpenPreviewView(
         currentSelectedSubBubble = null
         activeFolderBubble = null
         activeFolderDismissRadius = 0f
+        ghostLayer.setExcludedSource(null)
 
         if (!animated) {
             for (sub in subs) {
-                sub.animate().cancel()
+                sub.animate().setListener(null).setUpdateListener(null).cancel()
+                sub.endExternalScaleAnimation()
                 sub.resetBlur()
                 bubblesContainer.removeView(sub)
             }
         } else {
+            collapsingSubBubbles.addAll(subs)
             val collapseTarget = folder ?: subs.first()
             FolderChildAnimator.playCollapse(subs, collapseTarget, config) {
                 for (sub in subs) {
-                    sub.animate().cancel()
+                    sub.animate().setListener(null).setUpdateListener(null).cancel()
+                    sub.endExternalScaleAnimation()
                     sub.resetBlur()
                     bubblesContainer.removeView(sub)
+                    collapsingSubBubbles.remove(sub)
                 }
             }
         }
@@ -2416,8 +2660,9 @@ class HyperOpenPreviewView(
         for (b in bubbleViews) {
             // 收起时一级气泡（含文件夹图标）恢复原大小与原透明度：
             // 有动画的关闭走平滑过渡（与收拢动画同步），立即关闭保持瞬态复位
-            b.animate().cancel()
+            b.animate().setListener(null).setUpdateListener(null).cancel()
             if (animated) {
+                b.prepareExternalScaleTarget(1.0f, false)
                 b.animate()
                     .scaleX(1.0f)
                     .scaleY(1.0f)
@@ -2427,14 +2672,30 @@ class HyperOpenPreviewView(
                         b.syncBlurCornerRadiusWithViewScale()
                         b.clearGhost()
                     }
-                    .withEndAction {
-                        b.applyScale(1.0f)
-                        b.ensureBlurAndRefreshBackground()
-                        b.clearGhost()
-                    }
+                    .setListener(object : AnimatorListenerAdapter() {
+                        private var canceled = false
+                        private var done = false
+
+                        override fun onAnimationCancel(animation: Animator) {
+                            canceled = true
+                        }
+
+                        override fun onAnimationEnd(animation: Animator) {
+                            if (done) return
+                            done = true
+                            b.animate().setListener(null)
+                            b.endExternalScaleAnimation()
+                            if (!canceled && !b.isFisheyeScaleActive()) {
+                                b.ensureBlurAndRefreshBackground()
+                                b.clearGhost()
+                            }
+                        }
+                    })
                     .start()
                 b.animateFolderRestore(config.iconAlpha, collapseDuration)
             } else {
+                b.endExternalScaleAnimation()
+                b.clearFisheyeTakeover()
                 b.applyScale(1.0f)
                 b.ensureBlurAndRefreshBackground()
                 b.clearGhost()

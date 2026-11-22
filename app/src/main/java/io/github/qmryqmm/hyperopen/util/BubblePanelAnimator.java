@@ -1,5 +1,7 @@
 package io.github.qmryqmm.hyperopen.util;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.view.animation.AccelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.LinearInterpolator;
@@ -22,7 +24,9 @@ public final class BubblePanelAnimator {
 
     public static void applyHiddenState(List<? extends CircularBubbleView> bubbles, float fodX, float fodY) {
         for (CircularBubbleView b : bubbles) {
-            b.animate().cancel();
+            b.animate().setListener(null).setUpdateListener(null).cancel();
+            b.endExternalScaleAnimation();
+            b.clearFisheyeTakeover();
             b.setTranslationX(fodX - b.targetX);
             b.setTranslationY(fodY - b.targetY);
             b.setScaleX(0.1f);
@@ -34,7 +38,9 @@ public final class BubblePanelAnimator {
 
     public static void applyShownState(List<? extends CircularBubbleView> bubbles) {
         for (CircularBubbleView b : bubbles) {
-            b.animate().cancel();
+            b.animate().setListener(null).setUpdateListener(null).cancel();
+            b.endExternalScaleAnimation();
+            b.clearFisheyeTakeover();
             b.setTranslationX(0f);
             b.setTranslationY(0f);
             b.setScaleX(1f);
@@ -42,6 +48,30 @@ public final class BubblePanelAnimator {
             b.setAlpha(1f);
             b.applyScale(1f);
         }
+    }
+
+    private static AnimatorListenerAdapter createExpandEndListener(final CircularBubbleView b) {
+        return new AnimatorListenerAdapter() {
+            private boolean canceled = false;
+            private boolean done = false;
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+                canceled = true;
+            }
+
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                if (done) return;
+                done = true;
+                b.animate().setListener(null);
+                b.endExternalScaleAnimation();
+                if (!canceled && !b.isFisheyeScaleActive()) {
+                    b.applyScale(1f);
+                    b.ensureBlurAndRefreshBackground();
+                }
+            }
+        };
     }
 
     public static void playExpand(List<? extends CircularBubbleView> bubbles,
@@ -56,8 +86,10 @@ public final class BubblePanelAnimator {
 
         for (int i = 0; i < bubbles.size(); i++) {
             CircularBubbleView b = bubbles.get(i);
-            b.animate().cancel();
+            b.animate().setListener(null).setUpdateListener(null).cancel();
             if (duration == 0) {
+                b.endExternalScaleAnimation();
+                b.clearFisheyeTakeover();
                 b.setTranslationX(0f);
                 b.setTranslationY(0f);
                 b.setScaleX(1f);
@@ -67,6 +99,7 @@ public final class BubblePanelAnimator {
                 continue;
             }
 
+            b.prepareExternalScaleTarget(1f, true);
             long delay = Math.min(i * (long) stagger, 160L);
             if (type == HyperOpenConfig.PANEL_EXPAND_FADE_SCALE) {
                 b.setTranslationX(0f);
@@ -83,7 +116,7 @@ public final class BubblePanelAnimator {
                         .setDuration(duration)
                         .setStartDelay(delay)
                         .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
-                        .withEndAction(() -> b.applyScale(1f))
+                        .setListener(createExpandEndListener(b))
                         .start();
                 continue;
             }
@@ -101,7 +134,7 @@ public final class BubblePanelAnimator {
                         .setInterpolator(new DecelerateInterpolator())
                         .setDuration(duration)
                         .setStartDelay(delay)
-                        .withEndAction(() -> b.applyScale(1f))
+                        .setListener(createExpandEndListener(b))
                         .start();
             } else {
                 b.setScaleX(0.1f);
@@ -118,7 +151,7 @@ public final class BubblePanelAnimator {
                         .setDuration(duration)
                         .setStartDelay(delay)
                         .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
-                        .withEndAction(() -> b.applyScale(1f))
+                        .setListener(createExpandEndListener(b))
                         .start();
             }
         }
@@ -151,11 +184,25 @@ public final class BubblePanelAnimator {
         };
 
         for (int i = 0; i < bubbles.size(); i++) {
-            CircularBubbleView b = bubbles.get(i);
-            b.animate().cancel();
+            final CircularBubbleView b = bubbles.get(i);
+            b.animate().setListener(null).setUpdateListener(null).cancel();
+            b.beginExternalScaleAnimation(false);
             boolean isSelected = b == selected;
             long delay = isSelected ? 0L : Math.min(i * (long) stagger, 120L);
-            float popScale = config != null ? Math.max(1f, config.panelSelectedPopScale) : 1.30f;
+            float popScale = Math.max(1f, config.panelSelectedPopScale);
+
+            AnimatorListenerAdapter endListener = new AnimatorListenerAdapter() {
+                private boolean done = false;
+
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    if (done) return;
+                    done = true;
+                    b.animate().setListener(null);
+                    b.endExternalScaleAnimation();
+                    finishOne.run();
+                }
+            };
 
             if (type == HyperOpenConfig.PANEL_COLLAPSE_FADE_SCALE) {
                 b.animate()
@@ -168,7 +215,7 @@ public final class BubblePanelAnimator {
                         .setDuration(duration)
                         .setStartDelay(delay)
                         .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
-                        .withEndAction(finishOne)
+                        .setListener(endListener)
                         .start();
             } else if (isSelected && type == HyperOpenConfig.PANEL_COLLAPSE_SELECTED_POP) {
                 b.animate()
@@ -178,7 +225,7 @@ public final class BubblePanelAnimator {
                         .setInterpolator(new DecelerateInterpolator())
                         .setDuration(duration)
                         .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
-                        .withEndAction(finishOne)
+                        .setListener(endListener)
                         .start();
             } else {
                 float toX = fodX - b.targetX;
@@ -197,7 +244,7 @@ public final class BubblePanelAnimator {
                         .setDuration(duration)
                         .setStartDelay(delay)
                         .setUpdateListener(anim -> b.syncBlurCornerRadiusWithViewScale())
-                        .withEndAction(finishOne)
+                        .setListener(endListener)
                         .start();
             }
         }
