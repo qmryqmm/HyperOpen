@@ -42,22 +42,22 @@
 
 ## 自定义域名绑定教程
 
-`*.workers.dev` 子域在部分网络环境下可能受限，建议在生产环境绑定自有域名：
+`*.workers.dev` 子域在部分网络环境下可能受限，生产环境默认使用已绑定的自有域名 `https://market.qmmry.cfd`（审核台：`https://market.qmmry.cfd/admin`）。如需绑定其他自有域名：
 
 1. 将域名托管到 Cloudflare DNS（确保对应域名所在 Zone 为 Active 状态）。
 2. 登录 Cloudflare Dashboard → **Workers & Pages** → 选择 `hyperopen-market`。
 3. 进入 **Settings** → **Domains & Routes** → 点击 **Add** → 选择 **Custom Domain**。
-4. 输入子域名（例如 `market.example.com`）并确认。Cloudflare 会自动签发 TLS 证书并配置路由，无需手动创建 DNS A/CNAME 记录。
+4. 输入子域名（例如 `market.qmmry.cfd`）并确认。Cloudflare 会自动签发 TLS 证书并配置路由，无需手动创建 DNS A/CNAME 记录。
 5. 绑定完成后：
-   - 客户端 API 基地址改为 `https://market.example.com`
-   - 审核台地址为 `https://market.example.com/admin`
+   - 客户端默认 API 基地址：`https://market.qmmry.cfd`
+   - 审核台地址：`https://market.qmmry.cfd/admin`
    - 可按需在 **Domains & Routes** 中决定是否保留默认 `workers.dev` 子域。
 
 ---
 
 ## `/admin` 审核台说明
 
-访问 `https://<worker-domain>/admin` 即可打开响应式单页审核台：
+访问 `https://market.qmmry.cfd/admin`（或你自建实例的 `https://<worker-domain>/admin`）即可打开响应式单页审核台：
 
 - **登录鉴权**：输入通过 `ADMIN_TOKEN` Secret 配置的管理员口令，验证通过后仅缓存在当前浏览器标签页的 `sessionStorage` 中（关闭标签页自动清除）。
 - **自动审核分流规则**：

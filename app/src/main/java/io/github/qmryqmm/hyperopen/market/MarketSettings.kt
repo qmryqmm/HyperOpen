@@ -15,7 +15,7 @@ object MarketSettings {
     private const val KEY_LAST_AUTHOR = "last_author"
     private const val PREFIX_MANAGE_TOKEN = "manage_token_"
 
-    const val DEFAULT_BASE_URL = "https://hyperopen-market.3307386373.workers.dev"
+    const val DEFAULT_BASE_URL = "https://market.qmmry.cfd"
     const val KIND_CONFIG = "config"
     const val KIND_SHORTCUT = "shortcut"
 
