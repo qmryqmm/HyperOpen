@@ -174,7 +174,7 @@ class HyperOpenPreviewView(
         pendingFolderBubble = null
         dismissFolderSubBubbles()
         // 扇区触发模式下允许自定义排版，但自动禁用图标吸附开关
-        if (target != null && !isEditMode && !isDraggingActive) {
+        if (target != null && !sandboxMode && !isEditMode && !isDraggingActive) {
             currentSelectedBubble?.setSelectedState(false)
             currentSelectedBubble = null
             enterEditMode(target)
@@ -191,6 +191,8 @@ class HyperOpenPreviewView(
     /** 预览松手是否真正执行选中的快捷方式（默认关闭，避免调参时误启动） */
     private var executeShortcutOnRelease: Boolean = false
     private var executeToggleButton: TextView? = null
+    /** 纯内存沙箱预览模式（配置市场预览用）：禁止长按编辑、拖拽与松手执行，仅保留真实壁纸、材质、鱼眼与文件夹交互 */
+    private var sandboxMode: Boolean = false
     private val freePlacedBubbles = mutableSetOf<CircularBubbleView>()
 
     // 会话布局快照：进入界面/保存后捕获，用于返回键退出时判断是否存在未保存的排版修改
@@ -777,6 +779,55 @@ class HyperOpenPreviewView(
     /** 当前面板是否可见（供 Compose 层读取，决定压暗层是否绘制）。 */
     fun isPanelVisible(): Boolean = panelVisible
 
+    private fun defaultHeaderSubtitle(): String =
+        if (sandboxMode) "沙箱预览模式 · 松手仅收起不触发动作" else "移至目标图标后松手直接打开"
+
+    /**
+     * 切换纯内存沙箱预览模式：
+     * 开启后禁止长按进入排版编辑、禁止拖拽、禁用松手触发快捷方式执行，
+     * 并隐藏编辑态提示与「松手执行」开关，保留真实壁纸、材质、鱼眼与文件夹交互；
+     * 关闭时恢复默认预览与排版能力。
+     */
+    fun setSandboxMode(enabled: Boolean) {
+        if (sandboxMode == enabled) return
+        sandboxMode = enabled
+        if (enabled) {
+            removeCallbacks(longPressRunnable)
+            removeCallbacks(headerHeightLongPressRunnable)
+            pendingPressBubble = null
+            headerHeightGestureActive = false
+            headerHeightDragging = false
+            if (isEditMode) {
+                discardLayoutChanges()
+            }
+            isDraggingActive = false
+            draggingBubble = null
+            executeToggleButton?.visibility = View.GONE
+            snapToggleButton?.visibility = View.GONE
+            if (::editBanner.isInitialized) {
+                editBanner.visibility = View.GONE
+            }
+            (alwaysShowToggleButton?.layoutParams as? LayoutParams)?.let { lp ->
+                lp.topMargin = dpToPx(46f).toInt()
+                alwaysShowToggleButton?.layoutParams = lp
+            }
+        } else {
+            executeToggleButton?.visibility = View.VISIBLE
+            (alwaysShowToggleButton?.layoutParams as? LayoutParams)?.let { lp ->
+                lp.topMargin = dpToPx(94f).toInt()
+                alwaysShowToggleButton?.layoutParams = lp
+            }
+        }
+        if (::headerTitle.isInitialized && ::headerSubtitle.isInitialized &&
+            currentSelectedBubble == null && activeFolderBubble == null && !isEditMode
+        ) {
+            HintTextStyler.reset(headerTitle, true, config)
+            HintTextStyler.reset(headerSubtitle, false, config)
+            headerTitle.text = "滑动选择快捷方式"
+            headerSubtitle.text = defaultHeaderSubtitle()
+        }
+    }
+
     /**
      * 将所有气泡（含被自由摆放的）归位到各自蜂窝槽位
      */
@@ -891,7 +942,7 @@ class HyperOpenPreviewView(
         }
 
         headerSubtitle = StrokeTextView(context).apply {
-            text = "移至目标图标后松手直接打开"
+            text = defaultHeaderSubtitle()
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             setTextColor(0xAAFFFFFF.toInt())
             gravity = Gravity.CENTER
@@ -1556,7 +1607,7 @@ class HyperOpenPreviewView(
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (::headerPill.isInitialized && headerPill.isShown) {
+        if (!sandboxMode && ::headerPill.isInitialized && headerPill.isShown) {
             if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                 headerHeightGestureActive = isHeaderHeightTouch(event.x, event.y)
             }
@@ -1637,7 +1688,7 @@ class HyperOpenPreviewView(
         ) {
             val isUp = event.actionMasked == MotionEvent.ACTION_UP
             val resolvedShortcut = if (isUp && !isEditMode) resolveSelectedShortcut() else null
-            val selectedToRun = if (executeShortcutOnRelease) resolvedShortcut else null
+            val selectedToRun = if (!sandboxMode && executeShortcutOnRelease) resolvedShortcut else null
             val popBubble = if (resolvedShortcut != null) currentSelectedBubble else null
             fingerprintHolding = false
             removeCallbacks(expandRunnable)
@@ -1690,16 +1741,18 @@ class HyperOpenPreviewView(
                 pendingPressBubble = findTouchedBubble(x, y)
 
                 if (pendingPressBubble != null) {
-                    if (isEditMode) {
+                    if (isEditMode && !sandboxMode) {
                         // 编辑模式下直接抓取拖拽，绝不触发文件夹二级展开
                         removeCallbacks(folderHoverRunnable)
                         pendingFolderBubble = null
                         dismissFolderSubBubbles()
                         startDragging(pendingPressBubble!!, x, y)
                     } else {
-                        // 准备长按识别 (450ms 进入自定义排版)，同时立即展现按压鱼眼放大反馈
+                        // 非沙箱模式下准备长按识别 (450ms 进入自定义排版)，同时立即展现按压鱼眼放大反馈
                         removeCallbacks(longPressRunnable)
-                        postDelayed(longPressRunnable, 450)
+                        if (!sandboxMode) {
+                            postDelayed(longPressRunnable, 450)
+                        }
                         handleFingerHover(x, y)
                     }
                 } else if (!isEditMode) {
@@ -1733,7 +1786,7 @@ class HyperOpenPreviewView(
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                val selected = if (event.actionMasked == MotionEvent.ACTION_UP &&
+                val selected = if (!sandboxMode && event.actionMasked == MotionEvent.ACTION_UP &&
                     executeShortcutOnRelease && !isEditMode && !isDraggingActive
                 ) {
                     resolveSelectedShortcut()
@@ -1786,7 +1839,7 @@ class HyperOpenPreviewView(
      * 进入自定义排版模式
      */
     fun enterEditMode(initialTarget: CircularBubbleView? = null) {
-        if (isEditMode) return
+        if (sandboxMode || isEditMode) return
         removeCallbacks(folderHoverRunnable)
         pendingFolderBubble = null
         dismissFolderSubBubbles()
@@ -1861,7 +1914,7 @@ class HyperOpenPreviewView(
         HintTextStyler.reset(headerTitle, true, config)
         HintTextStyler.reset(headerSubtitle, false, config)
         headerTitle.text = "滑动选择快捷方式"
-        headerSubtitle.text = "移至目标图标后松手直接打开"
+        headerSubtitle.text = defaultHeaderSubtitle()
 
         for (b in bubbleViews) {
             b.setSelectedState(false)
@@ -1928,6 +1981,7 @@ class HyperOpenPreviewView(
 
     /** 是否存在未保存的排版修改（顺序变化、偏移差 > 0.6dp 或顶部提示垂直边距变动） */
     fun hasUnsavedLayoutChanges(): Boolean {
+        if (sandboxMode) return false
         val curTop = (tentativeHeaderTopMargin ?: config.headerTopMargin).coerceIn(24, 360)
         if (curTop != sessionSnapshotHeaderTopMargin) return true
         if (bubbleViews.isEmpty()) return false
@@ -2009,6 +2063,7 @@ class HyperOpenPreviewView(
     }
 
     private fun startDragging(bubble: CircularBubbleView, touchX: Float, touchY: Float) {
+        if (sandboxMode) return
         isDraggingActive = true
         draggingBubble = bubble
         bubble.setSelectedState(false)
@@ -2346,7 +2401,7 @@ class HyperOpenPreviewView(
                 HintTextStyler.reset(headerTitle, true, config)
                 HintTextStyler.reset(headerSubtitle, false, config)
                 headerTitle.text = "滑动选择快捷方式"
-                headerSubtitle.text = "移至目标图标后松手直接打开"
+                headerSubtitle.text = defaultHeaderSubtitle()
             }
         }
     }
@@ -2369,7 +2424,7 @@ class HyperOpenPreviewView(
         HintTextStyler.reset(headerTitle, true, config)
         HintTextStyler.reset(headerSubtitle, false, config)
         headerTitle.text = "滑动选择快捷方式"
-        headerSubtitle.text = "移至目标图标后松手直接打开"
+        headerSubtitle.text = defaultHeaderSubtitle()
         sectorOverlay.setHighlight(-1, 0, false)
     }
 
@@ -2605,7 +2660,7 @@ class HyperOpenPreviewView(
                 HintTextStyler.reset(headerTitle, true, config)
                 HintTextStyler.reset(headerSubtitle, false, config)
                 headerTitle.text = "滑动选择快捷方式"
-                headerSubtitle.text = "移至目标图标后松手直接打开"
+                headerSubtitle.text = defaultHeaderSubtitle()
                 handleFingerHover(touchX, touchY)
                 return
             }

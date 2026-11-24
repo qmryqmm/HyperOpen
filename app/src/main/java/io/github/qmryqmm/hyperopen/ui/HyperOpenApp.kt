@@ -76,6 +76,17 @@ import io.github.qmryqmm.hyperopen.config.ConfigProfileStore
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
 import io.github.qmryqmm.hyperopen.factory.HyperOSMaterialFactory
 import io.github.qmryqmm.hyperopen.layout.LayoutCapacity
+import io.github.qmryqmm.hyperopen.market.ConfigMarketImportDialog
+import io.github.qmryqmm.hyperopen.market.ConfigMarketImportMode
+import io.github.qmryqmm.hyperopen.market.ConfigMarketImportRequest
+import io.github.qmryqmm.hyperopen.market.ConfigMarketPage
+import io.github.qmryqmm.hyperopen.market.ConfigMarketUploadDialog
+import io.github.qmryqmm.hyperopen.market.MarketApiClient
+import io.github.qmryqmm.hyperopen.market.MarketConfigSummary
+import io.github.qmryqmm.hyperopen.market.MarketSandboxFloatingBar
+import io.github.qmryqmm.hyperopen.market.MarketSandboxKind
+import io.github.qmryqmm.hyperopen.market.MarketSandboxPreview
+import io.github.qmryqmm.hyperopen.market.rememberConfigMarketState
 import io.github.qmryqmm.hyperopen.model.ShortcutItem
 import io.github.qmryqmm.hyperopen.safety.SafetyStore
 import io.github.qmryqmm.hyperopen.ui.components.BackNavigationIcon
@@ -585,8 +596,11 @@ fun HyperOpenApp(
         rememberLazyListState(),
     )
     var paramsTab by remember { mutableIntStateOf(0) }
+    var profilesTab by remember { mutableIntStateOf(0) }
     val shortcutsListState = rememberLazyListState()
     val configProfilesListState = rememberLazyListState()
+    val configMarketListState = rememberLazyListState()
+    val configMarketState = rememberConfigMarketState()
     val settingsListState = rememberLazyListState()
     val themeListState = rememberLazyListState()
     val softGlassListState = rememberLazyListState()
@@ -632,9 +646,21 @@ fun HyperOpenApp(
     // 排版预览页：视图引用（返回确认弹窗需调用 commitLayoutChanges/discardLayoutChanges）与「是否保存」弹窗开关
     var previewViewRef by remember { mutableStateOf<HyperOpenPreviewView?>(null) }
     var showLayoutSaveDialog by remember { mutableStateOf(false) }
+    // 配置/快捷市场：纯内存沙箱预览会话 & 上传/应用弹窗状态
+    var marketSandboxPreview by remember { mutableStateOf<MarketSandboxPreview?>(null) }
+    var showMarketUploadDialog by remember { mutableStateOf(false) }
+    var marketUploadInitialProfileId by remember { mutableStateOf<String?>(null) }
+    var marketRefreshTrigger by remember { mutableIntStateOf(0) }
+    var pendingSandboxImportRequest by remember { mutableStateOf<ConfigMarketImportRequest?>(null) }
 
-    /** 排版预览页的统一返回出口：存在未保存的排版修改时弹「是否保存」，否则直接退出 */
+    /** 排版/沙箱预览页的统一返回出口：沙箱态只置空预览会话（绝不落盘）；本地排版态有修改时弹保存确认 */
     fun requestPreviewExit() {
+        if (marketSandboxPreview != null) {
+            pendingSandboxImportRequest = null
+            marketSandboxPreview = null
+            subPage = 0
+            return
+        }
         val pv = previewViewRef
         // 排版模式（isEditMode）本身就意味着"正在修改"，即便签名容差内也弹确认框，
         // 保证排版界面返回永远触发二次确认弹窗
@@ -675,6 +701,8 @@ fun HyperOpenApp(
             }
             if (subPage == 3) {
                 previewViewRef = null
+                pendingSandboxImportRequest = null
+                marketSandboxPreview = null
             }
         }
     }
@@ -1197,6 +1225,192 @@ fun HyperOpenApp(
         configProfiles.add(destination, profile)
     }
 
+    fun openMarketUpload(targetProfileId: String?) {
+        flushPendingPersist()
+        if (targetProfileId == null) {
+            val sp = io.github.qmryqmm.hyperopen.util.DePrefs.get(ctx, HyperOpenConfig.PREF_NAME)
+            val hasPanelKeys = sp.all.keys.any {
+                ConfigBackup.isAllowedKey(it) && !ConfigBackup.isSkipped(it) && it != "shortcuts_json"
+            }
+            if (!hasPanelKeys) {
+                persist()
+            }
+        }
+        marketUploadInitialProfileId = targetProfileId
+        showMarketUploadDialog = true
+    }
+
+    fun saveMarketConfigToLibrary(
+        summary: MarketConfigSummary,
+        rawConfigJson: String,
+        profileName: String,
+        includeShortcuts: Boolean,
+        keepLocalOffsetY: Boolean,
+        applyImmediately: Boolean,
+        backupCurrentFirst: Boolean,
+        shouldRecordDownload: Boolean = false,
+        exitSandboxOnApply: Boolean = false,
+    ) {
+        val localOffset = offsetY.toInt()
+        if (applyImmediately) {
+            flushPendingPersist()
+            if (backupCurrentFirst) {
+                persist()
+            }
+        }
+        configScope.launch(Dispatchers.IO) {
+            val outcome = runCatching {
+                if (shouldRecordDownload) {
+                    runCatching { MarketApiClient.getConfigDetail(ctx, summary.id, download = true) }
+                }
+                val preparedJson = ConfigBackup.prepareBackupJsonForImport(
+                    rawConfigJson,
+                    if (keepLocalOffsetY) localOffset else null,
+                    includeShortcuts,
+                )
+                val preview = ConfigProfileStore.previewImport(ctx, preparedJson, profileName)
+                if (!preview.ok) {
+                    throw IllegalStateException(preview.message)
+                }
+                val commitRes = ConfigProfileStore.commitImport(ctx, preview, profileName, includeShortcuts)
+                if (!commitRes.ok) {
+                    throw IllegalStateException(commitRes.message)
+                }
+                commitRes
+            }
+            withContext(Dispatchers.Main) {
+                outcome.onSuccess { res ->
+                    configProfiles.clear()
+                    configProfiles.addAll(res.allProfiles)
+                    configRevision++
+                    val imported = res.importedProfiles.singleOrNull()
+                    if (applyImmediately && imported != null) {
+                        if (exitSandboxOnApply) {
+                            pendingSandboxImportRequest = null
+                            marketSandboxPreview = null
+                            subPage = 0
+                        }
+                        applyConfigProfile(
+                            profile = imported,
+                            applyParams = true,
+                            applyShortcuts = includeShortcuts && imported.hasShortcuts,
+                            backupCurrentFirst = backupCurrentFirst,
+                        )
+                    } else {
+                        Toast.makeText(
+                            ctx,
+                            "已将「${imported?.name ?: profileName}」保存到本地配置库",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }.onFailure { err ->
+                    Toast.makeText(
+                        ctx,
+                        "保存失败：${err.message ?: err.javaClass.simpleName}",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
+    }
+
+    fun applyMarketConfigDirectly(
+        summary: MarketConfigSummary,
+        rawConfigJson: String,
+        includeShortcuts: Boolean,
+        keepLocalOffsetY: Boolean,
+        backupCurrentFirst: Boolean,
+        shouldRecordDownload: Boolean = false,
+        onApplied: () -> Unit = {},
+    ) {
+        val activeSnapshotName = configProfiles.firstOrNull { it.id == activeConfigProfileId }?.name
+        val localOffset = offsetY.toInt()
+        flushPendingPersist()
+        if (backupCurrentFirst) {
+            persist()
+        }
+        configScope.launch(Dispatchers.IO) {
+            val outcome = runCatching {
+                if (shouldRecordDownload) {
+                    runCatching { MarketApiClient.getConfigDetail(ctx, summary.id, download = true) }
+                }
+                var backupProfile: ConfigProfile? = null
+                if (backupCurrentFirst) {
+                    val stamp = java.text.SimpleDateFormat("MMdd-HHmm", java.util.Locale.US)
+                        .format(java.util.Date())
+                    val prefix = activeSnapshotName?.take(18)?.trim().orEmpty()
+                    val backupName = if (prefix.isNotEmpty()) "${prefix}_备份_$stamp" else "切换前备份_$stamp"
+                    val created = ConfigProfileStore.createFromCurrent(ctx, backupName)
+                    ConfigProfileStore.add(ctx, created, false)
+                    backupProfile = created
+                }
+                val preparedJson = ConfigBackup.prepareBackupJsonForImport(
+                    rawConfigJson,
+                    if (keepLocalOffsetY) localOffset else null,
+                    includeShortcuts,
+                )
+                val pre = ConfigBackup.preview(preparedJson)
+                if (!pre.ok) {
+                    throw IllegalStateException(pre.message)
+                }
+                val finalApplyShortcuts = includeShortcuts && pre.hasShortcuts
+                val applyResult = ConfigBackup.apply(ctx, preparedJson, true, finalApplyShortcuts)
+                if (!applyResult.ok) {
+                    throw IllegalStateException(applyResult.message)
+                }
+                ConfigProfileStore.setActive(ctx, "")
+                val storeState = ConfigProfileStore.loadState(ctx)
+                val reloaded = HyperOpenConfig.loadFromApp(ctx)
+                Pair(Pair(applyResult, reloaded), Triple(backupProfile, storeState, finalApplyShortcuts))
+            }
+            withContext(Dispatchers.Main) {
+                outcome.onFailure { err ->
+                    Toast.makeText(
+                        ctx,
+                        "应用失败：${err.message ?: err.javaClass.simpleName}",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }.onSuccess { (resultPair, extra) ->
+                    val (applyResult, reloaded) = resultPair
+                    val (backupProfile, storeState, finalApplyShortcuts) = extra
+                    configProfiles.clear()
+                    configProfiles.addAll(storeState.profiles)
+                    activeConfigProfileId = storeState.activeId
+                    applyConfigToState(
+                        config = reloaded,
+                        applyShortcuts = finalApplyShortcuts,
+                        applyAppUiPrefs = false,
+                        applyParams = true,
+                    )
+                    val cap = computeLayoutCapacity()
+                    if (maxIconCount > cap) {
+                        maxIconCount = cap.toFloat()
+                        persistParamsImmediate()
+                    } else {
+                        activeSyncStatus = ConfigProfileStore.ProfileSyncStatus.CLEAN
+                        configRevision++
+                    }
+                    val requestedSoftGlass =
+                        summary.materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS && !softGlassSupported
+                    val msg = buildString {
+                        append("已应用市场配置「${summary.name}」")
+                        if (finalApplyShortcuts) {
+                            append("（含 ${applyResult.shortcutCount} 个快捷项）")
+                        }
+                        if (backupProfile != null) {
+                            append("；已备份原配置为「${backupProfile.name}」")
+                        }
+                        if (requestedSoftGlass) {
+                            append("；当前设备不支持柔光玻璃，已自动转为高斯模糊")
+                        }
+                    }
+                    Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+                    onApplied()
+                }
+            }
+        }
+    }
+
     fun persistConfigProfileOrder(orderedIds: List<String>) {
         val snapshot = orderedIds.toList()
         configScope.launch(Dispatchers.IO) {
@@ -1422,6 +1636,15 @@ fun HyperOpenApp(
                                 paramsTab = it
                             },
                         )
+                    } else if (subPage == 0 && page == 2 && !configProfileSelectionState.multiSelect) {
+                        SegmentedTopTabBar(
+                            labels = listOf("本地配置", "配置市场"),
+                            selectedIndex = profilesTab,
+                            onSelected = {
+                                flushPendingPersist()
+                                profilesTab = it
+                            },
+                        )
                     }
                 }
             },
@@ -1496,226 +1719,163 @@ fun HyperOpenApp(
                         }
                     }
                     3 -> {
-                        // 整段预览会话抽为局部组合 lambda（编译为独立合成方法，避免 Scaffold content 方法体超 64KB）
-                        val previewContent: @Composable () -> Unit = {
-                        // 指纹快捷方式整体预览与长按自由排版界面
-                        val currentConfig = HyperOpenConfig.loadFromApp(ctx, false).apply {
-                            this.materialStyle = materialStyle
-                            this.offsetY = offsetY.toInt()
-                            this.regionDiameter = regionDiameter.toInt()
-                            this.showRegionBg = showRegionBg
-                            this.showHeaderPill = showHeaderPill
-                            this.showHeaderPillBg = showHeaderPillBg
-                            this.headerTopMargin = headerTopMargin.toInt()
-                            this.headerTitleSize = headerTitleSize.toInt()
-                            this.headerSubtitleSize = headerSubtitleSize.toInt()
-                            this.headerTextCentered = headerTextCentered
-                            this.iconSize = iconSize.toInt()
-                            this.maxIconCount = maxIconCount.toInt()
-                            this.layoutStyle = layoutStyle
-                            this.stockSystemRegion = stockSystemRegion
-                            this.ringSectorMode = ringSectorMode
-                            this.sectorLineColor = sectorLineColor
-                            this.sectorLineAlpha = sectorLineAlpha
-                            this.sectorDashLength = sectorDashLength.toInt()
-                            this.sectorDashGap = sectorDashGap.toInt()
-                            this.sectorLineWidth = sectorLineWidth
-                            this.sectorHighlightEnabled = sectorHighlightEnabled
-                            this.animDurationMs = animDurationMs.toInt()
-                            this.panelExpandAnimType = panelExpandAnimType
-                            this.panelExpandStaggerMs = panelExpandStaggerMs.toInt()
-                            this.dismissAnimEnabled = dismissAnimEnabled
-                            this.panelCollapseAnimType = panelCollapseAnimType
-                            this.panelCollapseDurationMs = panelCollapseDurationMs.toInt()
-                            this.panelCollapseStaggerMs = panelCollapseStaggerMs.toInt()
-                            this.panelSelectedPopScale = panelSelectedPopScale
-                            this.globalHintColorMode = globalHintColorMode
-                            this.globalHintCustomColor = globalHintCustomColor
-                            this.defaultHintTextStroke = defaultHintTextStroke.toInt()
-                            this.defaultHintTextShadow = defaultHintTextShadow.toInt()
-                            this.defaultHintTextWeight = defaultHintTextWeight
-                            this.defaultHintTextLetterSpacing = defaultHintTextLetterSpacing
-                            this.defaultShowHintTitle = defaultShowHintTitle
-                            this.defaultShowHintSubtitle = defaultShowHintSubtitle
-                            this.folderHoverDelayMs = folderHoverDelayMs.toInt()
-                            this.folderChildDisplayRangeScale = folderChildDisplayRangeScale
-                            this.folderChildDirectionMode = folderChildDirectionMode
-                            this.folderChildDirectionOffsetDeg = folderChildDirectionOffsetDeg
-                            this.folderChildOrderMode = folderChildOrderMode
-                            this.folderChildMinGapDp = folderChildMinGapDp.toInt()
-                            this.folderChildSizeScale = folderChildSizeScale
-                            this.folderChildExpandAnimType = folderChildExpandAnimType
-                            this.folderChildExpandDurationMs = folderChildExpandDurationMs.toInt()
-                            this.folderChildExpandStaggerMs = folderChildExpandStaggerMs.toInt()
-                            this.folderChildCollapseAnimType = folderChildCollapseAnimType
-                            this.folderChildCollapseDurationMs = folderChildCollapseDurationMs.toInt()
-                            this.folderChildCollapseStaggerMs = folderChildCollapseStaggerMs.toInt()
-                            this.folderChildStartScale = folderChildStartScale
-                            this.folderChildOvershoot = folderChildOvershoot
-                            this.maxScale = maxScale
-                            this.influenceRadius = influenceRadius.toInt()
-                            this.iconAlpha = iconAlpha
-                            this.fisheyeZoomAlpha = fisheyeZoomAlpha
-                            this.fisheyeOtherAlpha = fisheyeOtherAlpha
-                            this.iconCornerRadius = iconCornerRadius.toInt().coerceIn(0, 50)
-                            this.fullscreenBlurMaskAlpha = fullscreenBlurMaskAlpha
-                            this.fullscreenDimAlpha = fullscreenDimAlpha
-                            this.headerDimAlpha = headerDimAlpha
-                            this.regionDimAlpha = regionDimAlpha
-                            this.bubbleDimAlpha = bubbleDimAlpha
-                            this.showDelayMs = showDelayMs.toInt()
-                            this.disableSystemEnterAnim = disableSystemEnterAnim
-                            this.faceUnlockQuickOpen = faceUnlockQuickOpen
-                            this.bleUnlockQuickOpen = bleUnlockQuickOpen
-                            this.hapticEnabled = hapticEnabled
-                            this.hapticStrength = hapticStrength.toInt()
-                            this.hapticDurationMs = hapticDurationMs.toInt()
-                            this.hapticMode = hapticMode
-                            this.hapticStockWaveExpand = hapticStockWaveExpand
-                            this.hapticBrakePulse = hapticBrakePulse
-                            this.hapticDoubleGapMs = hapticDoubleGapMs.toInt()
-                            this.hapticSlideEnabled = hapticSlideEnabled
-                            this.hapticSlideStrength = hapticSlideStrength.toInt()
-                            this.hapticSlideDurationMs = hapticSlideDurationMs.toInt()
-                            this.hapticSlideMode = hapticSlideMode
-                            this.hapticStockWaveSlide = hapticStockWaveSlide
-                            this.hapticSlideBrakePulse = hapticSlideBrakePulse
-                            this.hapticSlideDoubleGapMs = hapticSlideDoubleGapMs.toInt()
-                            this.iconSpacingOffset = iconSpacingOffset.toInt()
-                            this.showBubbleBg = showBubbleBg
-                            this.bubblePaddingPercent = bubblePaddingPercent.toInt()
-                            this.glyphPadEnabled = glyphPadEnabled
-                            this.glyphPadColor = glyphPadColor
-                            this.glyphPadMode = glyphPadMode
-                            this.glassPreset = glassPreset
-                            this.glassRefractIor = glassRefractIor
-                            this.glassThickness = glassThickness
-                            this.glassSpecular = glassSpecular
-                            this.glassMatteAlpha = glassMatteAlpha
-                            this.glassBorderLight = glassBorderLight
-                            this.glassBackgroundSaturation = glassBackgroundSaturation
-                            this.glassBackgroundBrightness = glassBackgroundBrightness
-                            this.glassBackgroundBurn = glassBackgroundBurn
-                            this.glassMatteWhiteMix = glassMatteWhiteMix
-                            this.glassMatteColorMix = glassMatteColorMix
-                            this.glassMatteColorPower = glassMatteColorPower
-                            this.glassEdgeRange = glassEdgeRange
-                            this.glassEdgePower = glassEdgePower
-                            this.glassReflectOffset = glassReflectOffset
-                            // 组件级材质解析（柔光磨砂浓度驱动模糊半径、跟随全局材质等）已统一收敛到
-                            // HyperOpenConfig.effective* / glassParamsFor 单一数据源，真机与预览同源取值；
-                            // 这里只搬运原始滑块值，禁止在 UI 层再私自换算（历史上只在预览侧换算，
-                            // 导致真机调节「柔光磨砂浓度 / 跟随全局」完全不生效）
-                            this.bubbleBlurRadius = bubbleBlurRadius.toInt()
-                            this.regionBlurRadius = regionBlurRadius.toInt()
-                            this.headerBlurRadius = headerBlurRadius.toInt()
-                            this.globalBlurRadius = globalBlurRadius.toInt()
-                            this.globalDimAlpha = globalDimAlpha
-                            this.bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal
-                            this.regionMaterialFollowGlobal = regionMaterialFollowGlobal
-                            this.headerMaterialFollowGlobal = headerMaterialFollowGlobal
-                            this.bubbleGlassMatteAlpha = bubbleGlassMatteAlpha
-                            this.regionGlassMatteAlpha = regionGlassMatteAlpha
-                            this.headerGlassMatteAlpha = headerGlassMatteAlpha
-                            this.shortcuts = ArrayList(shortcuts)
-                        }
-
-                        var previewPanelVisible by remember { mutableStateOf(false) }
-
-                        // 壁纸位图（供 SurfaceView 绘制到窗口后方 Surface 上）
-                        val liveWallpaperBitmap by io.github.qmryqmm.hyperopen.util.LiveWallpaperLoader.rememberLiveWallpaper(ctx)
-
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                        ) {
-                            // 壁纸层：SurfaceView 的 Surface 在窗口后方，BackgroundBlurDrawable 模糊的正是它
-                            AndroidView(
-                                factory = { viewCtx ->
-                                    WallpaperSurfaceView(viewCtx) {
-                                        liveWallpaperBitmap?.asAndroidBitmap()
-                                    }
-                                },
-                                update = { it.redraw() },
-                                modifier = Modifier.fillMaxSize(),
-                            )
-
-                            // 全屏毛玻璃遮罩（BackgroundBlurDrawable 全屏区域，与真实侧 BlurUtils.applyBlur 同构：
-                            // 模糊窗口后方壁纸；圆角 0 = 矩形全屏。半径与真实侧 blurRadiusOfRatio 同构近似）
-                            AndroidView(
-                                factory = { viewCtx -> android.view.View(viewCtx) },
-                                update = { view ->
-                                    // 与真实侧 BlurUtils.blurRadiusOfRatio 完全同构：
-                                    // lerp(min_window_blur_radius=1px, max_window_blur_radius=100px, ratio)
-                                    // = 1 + 99 * ratio（ratio=0 时为 0）
-                                    val ratio = currentConfig.fullscreenBlurMaskAlpha.coerceIn(0f, 1f)
-                                    val blurPx = if (previewPanelVisible && ratio > 0f) {
-                                        currentConfig.approximateFullscreenBlurRadiusPx().toInt()
-                                    } else 0
-                                    val prev = view.tag as? Int ?: -1
-                                    if (prev != blurPx) {
-                                        view.tag = blurPx
-                                        view.post {
-                                            if (blurPx > 0) {
-                                                view.background =
-                                                    io.github.qmryqmm.hyperopen.factory.HyperOSBlurHelper
-                                                        .createSystemBackdropBlurDrawable(view, 0f, blurPx, 0)
-                                            } else {
-                                                view.background = null
-                                            }
-                                        }
-                                    }
-                                },
-                                modifier = Modifier.fillMaxSize(),
-                            )
-
-                            // 全屏压暗层（独立于模糊层，与真实侧 view.setBackgroundColor(black alpha) 同构；
-                            // 面板隐藏态不绘制）
-                            if (previewPanelVisible && currentConfig.fullscreenDimAlpha > 0.001f) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(Color.Black.copy(alpha = currentConfig.fullscreenDimAlpha.coerceIn(0f, 1f)))
-                                )
+                        // 整段预览会话抽为独立 @Composable（避免 Scaffold content 方法体超 64KB），同时承载本地排版与市场沙箱预览
+                        val buildLocalPreviewConfig: () -> HyperOpenConfig = {
+                            HyperOpenConfig.loadFromApp(ctx, false).apply {
+                                this.materialStyle = materialStyle
+                                this.offsetY = offsetY.toInt()
+                                this.regionDiameter = regionDiameter.toInt()
+                                this.showRegionBg = showRegionBg
+                                this.showHeaderPill = showHeaderPill
+                                this.showHeaderPillBg = showHeaderPillBg
+                                this.headerTopMargin = headerTopMargin.toInt()
+                                this.headerTitleSize = headerTitleSize.toInt()
+                                this.headerSubtitleSize = headerSubtitleSize.toInt()
+                                this.headerTextCentered = headerTextCentered
+                                this.iconSize = iconSize.toInt()
+                                this.maxIconCount = maxIconCount.toInt()
+                                this.layoutStyle = layoutStyle
+                                this.stockSystemRegion = stockSystemRegion
+                                this.ringSectorMode = ringSectorMode
+                                this.sectorLineColor = sectorLineColor
+                                this.sectorLineAlpha = sectorLineAlpha
+                                this.sectorDashLength = sectorDashLength.toInt()
+                                this.sectorDashGap = sectorDashGap.toInt()
+                                this.sectorLineWidth = sectorLineWidth
+                                this.sectorHighlightEnabled = sectorHighlightEnabled
+                                this.animDurationMs = animDurationMs.toInt()
+                                this.panelExpandAnimType = panelExpandAnimType
+                                this.panelExpandStaggerMs = panelExpandStaggerMs.toInt()
+                                this.dismissAnimEnabled = dismissAnimEnabled
+                                this.panelCollapseAnimType = panelCollapseAnimType
+                                this.panelCollapseDurationMs = panelCollapseDurationMs.toInt()
+                                this.panelCollapseStaggerMs = panelCollapseStaggerMs.toInt()
+                                this.panelSelectedPopScale = panelSelectedPopScale
+                                this.globalHintColorMode = globalHintColorMode
+                                this.globalHintCustomColor = globalHintCustomColor
+                                this.defaultHintTextStroke = defaultHintTextStroke.toInt()
+                                this.defaultHintTextShadow = defaultHintTextShadow.toInt()
+                                this.defaultHintTextWeight = defaultHintTextWeight
+                                this.defaultHintTextLetterSpacing = defaultHintTextLetterSpacing
+                                this.defaultShowHintTitle = defaultShowHintTitle
+                                this.defaultShowHintSubtitle = defaultShowHintSubtitle
+                                this.folderHoverDelayMs = folderHoverDelayMs.toInt()
+                                this.folderChildDisplayRangeScale = folderChildDisplayRangeScale
+                                this.folderChildDirectionMode = folderChildDirectionMode
+                                this.folderChildDirectionOffsetDeg = folderChildDirectionOffsetDeg
+                                this.folderChildOrderMode = folderChildOrderMode
+                                this.folderChildMinGapDp = folderChildMinGapDp.toInt()
+                                this.folderChildSizeScale = folderChildSizeScale
+                                this.folderChildExpandAnimType = folderChildExpandAnimType
+                                this.folderChildExpandDurationMs = folderChildExpandDurationMs.toInt()
+                                this.folderChildExpandStaggerMs = folderChildExpandStaggerMs.toInt()
+                                this.folderChildCollapseAnimType = folderChildCollapseAnimType
+                                this.folderChildCollapseDurationMs = folderChildCollapseDurationMs.toInt()
+                                this.folderChildCollapseStaggerMs = folderChildCollapseStaggerMs.toInt()
+                                this.folderChildStartScale = folderChildStartScale
+                                this.folderChildOvershoot = folderChildOvershoot
+                                this.maxScale = maxScale
+                                this.influenceRadius = influenceRadius.toInt()
+                                this.iconAlpha = iconAlpha
+                                this.fisheyeZoomAlpha = fisheyeZoomAlpha
+                                this.fisheyeOtherAlpha = fisheyeOtherAlpha
+                                this.iconCornerRadius = iconCornerRadius.toInt().coerceIn(0, 50)
+                                this.fullscreenBlurMaskAlpha = fullscreenBlurMaskAlpha
+                                this.fullscreenDimAlpha = fullscreenDimAlpha
+                                this.headerDimAlpha = headerDimAlpha
+                                this.regionDimAlpha = regionDimAlpha
+                                this.bubbleDimAlpha = bubbleDimAlpha
+                                this.showDelayMs = showDelayMs.toInt()
+                                this.disableSystemEnterAnim = disableSystemEnterAnim
+                                this.faceUnlockQuickOpen = faceUnlockQuickOpen
+                                this.bleUnlockQuickOpen = bleUnlockQuickOpen
+                                this.hapticEnabled = hapticEnabled
+                                this.hapticStrength = hapticStrength.toInt()
+                                this.hapticDurationMs = hapticDurationMs.toInt()
+                                this.hapticMode = hapticMode
+                                this.hapticStockWaveExpand = hapticStockWaveExpand
+                                this.hapticBrakePulse = hapticBrakePulse
+                                this.hapticDoubleGapMs = hapticDoubleGapMs.toInt()
+                                this.hapticSlideEnabled = hapticSlideEnabled
+                                this.hapticSlideStrength = hapticSlideStrength.toInt()
+                                this.hapticSlideDurationMs = hapticSlideDurationMs.toInt()
+                                this.hapticSlideMode = hapticSlideMode
+                                this.hapticStockWaveSlide = hapticStockWaveSlide
+                                this.hapticSlideBrakePulse = hapticSlideBrakePulse
+                                this.hapticSlideDoubleGapMs = hapticSlideDoubleGapMs.toInt()
+                                this.iconSpacingOffset = iconSpacingOffset.toInt()
+                                this.showBubbleBg = showBubbleBg
+                                this.bubblePaddingPercent = bubblePaddingPercent.toInt()
+                                this.glyphPadEnabled = glyphPadEnabled
+                                this.glyphPadColor = glyphPadColor
+                                this.glyphPadMode = glyphPadMode
+                                this.glassPreset = glassPreset
+                                this.glassRefractIor = glassRefractIor
+                                this.glassThickness = glassThickness
+                                this.glassSpecular = glassSpecular
+                                this.glassMatteAlpha = glassMatteAlpha
+                                this.glassBorderLight = glassBorderLight
+                                this.glassBackgroundSaturation = glassBackgroundSaturation
+                                this.glassBackgroundBrightness = glassBackgroundBrightness
+                                this.glassBackgroundBurn = glassBackgroundBurn
+                                this.glassMatteWhiteMix = glassMatteWhiteMix
+                                this.glassMatteColorMix = glassMatteColorMix
+                                this.glassMatteColorPower = glassMatteColorPower
+                                this.glassEdgeRange = glassEdgeRange
+                                this.glassEdgePower = glassEdgePower
+                                this.glassReflectOffset = glassReflectOffset
+                                this.bubbleBlurRadius = bubbleBlurRadius.toInt()
+                                this.regionBlurRadius = regionBlurRadius.toInt()
+                                this.headerBlurRadius = headerBlurRadius.toInt()
+                                this.globalBlurRadius = globalBlurRadius.toInt()
+                                this.globalDimAlpha = globalDimAlpha
+                                this.bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal
+                                this.regionMaterialFollowGlobal = regionMaterialFollowGlobal
+                                this.headerMaterialFollowGlobal = headerMaterialFollowGlobal
+                                this.bubbleGlassMatteAlpha = bubbleGlassMatteAlpha
+                                this.regionGlassMatteAlpha = regionGlassMatteAlpha
+                                this.headerGlassMatteAlpha = headerGlassMatteAlpha
+                                this.shortcuts = ArrayList(shortcuts)
                             }
-                            // 6. 交互式预览与拖拽排版控件
-                            AndroidView(
-                                modifier = Modifier.fillMaxSize(),
-                                factory = { viewCtx ->
-                                    HyperOpenPreviewView(
-                                        context = viewCtx,
-                                        config = currentConfig,
-                                        onBackClick = {
-                                            // 统一返回出口：有未保存排版修改时弹「是否保存」确认框
-                                            requestPreviewExit()
-                                        },
-                                        onOrderChanged = { newOrder ->
-                                            // 保持启用/未启用项与整体列表同步重排
-                                            val reordered = ArrayList<ShortcutItem>()
-                                            reordered.addAll(newOrder)
-                                            for (orig in shortcuts) {
-                                                if (reordered.none { it.id == orig.id }) {
-                                                    reordered.add(orig)
-                                                }
-                                            }
-                                            shortcuts.clear()
-                                            shortcuts.addAll(reordered)
-                                            persist()
-                                            Toast.makeText(viewCtx, "已更新并保存快捷方式排版", Toast.LENGTH_SHORT).show()
-                                        },
-                                        onPanelVisibleChanged = { previewPanelVisible = it },
-                                        onHeaderTopMarginChanged = {
-                                            headerTopMargin = it
-                                            persistParamsImmediate()
-                                        },
-                                    ).also { previewViewRef = it }
-                                },
-                                update = { pv ->
-                                    pv.updateConfig(currentConfig)
-                                },
-                            )
                         }
-                        }
-                        previewContent()
+                        PreviewSessionContent(
+                            sandboxPreview = marketSandboxPreview,
+                            localConfigProvider = buildLocalPreviewConfig,
+                            shortcuts = shortcuts,
+                            onBackClick = { requestPreviewExit() },
+                            onPreviewViewRef = { previewViewRef = it },
+                            onLocalOrderSaved = { persist() },
+                            onLocalHeaderTopMarginChanged = {
+                                headerTopMargin = it
+                                persistParamsImmediate()
+                            },
+                            onSandboxSaveToLibrary = {
+                                val sb = marketSandboxPreview
+                                val summary = sb?.summary
+                                val rawJson = sb?.rawConfigJson
+                                if (summary != null && !rawJson.isNullOrBlank()) {
+                                    pendingSandboxImportRequest = ConfigMarketImportRequest(
+                                        mode = ConfigMarketImportMode.SAVE_TO_LIBRARY,
+                                        summary = summary,
+                                        rawConfigJson = rawJson,
+                                        fromSandbox = true,
+                                    )
+                                }
+                            },
+                            onSandboxApplyDirectly = {
+                                val sb = marketSandboxPreview
+                                val summary = sb?.summary
+                                val rawJson = sb?.rawConfigJson
+                                if (summary != null && !rawJson.isNullOrBlank()) {
+                                    pendingSandboxImportRequest = ConfigMarketImportRequest(
+                                        mode = ConfigMarketImportMode.APPLY_DIRECTLY,
+                                        summary = summary,
+                                        rawConfigJson = rawJson,
+                                        fromSandbox = true,
+                                    )
+                                }
+                            },
+                        )
                     }
                     4 -> {
                         PermissionCheckPage(
@@ -2104,40 +2264,87 @@ fun HyperOpenApp(
                                 } else {
                                     "高斯模糊"
                                 }
-                                ConfigProfilesPage(
-                                    contentPadding = innerPadding,
-                                    lazyListState = configProfilesListState,
-                                    profiles = configProfiles,
-                                    selectionState = configProfileSelectionState,
-                                    activeProfileId = activeConfigProfileId,
-                                    activeSyncStatus = activeSyncStatus,
-                                    softGlassSupported = softGlassSupported,
-                                    currentLayoutLabel = currentLayoutLabel,
-                                    currentMaterialLabel = currentMaterialLabel,
-                                    currentShortcutCount = shortcuts.size,
-                                    pendingImportPreview = pendingImportPreview,
-                                    onDismissImportPreview = { pendingImportPreview = null },
-                                    onCreateProfile = ::createConfigProfile,
-                                    onApplyProfile = ::applyConfigProfile,
-                                    onSyncProfile = ::syncConfigProfile,
-                                    onRequestPickImportFile = {
-                                        flushPendingPersist()
-                                        importProfilesLauncher.launch(
-                                            arrayOf(
-                                                "application/json",
-                                                "text/plain",
-                                                "application/octet-stream",
+                                val activeProfilesTab = if (configProfileSelectionState.multiSelect) 0 else profilesTab
+                                if (activeProfilesTab == 0) {
+                                    ConfigProfilesPage(
+                                        contentPadding = innerPadding,
+                                        lazyListState = configProfilesListState,
+                                        profiles = configProfiles,
+                                        selectionState = configProfileSelectionState,
+                                        activeProfileId = activeConfigProfileId,
+                                        activeSyncStatus = activeSyncStatus,
+                                        softGlassSupported = softGlassSupported,
+                                        currentLayoutLabel = currentLayoutLabel,
+                                        currentMaterialLabel = currentMaterialLabel,
+                                        currentShortcutCount = shortcuts.size,
+                                        pendingImportPreview = pendingImportPreview,
+                                        onDismissImportPreview = { pendingImportPreview = null },
+                                        onCreateProfile = ::createConfigProfile,
+                                        onApplyProfile = ::applyConfigProfile,
+                                        onSyncProfile = ::syncConfigProfile,
+                                        onRequestPickImportFile = {
+                                            flushPendingPersist()
+                                            importProfilesLauncher.launch(
+                                                arrayOf(
+                                                    "application/json",
+                                                    "text/plain",
+                                                    "application/octet-stream",
+                                                )
                                             )
-                                        )
-                                    },
-                                    onCommitImport = ::commitPendingImport,
-                                    onRequestExport = ::requestExportProfiles,
-                                    onMoveProfile = ::moveConfigProfile,
-                                    onPersistProfileOrder = ::persistConfigProfileOrder,
-                                    onCopyProfiles = ::copyConfigProfiles,
-                                    onDeleteProfiles = ::deleteConfigProfiles,
-                                    onRenameProfile = ::renameConfigProfile,
-                                )
+                                        },
+                                        onCommitImport = ::commitPendingImport,
+                                        onRequestExport = ::requestExportProfiles,
+                                        onMoveProfile = ::moveConfigProfile,
+                                        onPersistProfileOrder = ::persistConfigProfileOrder,
+                                        onCopyProfiles = ::copyConfigProfiles,
+                                        onDeleteProfiles = ::deleteConfigProfiles,
+                                        onRenameProfile = ::renameConfigProfile,
+                                        onUploadToMarket = { profile -> openMarketUpload(profile?.id) },
+                                    )
+                                } else {
+                                    val needsBackupSuggestion =
+                                        activeConfigProfileId.isEmpty() || activeSyncStatus.isModified()
+                                    ConfigMarketPage(
+                                        contentPadding = innerPadding,
+                                        lazyListState = configMarketListState,
+                                        marketState = configMarketState,
+                                        refreshTrigger = marketRefreshTrigger,
+                                        softGlassSupported = softGlassSupported,
+                                        currentShortcuts = shortcuts.toList(),
+                                        existingProfileNames = configProfiles.map { it.name }.toSet(),
+                                        localOffsetY = offsetY.toInt(),
+                                        needsBackupSuggestion = needsBackupSuggestion,
+                                        onOpenUpload = { openMarketUpload(null) },
+                                        onEnterSandboxPreview = { preview ->
+                                            flushPendingPersist()
+                                            marketSandboxPreview = preview
+                                            subPage = 3
+                                        },
+                                        onSaveToLibrary = { summary, rawJson, profileName, includeShortcuts, keepLocalOffsetY, applyImmediately, backupCurrentFirst ->
+                                            saveMarketConfigToLibrary(
+                                                summary = summary,
+                                                rawConfigJson = rawJson,
+                                                profileName = profileName,
+                                                includeShortcuts = includeShortcuts,
+                                                keepLocalOffsetY = keepLocalOffsetY,
+                                                applyImmediately = applyImmediately,
+                                                backupCurrentFirst = backupCurrentFirst,
+                                                shouldRecordDownload = false,
+                                                exitSandboxOnApply = false,
+                                            )
+                                        },
+                                        onApplyDirectly = { summary, rawJson, includeShortcuts, keepLocalOffsetY, backupCurrentFirst ->
+                                            applyMarketConfigDirectly(
+                                                summary = summary,
+                                                rawConfigJson = rawJson,
+                                                includeShortcuts = includeShortcuts,
+                                                keepLocalOffsetY = keepLocalOffsetY,
+                                                backupCurrentFirst = backupCurrentFirst,
+                                                shouldRecordDownload = false,
+                                            )
+                                        },
+                                    )
+                                }
                             }
                             else -> {
                                 SettingsPage(
@@ -2364,6 +2571,65 @@ fun HyperOpenApp(
             }
         }
 
+        if (showMarketUploadDialog) {
+            ConfigMarketUploadDialog(
+                profiles = configProfiles,
+                initialTargetProfileId = marketUploadInitialProfileId,
+                onDismiss = { showMarketUploadDialog = false },
+                onUploaded = { result ->
+                    showMarketUploadDialog = false
+                    marketRefreshTrigger++
+                    val msg = if (result.isPendingReview) {
+                        "已提交审核（含高危动作或自定义图片），审核通过后将自动上架配置市场"
+                    } else {
+                        "上传成功，已直接上架配置市场"
+                    }
+                    Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+                },
+            )
+        }
+
+        pendingSandboxImportRequest?.let { req ->
+            val needsBackupSuggestion = activeConfigProfileId.isEmpty() || activeSyncStatus.isModified()
+            ConfigMarketImportDialog(
+                request = req,
+                existingProfileNames = configProfiles.map { it.name }.toSet(),
+                localOffsetY = offsetY.toInt(),
+                softGlassSupported = softGlassSupported,
+                needsBackupSuggestion = needsBackupSuggestion,
+                onDismiss = { pendingSandboxImportRequest = null },
+                onConfirmSaveToLibrary = { profileName, includeShortcuts, keepLocalOffsetY, applyImmediately, backupCurrentFirst ->
+                    pendingSandboxImportRequest = null
+                    saveMarketConfigToLibrary(
+                        summary = req.summary,
+                        rawConfigJson = req.rawConfigJson,
+                        profileName = profileName,
+                        includeShortcuts = includeShortcuts,
+                        keepLocalOffsetY = keepLocalOffsetY,
+                        applyImmediately = applyImmediately,
+                        backupCurrentFirst = backupCurrentFirst,
+                        shouldRecordDownload = true,
+                        exitSandboxOnApply = true,
+                    )
+                },
+                onConfirmApplyDirectly = { includeShortcuts, keepLocalOffsetY, backupCurrentFirst ->
+                    pendingSandboxImportRequest = null
+                    applyMarketConfigDirectly(
+                        summary = req.summary,
+                        rawConfigJson = req.rawConfigJson,
+                        includeShortcuts = includeShortcuts,
+                        keepLocalOffsetY = keepLocalOffsetY,
+                        backupCurrentFirst = backupCurrentFirst,
+                        shouldRecordDownload = true,
+                        onApplied = {
+                            marketSandboxPreview = null
+                            subPage = 0
+                        },
+                    )
+                },
+            )
+        }
+
     }
 }
 }
@@ -2459,7 +2725,7 @@ private fun AppBottomBarOrMultiSelect(
 }
 
 /**
- * 参数页的分段式分页控件。
+ * 顶栏分段切换控件（参数页 5 分页与配置管理页「本地配置 | 配置市场」共用）。
  *
  * 刻意不用 Miuix 的 [TabRow]：它的 `backgroundColor` 是按 Tab 逐项求值（带 selected 参数）
  * 的药丸底色，整条容器底色无法覆盖，会和折叠后的标题栏拼出一条深浅不一的白带。
@@ -2467,11 +2733,11 @@ private fun AppBottomBarOrMultiSelect(
  * 与应用里「白色卡片落在浅灰页面上」的整体风格一致。
  */
 @Composable
-private fun ParamsTabBar(
+private fun SegmentedTopTabBar(
+    labels: List<String>,
     selectedIndex: Int,
     onSelected: (Int) -> Unit,
 ) {
-    val labels = listOf("布局", "动效", "外观", "图标", "震动")
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2505,6 +2771,147 @@ private fun ParamsTabBar(
                     else MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun ParamsTabBar(
+    selectedIndex: Int,
+    onSelected: (Int) -> Unit,
+) {
+    SegmentedTopTabBar(
+        labels = listOf("布局", "动效", "外观", "图标", "震动"),
+        selectedIndex = selectedIndex,
+        onSelected = onSelected,
+    )
+}
+
+/**
+ * 整体预览与市场纯内存沙箱预览共用容器（从 HyperOpenApp 拆出避免 Scaffold 方法体超 64KB）。
+ * 当 [sandboxPreview] 非空时，使用其纯内存 HyperOpenConfig 并开启 [HyperOpenPreviewView.setSandboxMode](true)，
+ * 同时在底部叠加精简 Miuix 悬浮栏，绝不向本地配置写盘或发广播。
+ */
+@Composable
+private fun PreviewSessionContent(
+    sandboxPreview: MarketSandboxPreview?,
+    localConfigProvider: () -> HyperOpenConfig,
+    shortcuts: SnapshotStateList<ShortcutItem>,
+    onBackClick: () -> Unit,
+    onPreviewViewRef: (HyperOpenPreviewView?) -> Unit,
+    onLocalOrderSaved: () -> Unit,
+    onLocalHeaderTopMarginChanged: (Float) -> Unit,
+    onSandboxSaveToLibrary: () -> Unit,
+    onSandboxApplyDirectly: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val isSandbox = sandboxPreview != null
+    val activeConfig = sandboxPreview?.config ?: localConfigProvider()
+    var previewPanelVisible by remember(sandboxPreview?.id) { mutableStateOf(false) }
+    val liveWallpaperBitmap by LiveWallpaperLoader.rememberLiveWallpaper(ctx)
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        AndroidView(
+            factory = { viewCtx ->
+                WallpaperSurfaceView(viewCtx) {
+                    liveWallpaperBitmap?.asAndroidBitmap()
+                }
+            },
+            update = { it.redraw() },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        AndroidView(
+            factory = { viewCtx -> android.view.View(viewCtx) },
+            update = { view ->
+                val ratio = activeConfig.fullscreenBlurMaskAlpha.coerceIn(0f, 1f)
+                val blurPx = if (previewPanelVisible && ratio > 0f) {
+                    activeConfig.approximateFullscreenBlurRadiusPx().toInt()
+                } else {
+                    0
+                }
+                val prev = view.tag as? Int ?: -1
+                if (prev != blurPx) {
+                    view.tag = blurPx
+                    view.post {
+                        if (blurPx > 0) {
+                            view.background =
+                                io.github.qmryqmm.hyperopen.factory.HyperOSBlurHelper
+                                    .createSystemBackdropBlurDrawable(view, 0f, blurPx, 0)
+                        } else {
+                            view.background = null
+                        }
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        if (previewPanelVisible && activeConfig.fullscreenDimAlpha > 0.001f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = activeConfig.fullscreenDimAlpha.coerceIn(0f, 1f)))
+            )
+        }
+
+        key(sandboxPreview != null, sandboxPreview?.id ?: "local") {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { viewCtx ->
+                    HyperOpenPreviewView(
+                        context = viewCtx,
+                        config = activeConfig,
+                        onBackClick = onBackClick,
+                        onOrderChanged = { newOrder ->
+                            if (!isSandbox) {
+                                val reordered = ArrayList<ShortcutItem>()
+                                reordered.addAll(newOrder)
+                                for (orig in shortcuts) {
+                                    if (reordered.none { it.id == orig.id }) {
+                                        reordered.add(orig)
+                                    }
+                                }
+                                shortcuts.clear()
+                                shortcuts.addAll(reordered)
+                                onLocalOrderSaved()
+                                Toast.makeText(viewCtx, "已更新并保存快捷方式排版", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onPanelVisibleChanged = { previewPanelVisible = it },
+                        onHeaderTopMarginChanged = { nextMargin ->
+                            if (!isSandbox) {
+                                onLocalHeaderTopMarginChanged(nextMargin)
+                            }
+                        },
+                    ).apply {
+                        setSandboxMode(isSandbox)
+                        onPreviewViewRef(this)
+                    }
+                },
+                update = { pv ->
+                    pv.setSandboxMode(isSandbox)
+                    pv.updateConfig(activeConfig)
+                },
+            )
+        }
+
+        if (sandboxPreview != null) {
+            MarketSandboxFloatingBar(
+                preview = sandboxPreview,
+                onExit = onBackClick,
+                onSaveToLibrary = if (sandboxPreview.kind == MarketSandboxKind.CONFIG) {
+                    onSandboxSaveToLibrary
+                } else {
+                    null
+                },
+                onApplyDirectly = if (sandboxPreview.kind == MarketSandboxKind.CONFIG) {
+                    onSandboxApplyDirectly
+                } else {
+                    null
+                },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
         }
     }
 }

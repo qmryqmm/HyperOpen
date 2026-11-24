@@ -14,6 +14,10 @@
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
+    <!-- 允许市场页在用户主动浏览/上传/下载配置与快捷包时访问网络（SystemUI 进程绝不联网） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <!-- 允许 App 完全实时读取系统真实桌面壁纸与触觉反馈 -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- 静音/响铃模式切换（App 进程直调 AudioManager.setRingerMode 的前置权限） -->

@@ -102,6 +102,7 @@ import top.yukonga.miuix.kmp.icon.extended.Share
 import top.yukonga.miuix.kmp.icon.extended.Theme
 import top.yukonga.miuix.kmp.icon.extended.Undo
 import top.yukonga.miuix.kmp.icon.extended.Update
+import top.yukonga.miuix.kmp.icon.extended.UploadCloud
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -435,6 +436,7 @@ fun ConfigProfilesPage(
     onCopyProfiles: (Set<String>) -> Unit,
     onDeleteProfiles: (Set<String>) -> Unit,
     onRenameProfile: (id: String, newName: String) -> Unit,
+    onUploadToMarket: (ConfigProfile?) -> Unit = {},
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
     var applyTargetProfile by remember { mutableStateOf<ConfigProfile?>(null) }
@@ -547,6 +549,7 @@ fun ConfigProfilesPage(
                 onUpdateActive = { profile -> syncTargetProfile = profile },
                 onSaveAsNew = { showCreateDialog = true },
                 onRestoreActive = { profile -> applyTargetProfile = profile },
+                onUploadToMarket = { profile -> onUploadToMarket(profile) },
             )
         }
 
@@ -835,6 +838,10 @@ fun ConfigProfilesPage(
                 exportSingleName = latest.name
                 showExportDialog = true
             },
+            onUploadToMarket = {
+                actionSheetProfile = null
+                onUploadToMarket(latest)
+            },
             onDelete = {
                 actionSheetProfile = null
                 deleteSingleIds = setOf(latest.id)
@@ -1085,6 +1092,7 @@ private fun ActiveProfileStatusCard(
     onUpdateActive: (ConfigProfile) -> Unit,
     onSaveAsNew: () -> Unit,
     onRestoreActive: (ConfigProfile) -> Unit,
+    onUploadToMarket: (ConfigProfile?) -> Unit,
 ) {
     Card(
         modifier = Modifier
@@ -1148,8 +1156,8 @@ private fun ActiveProfileStatusCard(
                         bgColor = if (modified) Color(0x1FFAAD14) else MiuixTheme.colorScheme.primary.copy(alpha = 0.12f),
                     )
                 }
+                Spacer(Modifier.height(12.dp))
                 if (modified) {
-                    Spacer(Modifier.height(12.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1173,33 +1181,54 @@ private fun ActiveProfileStatusCard(
                             onClick = { onRestoreActive(activeProfile) },
                         )
                     }
+                    Spacer(Modifier.height(8.dp))
+                    StatusActionChip(
+                        label = "上传到配置市场",
+                        highlighted = false,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { onUploadToMarket(null) },
+                    )
+                } else {
+                    StatusActionChip(
+                        label = "上传到配置市场",
+                        highlighted = false,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { onUploadToMarket(activeProfile) },
+                    )
                 }
             } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "当前生效：未归档配置",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MiuixTheme.colorScheme.onSurface,
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "当前生效：未归档配置",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "$currentLayoutLabel · $currentMaterialLabel · $currentShortcutCount 个快捷项 · 尚未保存为方案",
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        StatusActionChip(
+                            label = "保存方案",
+                            highlighted = true,
+                            modifier = Modifier.weight(1f),
+                            onClick = onSaveAsNew,
                         )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = "$currentLayoutLabel · $currentMaterialLabel · $currentShortcutCount 个快捷项 · 尚未保存为方案",
-                            fontSize = 12.sp,
-                            lineHeight = 17.sp,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        StatusActionChip(
+                            label = "上传到配置市场",
+                            highlighted = false,
+                            modifier = Modifier.weight(1f),
+                            onClick = { onUploadToMarket(null) },
                         )
                     }
-                    Spacer(Modifier.width(10.dp))
-                    StatusActionChip(
-                        label = "保存方案",
-                        highlighted = true,
-                        onClick = onSaveAsNew,
-                    )
                 }
             }
         }
@@ -1360,6 +1389,7 @@ private fun ProfileActionDialog(
     onRename: () -> Unit,
     onDuplicate: () -> Unit,
     onExport: () -> Unit,
+    onUploadToMarket: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var showShortcuts by remember(profile.id) { mutableStateOf(false) }
@@ -1504,6 +1534,12 @@ private fun ProfileActionDialog(
                     title = "导出此配置",
                     summary = "单独将此配置保存为 JSON 文件",
                     onClick = onExport,
+                )
+                ProfileMenuRow(
+                    icon = MiuixIcons.UploadCloud,
+                    title = "上传到配置市场",
+                    summary = "脱敏校验后分享此配置到在线配置市场",
+                    onClick = onUploadToMarket,
                 )
                 ProfileMenuRow(
                     icon = MiuixIcons.Delete,

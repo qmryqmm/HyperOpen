@@ -508,6 +508,129 @@ public final class ConfigBackup {
         return apply(ctx, json, true, includeShortcuts);
     }
 
+    /** 应用配置，支持独立选择参数、快捷方式以及可选覆写本机 offsetY。 */
+    public static Result apply(
+            Context ctx,
+            String json,
+            boolean applyParams,
+            boolean applyShortcuts,
+            Integer overrideOffsetY
+    ) {
+        try {
+            String prepared = prepareBackupJsonForImport(json, applyParams ? overrideOffsetY : null, applyShortcuts);
+            return apply(ctx, prepared, applyParams, applyShortcuts);
+        } catch (Throwable t) {
+            return Result.fail(t.getMessage() != null ? t.getMessage() : "配置预处理失败");
+        }
+    }
+
+    /**
+     * 对待导入/应用的备份 JSON 做一键预检与预处理：
+     * 可选覆写 {@code offset_y}（保留本机指纹位置偏移）并按需剔除快捷项目，
+     * 返回规范化 JSON 供 {@link #apply} 或 {@link ConfigProfileStore#previewImport} 直接复用。
+     */
+    public static String prepareBackupJsonForImport(
+            String backupJson,
+            Integer overrideOffsetY,
+            boolean includeShortcuts
+    ) throws Exception {
+        Result pre = preview(backupJson);
+        if (!pre.ok) {
+            throw new IllegalArgumentException(pre.message);
+        }
+        JSONObject root = new JSONObject(backupJson);
+        JSONObject values = root.optJSONObject("values");
+        if (values == null) {
+            throw new IllegalArgumentException("配置文件缺少 values 字段");
+        }
+        if (overrideOffsetY != null) {
+            int clampedOffsetY = clampInt("offset_y", overrideOffsetY);
+            JSONObject offsetEntry = new JSONObject();
+            offsetEntry.put("t", "i");
+            offsetEntry.put("v", clampedOffsetY);
+            values.put("offset_y", offsetEntry);
+        }
+        if (!includeShortcuts) {
+            root.remove("shortcuts");
+            values.remove(KEY_SHORTCUTS);
+        }
+        return root.toString();
+    }
+
+    /**
+     * 纯内存沙箱预览构建：解析配置 JSON、按白名单校验与钳制参数、构造 {@link HyperOpenConfig}
+     * 并执行柔光玻璃降级适配；{@code !includeShortcuts} 或目标不含快捷项时回退到
+     * {@code fallbackShortcuts}。全程零写盘、零广播，不修改任何本地存储。
+     */
+    public static HyperOpenConfig buildPreviewConfigFromBackupJson(
+            Context ctx,
+            String backupJson,
+            List<ShortcutItem> fallbackShortcuts,
+            boolean includeShortcuts,
+            boolean softGlassSupported
+    ) throws Exception {
+        Result pre = preview(backupJson);
+        if (!pre.ok) {
+            throw new IllegalArgumentException(pre.message);
+        }
+        JSONObject root = new JSONObject(backupJson);
+        JSONObject rawValues = root.optJSONObject("values");
+        JSONObject validatedValues = new JSONObject();
+        if (rawValues != null) {
+            for (Iterator<String> it = rawValues.keys(); it.hasNext(); ) {
+                String k = it.next();
+                if (isSkipped(k) || KEY_SHORTCUTS.equals(k)) {
+                    continue;
+                }
+                Object validated = parseValidatedPref(k, rawValues.optJSONObject(k));
+                if (validated != null) {
+                    JSONObject encoded = encodeValue(validated);
+                    if (encoded != null) {
+                        validatedValues.put(k, encoded);
+                    }
+                }
+            }
+        }
+        HyperOpenConfig config = HyperOpenConfig.fromBackupValues(validatedValues);
+        HyperOpenConfig.adaptUnsupportedSoftGlass(config, softGlassSupported);
+
+        if (ctx != null) {
+            try {
+                SharedPreferences sp = DePrefs.get(ctx, HyperOpenConfig.PREF_NAME);
+                config.lastRealFodX = sp.getFloat("last_real_fod_x", 0f);
+                config.lastRealFodY = sp.getFloat("last_real_fod_y", 0f);
+            } catch (Throwable ignored) {
+            }
+        }
+
+        List<ShortcutItem> resolvedShortcuts = null;
+        if (includeShortcuts && pre.hasShortcuts) {
+            List<ShortcutItem> parsed = parseShortcutsFromBackup(backupJson);
+            if (parsed != null && !parsed.isEmpty()) {
+                resolvedShortcuts = new ArrayList<>(parsed.size());
+                for (ShortcutItem item : parsed) {
+                    if (item != null) {
+                        resolvedShortcuts.add(item.copy());
+                    }
+                }
+            }
+        }
+        if (resolvedShortcuts == null) {
+            if (fallbackShortcuts != null && !fallbackShortcuts.isEmpty()) {
+                resolvedShortcuts = new ArrayList<>(fallbackShortcuts.size());
+                for (ShortcutItem item : fallbackShortcuts) {
+                    if (item != null) {
+                        resolvedShortcuts.add(item.copy());
+                    }
+                }
+            } else {
+                resolvedShortcuts = HyperOpenConfig.getDefaultShortcuts();
+            }
+        }
+        config.shortcuts = resolvedShortcuts;
+        return config;
+    }
+
     /** 应用配置，支持独立选择是否应用面板参数与快捷方式列表。 */
     public static Result apply(
             Context ctx,
@@ -793,6 +916,10 @@ public final class ConfigBackup {
     }
 
     // ──────────────────────────────────────────────────────────────
+
+    public static boolean isAllowedKey(String key) {
+        return key != null && ALLOWED_KEY_TYPES.containsKey(key);
+    }
 
     public static boolean isSkipped(String key) {
         return key == null

@@ -548,7 +548,15 @@ public class HyperOpenConfig {
      * 所有加载入口与备份对比共用此规则，确保降级应用后的生效配置与导入/预览基线一致。
      */
     public static void adaptUnsupportedSoftGlass(HyperOpenConfig config) {
-        if (config == null || HyperOSMaterialFactory.isSoftGlassSupported()) {
+        adaptUnsupportedSoftGlass(config, HyperOSMaterialFactory.isSoftGlassSupported());
+    }
+
+    /**
+     * 在不支持柔光玻璃材质的设备上，统一将柔光玻璃配置降级为高斯模糊并做模糊半径补偿。
+     * 所有加载入口、沙箱预览与备份对比共用此规则，确保降级应用后的生效配置与导入/预览基线一致。
+     */
+    public static void adaptUnsupportedSoftGlass(HyperOpenConfig config, boolean softGlassSupported) {
+        if (config == null || softGlassSupported) {
             return;
         }
         if (config.materialStyle != MATERIAL_SOFT_GLASS) {
