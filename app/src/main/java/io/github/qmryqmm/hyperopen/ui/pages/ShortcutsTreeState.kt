@@ -25,6 +25,7 @@ import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.MoveFile
 import top.yukonga.miuix.kmp.icon.extended.SelectAll
+import top.yukonga.miuix.kmp.icon.extended.Share
 import java.util.UUID
 
 /**
@@ -175,6 +176,30 @@ class ShortcutsTreeState(
                 )
             )
         }
+    }
+
+    /** 提取多选状态下的待分享条目：已选文件夹完整保留，剔除同时被选中的父文件夹子项，仅保留孤立子项。 */
+    fun collectSelectedShortcutsForShare(): List<ShortcutItem> {
+        val sel = interactionState.selection
+        if (sel.isEmpty()) return emptyList()
+        val nodes = buildNodes()
+        val selectedFolderIds = nodes
+            .filter { it.depth == 0 && it.item.actionType == ShortcutItem.ACTION_FOLDER && it.key in sel }
+            .map { it.item.id }
+            .toSet()
+        val result = ArrayList<ShortcutItem>()
+        for (node in nodes) {
+            if (node.key !in sel) continue
+            if (node.depth == 1 && (
+                    "top:${node.parentFolderId}" in sel ||
+                    (node.parentFolderId != null && node.parentFolderId in selectedFolderIds)
+                )
+            ) {
+                continue
+            }
+            result.add(node.item.copy())
+        }
+        return result
     }
 
     fun moveNode(node: ShortcutRowNode, dir: Int) {
@@ -656,6 +681,7 @@ fun ShortcutMultiSelectBottomBar(
     onSelectAll: () -> Unit,
     onMove: () -> Unit,
     onCopy: () -> Unit,
+    onShare: () -> Unit,
     onDelete: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -682,6 +708,13 @@ fun ShortcutMultiSelectBottomBar(
                 onClick = onCopy,
                 icon = MiuixIcons.Copy,
                 label = "复制",
+            )
+            FloatingNavigationBarItem(
+                selected = false,
+                enabled = hasSelection,
+                onClick = onShare,
+                icon = MiuixIcons.Share,
+                label = "分享",
             )
             FloatingNavigationBarItem(
                 selected = false,
@@ -720,6 +753,13 @@ fun ShortcutMultiSelectBottomBar(
                 onClick = onCopy,
                 icon = MiuixIcons.Copy,
                 label = "复制",
+            )
+            NavigationBarItem(
+                selected = false,
+                enabled = hasSelection,
+                onClick = onShare,
+                icon = MiuixIcons.Share,
+                label = "分享",
             )
             NavigationBarItem(
                 selected = false,

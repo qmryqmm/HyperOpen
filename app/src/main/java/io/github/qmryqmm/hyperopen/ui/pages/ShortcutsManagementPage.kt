@@ -56,6 +56,7 @@ import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.ExpandLess
 import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.icon.extended.ScreenMirroring
+import top.yukonga.miuix.kmp.icon.extended.UploadCloud
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -83,6 +84,7 @@ fun ShortcutsManagementPage(
     onChildClick: (ShortcutItem, ShortcutItem) -> Unit,
     onAddShortcut: () -> Unit,
     onCreateFolder: () -> Unit,
+    onShareToMarket: () -> Unit = {},
     onShortcutsChanged: () -> Unit = {},
 ) {
     val state = treeState.interactionState
@@ -161,6 +163,18 @@ fun ShortcutsManagementPage(
                             )
                         },
                         onClick = onCreateFolder,
+                    )
+                    ArrowPreference(
+                        title = "分享到快捷市场",
+                        summary = "将当前 ${shortcuts.size} 个快捷方式打包脱敏后上传分享",
+                        startAction = {
+                            Icon(
+                                MiuixIcons.UploadCloud,
+                                contentDescription = null,
+                                tint = MiuixTheme.colorScheme.primary,
+                            )
+                        },
+                        onClick = onShareToMarket,
                     )
                 }
             }

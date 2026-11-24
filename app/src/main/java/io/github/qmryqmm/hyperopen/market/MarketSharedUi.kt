@@ -619,6 +619,7 @@ fun MarketSandboxFloatingBar(
     onExit: () -> Unit,
     onSaveToLibrary: (() -> Unit)? = null,
     onApplyDirectly: (() -> Unit)? = null,
+    exitLabel: String = "退出",
     primaryLabel: String = "直接应用",
     secondaryLabel: String = "保存到配置库",
     modifier: Modifier = Modifier,
@@ -672,7 +673,7 @@ fun MarketSandboxFloatingBar(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 SandboxActionPill(
-                    text = "退出",
+                    text = exitLabel,
                     highlighted = false,
                     onClick = onExit,
                 )

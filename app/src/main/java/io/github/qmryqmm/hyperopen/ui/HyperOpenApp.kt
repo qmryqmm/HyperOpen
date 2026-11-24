@@ -86,7 +86,15 @@ import io.github.qmryqmm.hyperopen.market.MarketConfigSummary
 import io.github.qmryqmm.hyperopen.market.MarketSandboxFloatingBar
 import io.github.qmryqmm.hyperopen.market.MarketSandboxKind
 import io.github.qmryqmm.hyperopen.market.MarketSandboxPreview
+import io.github.qmryqmm.hyperopen.market.MarketShortcutPackSummary
+import io.github.qmryqmm.hyperopen.market.ShortcutMarketPage
+import io.github.qmryqmm.hyperopen.market.ShortcutMarketUploadDialog
+import io.github.qmryqmm.hyperopen.market.ShortcutPackImportAllDialog
+import io.github.qmryqmm.hyperopen.market.cloneShortcutForImport
+import io.github.qmryqmm.hyperopen.market.deduplicateShortcutsForUpload
+import io.github.qmryqmm.hyperopen.market.hasDuplicateTargetInLocal
 import io.github.qmryqmm.hyperopen.market.rememberConfigMarketState
+import io.github.qmryqmm.hyperopen.market.rememberShortcutMarketState
 import io.github.qmryqmm.hyperopen.model.ShortcutItem
 import io.github.qmryqmm.hyperopen.safety.SafetyStore
 import io.github.qmryqmm.hyperopen.ui.components.BackNavigationIcon
@@ -596,8 +604,11 @@ fun HyperOpenApp(
         rememberLazyListState(),
     )
     var paramsTab by remember { mutableIntStateOf(0) }
+    var shortcutsTab by remember { mutableIntStateOf(0) }
     var profilesTab by remember { mutableIntStateOf(0) }
     val shortcutsListState = rememberLazyListState()
+    val shortcutMarketListState = rememberLazyListState()
+    val shortcutMarketState = rememberShortcutMarketState()
     val configProfilesListState = rememberLazyListState()
     val configMarketListState = rememberLazyListState()
     val configMarketState = rememberConfigMarketState()
@@ -652,11 +663,19 @@ fun HyperOpenApp(
     var marketUploadInitialProfileId by remember { mutableStateOf<String?>(null) }
     var marketRefreshTrigger by remember { mutableIntStateOf(0) }
     var pendingSandboxImportRequest by remember { mutableStateOf<ConfigMarketImportRequest?>(null) }
+    var showShortcutMarketUploadDialog by remember { mutableStateOf(false) }
+    var shortcutUploadSourceItems by remember { mutableStateOf<List<ShortcutItem>>(emptyList()) }
+    var shortcutUploadFromMultiSelect by remember { mutableStateOf(false) }
+    var shortcutMarketRefreshTrigger by remember { mutableIntStateOf(0) }
+    var pendingSandboxShortcutImport by remember {
+        mutableStateOf<Pair<MarketShortcutPackSummary, List<ShortcutItem>>?>(null)
+    }
 
     /** 排版/沙箱预览页的统一返回出口：沙箱态只置空预览会话（绝不落盘）；本地排版态有修改时弹保存确认 */
     fun requestPreviewExit() {
         if (marketSandboxPreview != null) {
             pendingSandboxImportRequest = null
+            pendingSandboxShortcutImport = null
             marketSandboxPreview = null
             subPage = 0
             return
@@ -702,6 +721,7 @@ fun HyperOpenApp(
             if (subPage == 3) {
                 previewViewRef = null
                 pendingSandboxImportRequest = null
+                pendingSandboxShortcutImport = null
                 marketSandboxPreview = null
             }
         }
@@ -1428,6 +1448,263 @@ fun HyperOpenApp(
         }
     }
 
+    fun buildLivePreviewConfig(overrideShortcuts: List<ShortcutItem>? = null): HyperOpenConfig {
+        return HyperOpenConfig.loadFromApp(ctx, false).apply {
+            this.materialStyle = materialStyle
+            this.offsetY = offsetY.toInt()
+            this.regionDiameter = regionDiameter.toInt()
+            this.showRegionBg = showRegionBg
+            this.showHeaderPill = showHeaderPill
+            this.showHeaderPillBg = showHeaderPillBg
+            this.headerTopMargin = headerTopMargin.toInt()
+            this.headerTitleSize = headerTitleSize.toInt()
+            this.headerSubtitleSize = headerSubtitleSize.toInt()
+            this.headerTextCentered = headerTextCentered
+            this.iconSize = iconSize.toInt()
+            this.maxIconCount = maxIconCount.toInt()
+            this.layoutStyle = layoutStyle
+            this.stockSystemRegion = stockSystemRegion
+            this.ringSectorMode = ringSectorMode
+            this.sectorLineColor = sectorLineColor
+            this.sectorLineAlpha = sectorLineAlpha
+            this.sectorDashLength = sectorDashLength.toInt()
+            this.sectorDashGap = sectorDashGap.toInt()
+            this.sectorLineWidth = sectorLineWidth
+            this.sectorHighlightEnabled = sectorHighlightEnabled
+            this.animDurationMs = animDurationMs.toInt()
+            this.panelExpandAnimType = panelExpandAnimType
+            this.panelExpandStaggerMs = panelExpandStaggerMs.toInt()
+            this.dismissAnimEnabled = dismissAnimEnabled
+            this.panelCollapseAnimType = panelCollapseAnimType
+            this.panelCollapseDurationMs = panelCollapseDurationMs.toInt()
+            this.panelCollapseStaggerMs = panelCollapseStaggerMs.toInt()
+            this.panelSelectedPopScale = panelSelectedPopScale
+            this.globalHintColorMode = globalHintColorMode
+            this.globalHintCustomColor = globalHintCustomColor
+            this.defaultHintTextStroke = defaultHintTextStroke.toInt()
+            this.defaultHintTextShadow = defaultHintTextShadow.toInt()
+            this.defaultHintTextWeight = defaultHintTextWeight
+            this.defaultHintTextLetterSpacing = defaultHintTextLetterSpacing
+            this.defaultShowHintTitle = defaultShowHintTitle
+            this.defaultShowHintSubtitle = defaultShowHintSubtitle
+            this.folderHoverDelayMs = folderHoverDelayMs.toInt()
+            this.folderChildDisplayRangeScale = folderChildDisplayRangeScale
+            this.folderChildDirectionMode = folderChildDirectionMode
+            this.folderChildDirectionOffsetDeg = folderChildDirectionOffsetDeg
+            this.folderChildOrderMode = folderChildOrderMode
+            this.folderChildMinGapDp = folderChildMinGapDp.toInt()
+            this.folderChildSizeScale = folderChildSizeScale
+            this.folderChildExpandAnimType = folderChildExpandAnimType
+            this.folderChildExpandDurationMs = folderChildExpandDurationMs.toInt()
+            this.folderChildExpandStaggerMs = folderChildExpandStaggerMs.toInt()
+            this.folderChildCollapseAnimType = folderChildCollapseAnimType
+            this.folderChildCollapseDurationMs = folderChildCollapseDurationMs.toInt()
+            this.folderChildCollapseStaggerMs = folderChildCollapseStaggerMs.toInt()
+            this.folderChildStartScale = folderChildStartScale
+            this.folderChildOvershoot = folderChildOvershoot
+            this.maxScale = maxScale
+            this.influenceRadius = influenceRadius.toInt()
+            this.iconAlpha = iconAlpha
+            this.fisheyeZoomAlpha = fisheyeZoomAlpha
+            this.fisheyeOtherAlpha = fisheyeOtherAlpha
+            this.iconCornerRadius = iconCornerRadius.toInt().coerceIn(0, 50)
+            this.fullscreenBlurMaskAlpha = fullscreenBlurMaskAlpha
+            this.fullscreenDimAlpha = fullscreenDimAlpha
+            this.headerDimAlpha = headerDimAlpha
+            this.regionDimAlpha = regionDimAlpha
+            this.bubbleDimAlpha = bubbleDimAlpha
+            this.showDelayMs = showDelayMs.toInt()
+            this.disableSystemEnterAnim = disableSystemEnterAnim
+            this.faceUnlockQuickOpen = faceUnlockQuickOpen
+            this.bleUnlockQuickOpen = bleUnlockQuickOpen
+            this.hapticEnabled = hapticEnabled
+            this.hapticStrength = hapticStrength.toInt()
+            this.hapticDurationMs = hapticDurationMs.toInt()
+            this.hapticMode = hapticMode
+            this.hapticStockWaveExpand = hapticStockWaveExpand
+            this.hapticBrakePulse = hapticBrakePulse
+            this.hapticDoubleGapMs = hapticDoubleGapMs.toInt()
+            this.hapticSlideEnabled = hapticSlideEnabled
+            this.hapticSlideStrength = hapticSlideStrength.toInt()
+            this.hapticSlideDurationMs = hapticSlideDurationMs.toInt()
+            this.hapticSlideMode = hapticSlideMode
+            this.hapticStockWaveSlide = hapticStockWaveSlide
+            this.hapticSlideBrakePulse = hapticSlideBrakePulse
+            this.hapticSlideDoubleGapMs = hapticSlideDoubleGapMs.toInt()
+            this.iconSpacingOffset = iconSpacingOffset.toInt()
+            this.showBubbleBg = showBubbleBg
+            this.bubblePaddingPercent = bubblePaddingPercent.toInt()
+            this.glyphPadEnabled = glyphPadEnabled
+            this.glyphPadColor = glyphPadColor
+            this.glyphPadMode = glyphPadMode
+            this.glassPreset = glassPreset
+            this.glassRefractIor = glassRefractIor
+            this.glassThickness = glassThickness
+            this.glassSpecular = glassSpecular
+            this.glassMatteAlpha = glassMatteAlpha
+            this.glassBorderLight = glassBorderLight
+            this.glassBackgroundSaturation = glassBackgroundSaturation
+            this.glassBackgroundBrightness = glassBackgroundBrightness
+            this.glassBackgroundBurn = glassBackgroundBurn
+            this.glassMatteWhiteMix = glassMatteWhiteMix
+            this.glassMatteColorMix = glassMatteColorMix
+            this.glassMatteColorPower = glassMatteColorPower
+            this.glassEdgeRange = glassEdgeRange
+            this.glassEdgePower = glassEdgePower
+            this.glassReflectOffset = glassReflectOffset
+            this.bubbleBlurRadius = bubbleBlurRadius.toInt()
+            this.regionBlurRadius = regionBlurRadius.toInt()
+            this.headerBlurRadius = headerBlurRadius.toInt()
+            this.globalBlurRadius = globalBlurRadius.toInt()
+            this.globalDimAlpha = globalDimAlpha
+            this.bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal
+            this.regionMaterialFollowGlobal = regionMaterialFollowGlobal
+            this.headerMaterialFollowGlobal = headerMaterialFollowGlobal
+            this.bubbleGlassMatteAlpha = bubbleGlassMatteAlpha
+            this.regionGlassMatteAlpha = regionGlassMatteAlpha
+            this.headerGlassMatteAlpha = headerGlassMatteAlpha
+            this.shortcuts = ArrayList(overrideShortcuts ?: shortcuts)
+            HyperOpenConfig.adaptUnsupportedSoftGlass(this, softGlassSupported)
+        }
+    }
+
+    fun openShortcutMarketUpload(items: List<ShortcutItem>, fromMultiSelect: Boolean) {
+        val clean = deduplicateShortcutsForUpload(items)
+        if (clean.isEmpty()) {
+            Toast.makeText(ctx, "请先至少添加一个快捷方式再分享", Toast.LENGTH_SHORT).show()
+            return
+        }
+        flushPendingPersist()
+        shortcutUploadSourceItems = clean
+        shortcutUploadFromMultiSelect = fromMultiSelect
+        showShortcutMarketUploadDialog = true
+    }
+
+    fun appendMarketShortcuts(
+        summary: MarketShortcutPackSummary,
+        rawItems: List<ShortcutItem>,
+        shouldRecordDownload: Boolean,
+    ) {
+        if (rawItems.isEmpty()) return
+        val existingSnapshot = shortcuts.toList()
+        var duplicateCount = 0
+        val clonedList = ArrayList<ShortcutItem>(rawItems.size)
+        for (raw in rawItems) {
+            if (hasDuplicateTargetInLocal(raw, existingSnapshot)) {
+                duplicateCount++
+            }
+            clonedList.add(cloneShortcutForImport(raw))
+        }
+        shortcuts.addAll(clonedList)
+        shortcutsTreeState.version++
+        persist(writeShortcuts = true)
+        if (shouldRecordDownload) {
+            configScope.launch(Dispatchers.IO) {
+                runCatching { MarketApiClient.getShortcutDetail(ctx, summary.id, download = true) }
+            }
+        }
+        val msg = if (clonedList.size == 1) {
+            val title = clonedList.first().title.orEmpty().ifBlank { "快捷方式" }
+            if (duplicateCount > 0) "已追加「$title」（本机已有相同目标条目）"
+            else "已添加「$title」到本地快捷列表"
+        } else {
+            if (duplicateCount > 0) "已追加 ${clonedList.size} 项（其中 $duplicateCount 项本机已有相同目标条目）"
+            else "已追加 ${clonedList.size} 个快捷项到本地快捷列表"
+        }
+        Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+    }
+
+    fun importMarketShortcutPackAll(
+        summary: MarketShortcutPackSummary,
+        rawItems: List<ShortcutItem>,
+        replaceExisting: Boolean,
+        backupCurrentFirst: Boolean,
+        shouldRecordDownload: Boolean,
+        onCompleted: () -> Unit = {},
+    ) {
+        if (rawItems.isEmpty()) return
+        if (!replaceExisting) {
+            val existingSnapshot = shortcuts.toList()
+            var duplicateCount = 0
+            val clonedList = ArrayList<ShortcutItem>(rawItems.size)
+            for (raw in rawItems) {
+                if (hasDuplicateTargetInLocal(raw, existingSnapshot)) {
+                    duplicateCount++
+                }
+                clonedList.add(cloneShortcutForImport(raw))
+            }
+            shortcuts.addAll(clonedList)
+            shortcutsTreeState.version++
+            persist(writeShortcuts = true)
+            if (shouldRecordDownload) {
+                configScope.launch(Dispatchers.IO) {
+                    runCatching { MarketApiClient.getShortcutDetail(ctx, summary.id, download = true) }
+                }
+            }
+            val dupNote = if (duplicateCount > 0) "（其中 $duplicateCount 项本机已有相同目标条目）" else ""
+            Toast.makeText(
+                ctx,
+                "已将「${summary.name}」的 ${clonedList.size} 个快捷项追加到当前列表$dupNote",
+                Toast.LENGTH_LONG,
+            ).show()
+            onCompleted()
+            return
+        }
+
+        val activeSnapshotName = configProfiles.firstOrNull { it.id == activeConfigProfileId }?.name
+        flushPendingPersist()
+        if (backupCurrentFirst) {
+            persist(writeShortcuts = true)
+        }
+        configScope.launch(Dispatchers.IO) {
+            val outcome = runCatching {
+                if (shouldRecordDownload) {
+                    runCatching { MarketApiClient.getShortcutDetail(ctx, summary.id, download = true) }
+                }
+                var backupProfile: ConfigProfile? = null
+                var storeState: ConfigProfileStore.StoreState? = null
+                if (backupCurrentFirst) {
+                    val stamp = java.text.SimpleDateFormat("MMdd-HHmm", java.util.Locale.US)
+                        .format(java.util.Date())
+                    val prefix = activeSnapshotName?.take(18)?.trim().orEmpty()
+                    val backupName = if (prefix.isNotEmpty()) "${prefix}_备份_$stamp" else "替换快捷前备份_$stamp"
+                    val created = ConfigProfileStore.createFromCurrent(ctx, backupName)
+                    storeState = ConfigProfileStore.add(ctx, created, false)
+                    backupProfile = created
+                }
+                val clonedList = rawItems.map(::cloneShortcutForImport)
+                Triple(clonedList, backupProfile, storeState)
+            }
+            withContext(Dispatchers.Main) {
+                outcome.onSuccess { (clonedList, backupProfile, storeState) ->
+                    if (storeState != null) {
+                        configProfiles.clear()
+                        configProfiles.addAll(storeState.profiles)
+                    }
+                    shortcuts.clear()
+                    shortcuts.addAll(clonedList)
+                    shortcutsTreeState.interactionState.clearSelection()
+                    shortcutsTreeState.collapsedFolders = emptySet()
+                    shortcutsTreeState.version++
+                    persist(writeShortcuts = true)
+                    val backupNote = if (backupProfile != null) "（已备份原配置为「${backupProfile.name}」）" else ""
+                    Toast.makeText(
+                        ctx,
+                        "已替换为「${summary.name}」的 ${clonedList.size} 个快捷项$backupNote",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    onCompleted()
+                }.onFailure { err ->
+                    Toast.makeText(
+                        ctx,
+                        "导入失败：${err.message ?: err.javaClass.simpleName}",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
+    }
+
     /**
      * 恢复全部参数为出厂默认值（视觉 / 物理 / 震动 / 等待时间 / 快捷方式列表）。
      * 以 HyperOpenConfig 字段初始值 + 默认快捷项为准，统一重置所有可编辑状态并持久化。
@@ -1636,6 +1913,15 @@ fun HyperOpenApp(
                                 paramsTab = it
                             },
                         )
+                    } else if (subPage == 0 && page == 1 && !shortcutsTreeState.multiSelect) {
+                        SegmentedTopTabBar(
+                            labels = listOf("本地快捷项", "快捷市场"),
+                            selectedIndex = shortcutsTab,
+                            onSelected = {
+                                flushPendingPersist()
+                                shortcutsTab = it
+                            },
+                        )
                     } else if (subPage == 0 && page == 2 && !configProfileSelectionState.multiSelect) {
                         SegmentedTopTabBar(
                             labels = listOf("本地配置", "配置市场"),
@@ -1664,6 +1950,12 @@ fun HyperOpenApp(
                         onPageSelect = {
                             flushPendingPersist()
                             page = it
+                        },
+                        onShortcutShare = {
+                            openShortcutMarketUpload(
+                                shortcutsTreeState.collectSelectedShortcutsForShare(),
+                                fromMultiSelect = true,
+                            )
                         },
                         onConfigProfileCopy = ::copySelectedConfigProfiles,
                     )
@@ -1720,127 +2012,9 @@ fun HyperOpenApp(
                     }
                     3 -> {
                         // 整段预览会话抽为独立 @Composable（避免 Scaffold content 方法体超 64KB），同时承载本地排版与市场沙箱预览
-                        val buildLocalPreviewConfig: () -> HyperOpenConfig = {
-                            HyperOpenConfig.loadFromApp(ctx, false).apply {
-                                this.materialStyle = materialStyle
-                                this.offsetY = offsetY.toInt()
-                                this.regionDiameter = regionDiameter.toInt()
-                                this.showRegionBg = showRegionBg
-                                this.showHeaderPill = showHeaderPill
-                                this.showHeaderPillBg = showHeaderPillBg
-                                this.headerTopMargin = headerTopMargin.toInt()
-                                this.headerTitleSize = headerTitleSize.toInt()
-                                this.headerSubtitleSize = headerSubtitleSize.toInt()
-                                this.headerTextCentered = headerTextCentered
-                                this.iconSize = iconSize.toInt()
-                                this.maxIconCount = maxIconCount.toInt()
-                                this.layoutStyle = layoutStyle
-                                this.stockSystemRegion = stockSystemRegion
-                                this.ringSectorMode = ringSectorMode
-                                this.sectorLineColor = sectorLineColor
-                                this.sectorLineAlpha = sectorLineAlpha
-                                this.sectorDashLength = sectorDashLength.toInt()
-                                this.sectorDashGap = sectorDashGap.toInt()
-                                this.sectorLineWidth = sectorLineWidth
-                                this.sectorHighlightEnabled = sectorHighlightEnabled
-                                this.animDurationMs = animDurationMs.toInt()
-                                this.panelExpandAnimType = panelExpandAnimType
-                                this.panelExpandStaggerMs = panelExpandStaggerMs.toInt()
-                                this.dismissAnimEnabled = dismissAnimEnabled
-                                this.panelCollapseAnimType = panelCollapseAnimType
-                                this.panelCollapseDurationMs = panelCollapseDurationMs.toInt()
-                                this.panelCollapseStaggerMs = panelCollapseStaggerMs.toInt()
-                                this.panelSelectedPopScale = panelSelectedPopScale
-                                this.globalHintColorMode = globalHintColorMode
-                                this.globalHintCustomColor = globalHintCustomColor
-                                this.defaultHintTextStroke = defaultHintTextStroke.toInt()
-                                this.defaultHintTextShadow = defaultHintTextShadow.toInt()
-                                this.defaultHintTextWeight = defaultHintTextWeight
-                                this.defaultHintTextLetterSpacing = defaultHintTextLetterSpacing
-                                this.defaultShowHintTitle = defaultShowHintTitle
-                                this.defaultShowHintSubtitle = defaultShowHintSubtitle
-                                this.folderHoverDelayMs = folderHoverDelayMs.toInt()
-                                this.folderChildDisplayRangeScale = folderChildDisplayRangeScale
-                                this.folderChildDirectionMode = folderChildDirectionMode
-                                this.folderChildDirectionOffsetDeg = folderChildDirectionOffsetDeg
-                                this.folderChildOrderMode = folderChildOrderMode
-                                this.folderChildMinGapDp = folderChildMinGapDp.toInt()
-                                this.folderChildSizeScale = folderChildSizeScale
-                                this.folderChildExpandAnimType = folderChildExpandAnimType
-                                this.folderChildExpandDurationMs = folderChildExpandDurationMs.toInt()
-                                this.folderChildExpandStaggerMs = folderChildExpandStaggerMs.toInt()
-                                this.folderChildCollapseAnimType = folderChildCollapseAnimType
-                                this.folderChildCollapseDurationMs = folderChildCollapseDurationMs.toInt()
-                                this.folderChildCollapseStaggerMs = folderChildCollapseStaggerMs.toInt()
-                                this.folderChildStartScale = folderChildStartScale
-                                this.folderChildOvershoot = folderChildOvershoot
-                                this.maxScale = maxScale
-                                this.influenceRadius = influenceRadius.toInt()
-                                this.iconAlpha = iconAlpha
-                                this.fisheyeZoomAlpha = fisheyeZoomAlpha
-                                this.fisheyeOtherAlpha = fisheyeOtherAlpha
-                                this.iconCornerRadius = iconCornerRadius.toInt().coerceIn(0, 50)
-                                this.fullscreenBlurMaskAlpha = fullscreenBlurMaskAlpha
-                                this.fullscreenDimAlpha = fullscreenDimAlpha
-                                this.headerDimAlpha = headerDimAlpha
-                                this.regionDimAlpha = regionDimAlpha
-                                this.bubbleDimAlpha = bubbleDimAlpha
-                                this.showDelayMs = showDelayMs.toInt()
-                                this.disableSystemEnterAnim = disableSystemEnterAnim
-                                this.faceUnlockQuickOpen = faceUnlockQuickOpen
-                                this.bleUnlockQuickOpen = bleUnlockQuickOpen
-                                this.hapticEnabled = hapticEnabled
-                                this.hapticStrength = hapticStrength.toInt()
-                                this.hapticDurationMs = hapticDurationMs.toInt()
-                                this.hapticMode = hapticMode
-                                this.hapticStockWaveExpand = hapticStockWaveExpand
-                                this.hapticBrakePulse = hapticBrakePulse
-                                this.hapticDoubleGapMs = hapticDoubleGapMs.toInt()
-                                this.hapticSlideEnabled = hapticSlideEnabled
-                                this.hapticSlideStrength = hapticSlideStrength.toInt()
-                                this.hapticSlideDurationMs = hapticSlideDurationMs.toInt()
-                                this.hapticSlideMode = hapticSlideMode
-                                this.hapticStockWaveSlide = hapticStockWaveSlide
-                                this.hapticSlideBrakePulse = hapticSlideBrakePulse
-                                this.hapticSlideDoubleGapMs = hapticSlideDoubleGapMs.toInt()
-                                this.iconSpacingOffset = iconSpacingOffset.toInt()
-                                this.showBubbleBg = showBubbleBg
-                                this.bubblePaddingPercent = bubblePaddingPercent.toInt()
-                                this.glyphPadEnabled = glyphPadEnabled
-                                this.glyphPadColor = glyphPadColor
-                                this.glyphPadMode = glyphPadMode
-                                this.glassPreset = glassPreset
-                                this.glassRefractIor = glassRefractIor
-                                this.glassThickness = glassThickness
-                                this.glassSpecular = glassSpecular
-                                this.glassMatteAlpha = glassMatteAlpha
-                                this.glassBorderLight = glassBorderLight
-                                this.glassBackgroundSaturation = glassBackgroundSaturation
-                                this.glassBackgroundBrightness = glassBackgroundBrightness
-                                this.glassBackgroundBurn = glassBackgroundBurn
-                                this.glassMatteWhiteMix = glassMatteWhiteMix
-                                this.glassMatteColorMix = glassMatteColorMix
-                                this.glassMatteColorPower = glassMatteColorPower
-                                this.glassEdgeRange = glassEdgeRange
-                                this.glassEdgePower = glassEdgePower
-                                this.glassReflectOffset = glassReflectOffset
-                                this.bubbleBlurRadius = bubbleBlurRadius.toInt()
-                                this.regionBlurRadius = regionBlurRadius.toInt()
-                                this.headerBlurRadius = headerBlurRadius.toInt()
-                                this.globalBlurRadius = globalBlurRadius.toInt()
-                                this.globalDimAlpha = globalDimAlpha
-                                this.bubbleMaterialFollowGlobal = bubbleMaterialFollowGlobal
-                                this.regionMaterialFollowGlobal = regionMaterialFollowGlobal
-                                this.headerMaterialFollowGlobal = headerMaterialFollowGlobal
-                                this.bubbleGlassMatteAlpha = bubbleGlassMatteAlpha
-                                this.regionGlassMatteAlpha = regionGlassMatteAlpha
-                                this.headerGlassMatteAlpha = headerGlassMatteAlpha
-                                this.shortcuts = ArrayList(shortcuts)
-                            }
-                        }
                         PreviewSessionContent(
                             sandboxPreview = marketSandboxPreview,
-                            localConfigProvider = buildLocalPreviewConfig,
+                            localConfigProvider = { buildLivePreviewConfig() },
                             shortcuts = shortcuts,
                             onBackClick = { requestPreviewExit() },
                             onPreviewViewRef = { previewViewRef = it },
@@ -1873,6 +2047,13 @@ fun HyperOpenApp(
                                         rawConfigJson = rawJson,
                                         fromSandbox = true,
                                     )
+                                }
+                            },
+                            onSandboxImportShortcutPack = {
+                                val sb = marketSandboxPreview
+                                val packSummary = sb?.shortcutPackSummary
+                                if (packSummary != null && sb.shortcutList.isNotEmpty()) {
+                                    pendingSandboxShortcutImport = packSummary to sb.shortcutList
                                 }
                             },
                         )
@@ -2185,72 +2366,131 @@ fun HyperOpenApp(
                         when (page) {
                             0 -> paramsPageContent()
                             1 -> {
-                                ShortcutsManagementPage(
-                                    contentPadding = innerPadding,
-                                    lazyListState = shortcutsListState,
-                                    shortcuts = shortcuts,
-                                    treeState = shortcutsTreeState,
-                                    onOpenPreview = {
-                                        subPage = 3
-                                    },
-                                    onShortcutToggle = { item, enabled ->
-                                        val i = shortcuts.indexOfFirst { it.id == item.id }
-                                        if (i >= 0) {
-                                            val updated = item.copy().apply { this.enabled = enabled }
-                                            shortcuts[i] = updated
-                                        }
-                                        persist()
-                                    },
-                                    onShortcutClick = { item ->
-                                        requestEditBackTrigger = 0
-                                        editingItem = item.copy()
-                                        isNewShortcut = false
-                                        editingChildFolder = null
-                                        editingChildReturnToEditor = false
-                                        editingChildFolderIsNew = false
-                                        subPage = 2
-                                    },
-                                    onChildClick = { parent, child ->
-                                        // 从列表树形直接进入文件夹子项编辑（结束后返回列表）
-                                        requestEditBackTrigger = 0
-                                        editingChildFolderIsNew = false
-                                        editingChildReturnToEditor = false
-                                        editingChildFolder = parent.copy()
-                                        editingItem = child.copy()
-                                        isNewShortcut = false
-                                        subPage = 2
-                                    },
-                                    onAddShortcut = {
-                                        showNewShortcutPresetDialog = true
-                                    },
-                                    onCreateFolder = {
-                                        // 空白聚合文件夹：payload 必须 "[]"（空串会被 parseShortcutsJson 解析成默认项）
-                                        val folder = ShortcutItem(
-                                            java.util.UUID.randomUUID().toString(),
-                                            "新聚合文件夹",
-                                            "点击编辑子快捷方式与样式",
-                                            ShortcutItem.ACTION_FOLDER,
-                                            "[]",
-                                            "",
-                                            "remix:folder-2-fill",
-                                            0xFFFFFFFF.toInt(),
-                                            true,
-                                            true,
-                                            0xFF2A82E4.toInt(),
-                                            ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA,
-                                        )
-                                        requestEditBackTrigger = 0
-                                        isNewShortcut = true
-                                        editingChildFolder = null
-                                        editingChildReturnToEditor = false
-                                        editingChildFolderIsNew = false
-                                        editingItem = folder
-                                        subPage = 2
-                                    },
-                                    onShortcutsChanged = {
-                                        persist()
-                                    },
-                                )
+                                val activeShortcutsTab = if (shortcutsTreeState.multiSelect) 0 else shortcutsTab
+                                if (activeShortcutsTab == 0) {
+                                    ShortcutsManagementPage(
+                                        contentPadding = innerPadding,
+                                        lazyListState = shortcutsListState,
+                                        shortcuts = shortcuts,
+                                        treeState = shortcutsTreeState,
+                                        onOpenPreview = {
+                                            subPage = 3
+                                        },
+                                        onShortcutToggle = { item, enabled ->
+                                            val i = shortcuts.indexOfFirst { it.id == item.id }
+                                            if (i >= 0) {
+                                                val updated = item.copy().apply { this.enabled = enabled }
+                                                shortcuts[i] = updated
+                                            }
+                                            persist()
+                                        },
+                                        onShortcutClick = { item ->
+                                            requestEditBackTrigger = 0
+                                            editingItem = item.copy()
+                                            isNewShortcut = false
+                                            editingChildFolder = null
+                                            editingChildReturnToEditor = false
+                                            editingChildFolderIsNew = false
+                                            subPage = 2
+                                        },
+                                        onChildClick = { parent, child ->
+                                            // 从列表树形直接进入文件夹子项编辑（结束后返回列表）
+                                            requestEditBackTrigger = 0
+                                            editingChildFolderIsNew = false
+                                            editingChildReturnToEditor = false
+                                            editingChildFolder = parent.copy()
+                                            editingItem = child.copy()
+                                            isNewShortcut = false
+                                            subPage = 2
+                                        },
+                                        onAddShortcut = {
+                                            showNewShortcutPresetDialog = true
+                                        },
+                                        onCreateFolder = {
+                                            // 空白聚合文件夹：payload 必须 "[]"（空串会被 parseShortcutsJson 解析成默认项）
+                                            val folder = ShortcutItem(
+                                                java.util.UUID.randomUUID().toString(),
+                                                "新聚合文件夹",
+                                                "点击编辑子快捷方式与样式",
+                                                ShortcutItem.ACTION_FOLDER,
+                                                "[]",
+                                                "",
+                                                "remix:folder-2-fill",
+                                                0xFFFFFFFF.toInt(),
+                                                true,
+                                                true,
+                                                0xFF2A82E4.toInt(),
+                                                ShortcutItem.DEFAULT_GLYPH_PAD_ALPHA,
+                                            )
+                                            requestEditBackTrigger = 0
+                                            isNewShortcut = true
+                                            editingChildFolder = null
+                                            editingChildReturnToEditor = false
+                                            editingChildFolderIsNew = false
+                                            editingItem = folder
+                                            subPage = 2
+                                        },
+                                        onShareToMarket = {
+                                            openShortcutMarketUpload(
+                                                shortcuts.map { it.copy() },
+                                                fromMultiSelect = false,
+                                            )
+                                        },
+                                        onShortcutsChanged = {
+                                            persist()
+                                        },
+                                    )
+                                } else {
+                                    val needsBackupSuggestion =
+                                        activeConfigProfileId.isEmpty() || activeSyncStatus.isModified()
+                                    ShortcutMarketPage(
+                                        contentPadding = innerPadding,
+                                        lazyListState = shortcutMarketListState,
+                                        marketState = shortcutMarketState,
+                                        refreshTrigger = shortcutMarketRefreshTrigger,
+                                        currentShortcutCount = shortcuts.size,
+                                        needsBackupSuggestion = needsBackupSuggestion,
+                                        onOpenUpload = {
+                                            openShortcutMarketUpload(
+                                                shortcuts.map { it.copy() },
+                                                fromMultiSelect = false,
+                                            )
+                                        },
+                                        onEnterSandboxPreview = { detail, parsedItems ->
+                                            flushPendingPersist()
+                                            val previewItems = parsedItems.map(::cloneShortcutForImport)
+                                            val previewCfg = buildLivePreviewConfig(overrideShortcuts = previewItems)
+                                            marketSandboxPreview = MarketSandboxPreview(
+                                                kind = MarketSandboxKind.SHORTCUT_PACK,
+                                                id = detail.item.id,
+                                                title = detail.item.name,
+                                                author = detail.item.author,
+                                                config = previewCfg,
+                                                hasShortcuts = previewItems.isNotEmpty(),
+                                                shortcutCount = previewItems.size,
+                                                shortcutList = previewItems,
+                                                minAppVersionCode = detail.item.minAppVersionCode,
+                                                appVersion = detail.item.appVersion,
+                                                hasRootRisk = detail.item.hasRootRisk,
+                                                riskSummary = detail.item.riskSummary,
+                                                shortcutPackSummary = detail.item,
+                                            )
+                                            subPage = 3
+                                        },
+                                        onAppendItems = { summary, pickedItems, recordDownload ->
+                                            appendMarketShortcuts(summary, pickedItems, recordDownload)
+                                        },
+                                        onImportAll = { summary, allItems, replaceExisting, backupCurrentFirst, recordDownload ->
+                                            importMarketShortcutPackAll(
+                                                summary = summary,
+                                                rawItems = allItems,
+                                                replaceExisting = replaceExisting,
+                                                backupCurrentFirst = backupCurrentFirst,
+                                                shouldRecordDownload = recordDownload,
+                                            )
+                                        },
+                                    )
+                                }
                             }
                             2 -> {
                                 val currentLayoutLabel = when (layoutStyle) {
@@ -2630,6 +2870,52 @@ fun HyperOpenApp(
             )
         }
 
+        if (showShortcutMarketUploadDialog) {
+            ShortcutMarketUploadDialog(
+                sourceShortcuts = shortcutUploadSourceItems,
+                isSelectionMode = shortcutUploadFromMultiSelect,
+                onDismiss = { showShortcutMarketUploadDialog = false },
+                onUploaded = { result ->
+                    showShortcutMarketUploadDialog = false
+                    shortcutMarketRefreshTrigger++
+                    if (shortcutUploadFromMultiSelect) {
+                        shortcutsTreeState.interactionState.clearSelection()
+                    }
+                    val msg = if (result.isPendingReview) {
+                        "已提交审核（含高危动作或自定义图片），审核通过后将自动上架快捷市场"
+                    } else {
+                        "上传成功，已直接上架快捷市场"
+                    }
+                    Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+                },
+            )
+        }
+
+        pendingSandboxShortcutImport?.let { (packSummary, packItems) ->
+            val needsBackupSuggestion = activeConfigProfileId.isEmpty() || activeSyncStatus.isModified()
+            ShortcutPackImportAllDialog(
+                summary = packSummary,
+                items = packItems,
+                currentShortcutCount = shortcuts.size,
+                needsBackupSuggestion = needsBackupSuggestion,
+                onDismiss = { pendingSandboxShortcutImport = null },
+                onConfirm = { replaceExisting, backupCurrentFirst ->
+                    pendingSandboxShortcutImport = null
+                    importMarketShortcutPackAll(
+                        summary = packSummary,
+                        rawItems = packItems,
+                        replaceExisting = replaceExisting,
+                        backupCurrentFirst = backupCurrentFirst,
+                        shouldRecordDownload = true,
+                        onCompleted = {
+                            marketSandboxPreview = null
+                            subPage = 0
+                        },
+                    )
+                },
+            )
+        }
+
     }
 }
 }
@@ -2692,6 +2978,7 @@ private fun AppBottomBarOrMultiSelect(
     configProfiles: List<ConfigProfile>,
     configProfileSelectionState: ConfigProfileSelectionState,
     onPageSelect: (Int) -> Unit,
+    onShortcutShare: () -> Unit,
     onConfigProfileCopy: () -> Unit,
 ) {
     if (selectedPage == 1 && shortcutsTreeState.multiSelect) {
@@ -2702,6 +2989,7 @@ private fun AppBottomBarOrMultiSelect(
             onSelectAll = { shortcutsTreeState.selectAllOrNone() },
             onMove = { shortcutsTreeState.showMoveDialog = true },
             onCopy = { shortcutsTreeState.copySelected() },
+            onShare = onShortcutShare,
             onDelete = { shortcutsTreeState.showDeleteDialog = true },
             onCancel = { shortcutsTreeState.interactionState.clearSelection() },
         )
@@ -2803,6 +3091,7 @@ private fun PreviewSessionContent(
     onLocalHeaderTopMarginChanged: (Float) -> Unit,
     onSandboxSaveToLibrary: () -> Unit,
     onSandboxApplyDirectly: () -> Unit,
+    onSandboxImportShortcutPack: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val isSandbox = sandboxPreview != null
@@ -2897,19 +3186,22 @@ private fun PreviewSessionContent(
         }
 
         if (sandboxPreview != null) {
+            val isShortcutPack = sandboxPreview.kind == MarketSandboxKind.SHORTCUT_PACK
             MarketSandboxFloatingBar(
                 preview = sandboxPreview,
                 onExit = onBackClick,
-                onSaveToLibrary = if (sandboxPreview.kind == MarketSandboxKind.CONFIG) {
+                onSaveToLibrary = if (!isShortcutPack) {
                     onSandboxSaveToLibrary
                 } else {
                     null
                 },
-                onApplyDirectly = if (sandboxPreview.kind == MarketSandboxKind.CONFIG) {
-                    onSandboxApplyDirectly
+                onApplyDirectly = if (isShortcutPack) {
+                    onSandboxImportShortcutPack
                 } else {
-                    null
+                    onSandboxApplyDirectly
                 },
+                exitLabel = if (isShortcutPack) "退出预览" else "退出",
+                primaryLabel = if (isShortcutPack) "导入整个列表" else "直接应用",
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
