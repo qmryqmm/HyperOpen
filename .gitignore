@@ -30,3 +30,8 @@ Thumbs.db
 .tmp_miuix/
 
 lsposed_log/
+
+# Cloudflare Workers market backend
+market-backend/.wrangler/
+market-backend/.dev.vars
+market-backend/node_modules/
