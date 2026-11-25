@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS shortcut_packs (
   description TEXT NOT NULL DEFAULT '',
   author TEXT NOT NULL,
   author_id TEXT REFERENCES authors(id) ON DELETE SET NULL,
+  entry_type TEXT NOT NULL DEFAULT 'pack' CHECK (entry_type IN ('single', 'pack')),
+  preview_item_json TEXT NOT NULL DEFAULT '',
   tags_json TEXT NOT NULL DEFAULT '[]',
   shortcut_count INTEGER NOT NULL DEFAULT 0,
   folder_count INTEGER NOT NULL DEFAULT 0,
@@ -101,6 +103,7 @@ CREATE INDEX IF NOT EXISTS idx_configs_author_id ON configs(author_id);
 CREATE INDEX IF NOT EXISTS idx_configs_linked_pack ON configs(linked_shortcut_pack_id);
 
 CREATE INDEX IF NOT EXISTS idx_shortcuts_status_created ON shortcut_packs(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_shortcuts_status_type_created ON shortcut_packs(status, entry_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_shortcuts_status_downloads ON shortcut_packs(status, downloads DESC, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_shortcuts_sha256 ON shortcut_packs(sha256);
 CREATE INDEX IF NOT EXISTS idx_shortcuts_author_id ON shortcut_packs(author_id);

@@ -7,6 +7,7 @@ import {
   validateAndNormalizeConfig,
   validateAuthorDisplayName,
   validateBadgeLabel,
+  validateShortcutEntryType,
   validateUploadMetadata,
 } from "./validator.js";
 
@@ -65,6 +66,16 @@ function safeParseJsonArray(raw) {
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
+  }
+}
+
+function safeParseJsonObject(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
   }
 }
 
@@ -134,6 +145,7 @@ function formatConfigRow(row, options = { includeLinkedStatus: false }) {
 }
 
 function formatShortcutRow(row) {
+  const entryType = row.entry_type === "single" ? "single" : "pack";
   return {
     id: row.id,
     name: row.name,
@@ -142,6 +154,8 @@ function formatShortcutRow(row) {
     authorId: row.author_id || null,
     authorIsOfficial: Boolean(row.author_is_official),
     authorBadgeLabel: row.author_badge_label || "",
+    entryType,
+    previewItem: entryType === "single" ? safeParseJsonObject(row.preview_item_json) : null,
     tags: safeParseJsonArray(row.tags_json),
     shortcutCount: Number(row.shortcut_count),
     folderCount: Number(row.folder_count),
@@ -1063,6 +1077,15 @@ async function handleListShortcuts(url, env) {
     where.push("s.custom_image_count = 0");
   }
 
+  const entryType = (url.searchParams.get("entryType") || "").trim().toLowerCase();
+  if (entryType && entryType !== "all" && entryType !== "single" && entryType !== "pack") {
+    return errorResponse(400, "entryType 参数仅支持 all / single / pack");
+  }
+  if (entryType === "single" || entryType === "pack") {
+    where.push("s.entry_type = ?");
+    params.push(entryType);
+  }
+
   const sort =
     url.searchParams.get("sort") === "downloads"
       ? "s.downloads DESC, s.created_at DESC"
@@ -1085,6 +1108,7 @@ async function handleListShortcuts(url, env) {
                 s.author_id,
                 COALESCE(a.is_official, 0) AS author_is_official,
                 COALESCE(a.badge_label, '') AS author_badge_label,
+                s.entry_type, s.preview_item_json,
                 s.tags_json, s.shortcut_count, s.folder_count, s.action_types_json,
                 s.custom_image_count, s.has_root_risk, s.risk_summary_json, s.review_reasons_json,
                 s.min_app_version_code, s.app_version, s.downloads, s.reports_count, s.status, s.sha256,
@@ -1127,6 +1151,7 @@ async function handleGetShortcutDetail(id, url, request, env, ctx) {
               s.author_id,
               COALESCE(a.is_official, 0) AS author_is_official,
               COALESCE(a.badge_label, '') AS author_badge_label,
+              s.entry_type, s.preview_item_json,
               s.tags_json, s.shortcut_count, s.folder_count,
               s.action_types_json, s.custom_image_count, s.has_root_risk, s.risk_summary_json,
               s.review_reasons_json, s.min_app_version_code, s.app_version, s.downloads,
@@ -1148,6 +1173,7 @@ async function handleGetShortcutDetail(id, url, request, env, ctx) {
   const etagDigest = await sha256Hex(
     JSON.stringify([
       row.sha256,
+      item.entryType,
       item.updatedAt,
       item.authorId,
       item.author,
@@ -1197,8 +1223,15 @@ async function handleGetShortcutDetail(id, url, request, env, ctx) {
 async function handleCreateShortcutPack(request, env, ctx) {
   const { secretHash } = await readAuthorSecret(request, { required: true });
   const body = await readLimitedJsonBody(request);
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new ValidationError("请求体必须是 JSON 对象");
+  }
+  const entryType = validateShortcutEntryType(body.entryType);
   const existingAuthor = await findAuthorBySecretHash(env.DB, secretHash);
-  const meta = validateUploadMetadata(body, { allowEmptyAuthor: Boolean(existingAuthor) });
+  const meta = validateUploadMetadata(body, {
+    allowEmptyAuthor: Boolean(existingAuthor),
+    allowEmptyName: entryType === "single",
+  });
   const displayName = meta.author || existingAuthor.display_name;
   const normalizedName = displayName.toLowerCase();
 
@@ -1219,7 +1252,21 @@ async function handleCreateShortcutPack(request, env, ctx) {
   }
 
   const normalized = normalizeShortcuts(rawShortcuts, { forceZeroOffsets: true });
-  if (normalized.shortcutCount === 0) {
+  let resolvedName = meta.name;
+  let previewItemJson = "";
+  let hashSource = normalized.shortcutsJson;
+
+  if (entryType === "single") {
+    if (normalized.shortcutCount !== 1) {
+      throw new ValidationError("单个快捷方式上传只能包含 1 个快捷项");
+    }
+    resolvedName = meta.name || (normalized.items[0].title || "").trim().slice(0, 60);
+    if (!resolvedName) {
+      throw new ValidationError("快捷方式名称不能为空");
+    }
+    previewItemJson = JSON.stringify(normalized.items[0]);
+    hashSource = `single:${normalized.shortcutsJson}`;
+  } else if (normalized.shortcutCount === 0) {
     throw new ValidationError("快捷方式包至少需要包含 1 个快捷方式");
   }
 
@@ -1228,7 +1275,7 @@ async function handleCreateShortcutPack(request, env, ctx) {
     throw new ValidationError("快捷包正文超过 512 KB 上限", 413);
   }
 
-  const sha256 = await sha256Hex(normalized.shortcutsJson);
+  const sha256 = await sha256Hex(hashSource);
   const dup = await env.DB
     .prepare("SELECT id, status FROM shortcut_packs WHERE sha256 = ? AND status IN ('pending', 'approved') LIMIT 1")
     .bind(sha256)
@@ -1273,18 +1320,20 @@ async function handleCreateShortcutPack(request, env, ctx) {
       env.DB
         .prepare(
           `INSERT INTO shortcut_packs (
-            id, name, description, author, author_id, tags_json, shortcut_count, folder_count, action_types_json,
+            id, name, description, author, author_id, entry_type, preview_item_json, tags_json, shortcut_count, folder_count, action_types_json,
             custom_image_count, has_root_risk, risk_summary_json, review_reasons_json,
             min_app_version_code, app_version, downloads, reports_count, status, sha256,
             size_bytes, manage_token_hash, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           id,
-          meta.name,
+          resolvedName,
           meta.description,
           displayName,
           authorPlan.author.id,
+          entryType,
+          previewItemJson,
           JSON.stringify(meta.tags),
           normalized.shortcutCount,
           normalized.folderCount,
@@ -1322,6 +1371,7 @@ async function handleCreateShortcutPack(request, env, ctx) {
               s.author_id,
               COALESCE(a.is_official, 0) AS author_is_official,
               COALESCE(a.badge_label, '') AS author_badge_label,
+              s.entry_type, s.preview_item_json,
               s.tags_json, s.shortcut_count, s.folder_count, s.action_types_json,
               s.custom_image_count, s.has_root_risk, s.risk_summary_json, s.review_reasons_json,
               s.min_app_version_code, s.app_version, s.downloads, s.reports_count, s.status, s.sha256,
@@ -1358,9 +1408,14 @@ async function handleAdminListItems(url, env) {
     return errorResponse(400, "status 参数仅支持 all / pending / approved / hidden / reported");
   }
 
+  const entryType = (url.searchParams.get("entryType") || "all").trim().toLowerCase();
+  if (!["all", "single", "pack"].includes(entryType)) {
+    return errorResponse(400, "entryType 参数仅支持 all / single / pack");
+  }
+
   const q = (url.searchParams.get("q") || "").trim();
 
-  function buildBranchFilter(alias, authorAlias) {
+  function buildBranchFilter(alias, authorAlias, branchKind) {
     const conds = [];
     const params = [];
     if (status === "reported") {
@@ -1368,6 +1423,10 @@ async function handleAdminListItems(url, env) {
     } else if (status !== "all") {
       conds.push(`${alias}status = ?`);
       params.push(status);
+    }
+    if (branchKind === "shortcut" && (entryType === "single" || entryType === "pack")) {
+      conds.push(`${alias}entry_type = ?`);
+      params.push(entryType);
     }
     if (q) {
       const pattern = `%${escapeLike(q)}%`;
@@ -1385,8 +1444,8 @@ async function handleAdminListItems(url, env) {
   const branches = [];
   const allParams = [];
 
-  if (kind === "all" || kind === "config") {
-    const f = buildBranchFilter("c.", "a.");
+  if ((kind === "all" || kind === "config") && entryType === "all") {
+    const f = buildBranchFilter("c.", "a.", "config");
     branches.push(
       `SELECT 'config' AS kind, c.id, c.name, c.description,
               COALESCE(a.display_name, c.author) AS author,
@@ -1400,6 +1459,7 @@ async function handleAdminListItems(url, env) {
               sp.folder_count AS linked_pack_folder_count,
               sp.has_root_risk AS linked_pack_has_root_risk,
               sp.custom_image_count AS linked_pack_custom_image_count,
+              NULL AS entry_type, NULL AS preview_item_json,
               c.tags_json, c.layout_style, c.material_style,
               c.key_count, c.shortcut_count, c.has_shortcuts, NULL AS folder_count, NULL AS action_types_json,
               c.custom_image_count, c.has_root_risk, c.risk_summary_json, c.review_reasons_json,
@@ -1414,7 +1474,7 @@ async function handleAdminListItems(url, env) {
   }
 
   if (kind === "all" || kind === "shortcut") {
-    const f = buildBranchFilter("s.", "a.");
+    const f = buildBranchFilter("s.", "a.", "shortcut");
     branches.push(
       `SELECT 'shortcut' AS kind, s.id, s.name, s.description,
               COALESCE(a.display_name, s.author) AS author,
@@ -1428,6 +1488,7 @@ async function handleAdminListItems(url, env) {
               NULL AS linked_pack_folder_count,
               NULL AS linked_pack_has_root_risk,
               NULL AS linked_pack_custom_image_count,
+              s.entry_type, s.preview_item_json,
               s.tags_json, NULL AS layout_style, NULL AS material_style,
               NULL AS key_count, s.shortcut_count, NULL AS has_shortcuts, s.folder_count, s.action_types_json,
               s.custom_image_count, s.has_root_risk, s.risk_summary_json, s.review_reasons_json,
@@ -1438,6 +1499,24 @@ async function handleAdminListItems(url, env) {
        WHERE ${f.whereSql}`
     );
     allParams.push(...f.params);
+  }
+
+  if (branches.length === 0) {
+    return jsonResponse(
+      {
+        ok: true,
+        items: [],
+        pagination: {
+          page,
+          pageSize,
+          total: 0,
+          totalPages: 1,
+          hasMore: false,
+        },
+      },
+      200,
+      { "Cache-Control": "no-store" }
+    );
   }
 
   const unionSql = branches.join(" UNION ALL ");
@@ -1524,6 +1603,7 @@ async function handleAdminGetItemDetail(kind, id, env) {
                 s.author_id,
                 COALESCE(a.is_official, 0) AS author_is_official,
                 COALESCE(a.badge_label, '') AS author_badge_label,
+                s.entry_type, s.preview_item_json,
                 s.tags_json, s.shortcut_count, s.folder_count,
                 s.action_types_json, s.custom_image_count, s.has_root_risk, s.risk_summary_json,
                 s.review_reasons_json, s.min_app_version_code, s.app_version, s.downloads,

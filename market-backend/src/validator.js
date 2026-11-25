@@ -918,12 +918,27 @@ export function validateAndNormalizeConfig(rawInput) {
 
 export const validateConfigSubmission = validateAndNormalizeConfig;
 
-export function validateUploadMetadata(body, options = { allowEmptyAuthor: false }) {
+export function validateShortcutEntryType(raw) {
+  if (raw === undefined || raw === null || raw === "") {
+    return "pack";
+  }
+  if (typeof raw !== "string") {
+    throw new ValidationError("entryType 参数仅支持 single 或 pack", 400);
+  }
+  const normalized = raw.trim().toLowerCase();
+  if (normalized !== "single" && normalized !== "pack") {
+    throw new ValidationError("entryType 参数仅支持 single 或 pack", 400);
+  }
+  return normalized;
+}
+
+export function validateUploadMetadata(body, options = { allowEmptyAuthor: false, allowEmptyName: false }) {
   if (!isPlainObject(body)) {
     throw new ValidationError("请求体必须是 JSON 对象");
   }
+  const allowEmptyName = Boolean(options?.allowEmptyName);
   const name = asString(body.name, "", "name", 120).trim();
-  if (!name || name.length > 60) {
+  if (name.length > 60 || (!name && !allowEmptyName)) {
     throw new ValidationError("名称不能为空且不能超过 60 个字符");
   }
   const description = asString(body.description, "", "description", 1000).trim();

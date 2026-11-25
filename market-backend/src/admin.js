@@ -64,6 +64,10 @@ export function renderAdminHtml() {
     .badge.ok { background: var(--ok-bg); color: var(--ok); }
     .badge.warn { background: var(--warn-bg); color: var(--warn); }
     .badge.danger { background: var(--danger-bg); color: var(--danger); }
+    .badge.single { background: rgba(124, 58, 237, 0.14); color: #6d28d9; }
+    @media (prefers-color-scheme: dark) {
+      .badge.single { background: rgba(167, 139, 250, 0.16); color: #c4b5fd; }
+    }
     .badge.official { background: var(--info-bg); color: var(--primary); border: 1px solid var(--primary); }
     .card {
       background: var(--card); border: 1px solid var(--border); border-radius: 14px;
@@ -171,7 +175,7 @@ export function renderAdminHtml() {
       </div>
 
       <div class="tabs" id="tabBar">
-        <button class="tab active" data-view="items" data-kind="shortcut" data-status="pending">待审快捷包</button>
+        <button class="tab active" data-view="items" data-kind="shortcut" data-status="pending">待审快捷方式</button>
         <button class="tab" data-view="items" data-kind="config" data-status="pending">待审配置</button>
         <button class="tab" data-view="items" data-kind="all" data-status="approved">已上架</button>
         <button class="tab" data-view="items" data-kind="all" data-status="hidden">已隐藏</button>
@@ -182,6 +186,11 @@ export function renderAdminHtml() {
 
       <div class="toolbar">
         <input id="searchInput" type="search" placeholder="搜索名称、作者、标签或简介..." />
+        <select id="entryTypeFilter">
+          <option value="all">全部快捷形态</option>
+          <option value="single">仅单个快捷方式</option>
+          <option value="pack">仅快捷包</option>
+        </select>
         <select id="officialFilter" style="display:none">
           <option value="all">全部作者</option>
           <option value="1">仅官方作者</option>
@@ -282,6 +291,7 @@ export function renderAdminHtml() {
       view: "items",
       kind: "shortcut",
       status: "pending",
+      entryType: "all",
       official: "all",
       q: "",
       page: 1,
@@ -321,6 +331,10 @@ export function renderAdminHtml() {
       if (!isOfficial) return null;
       const label = (badgeLabel || "").trim() || "官方";
       return el("span", "badge official", "✓ " + label);
+    }
+
+    function shortcutTypeLabel(item) {
+      return item && item.entryType === "single" ? "单个快捷方式" : "快捷包";
     }
 
     async function apiFetch(path, options = {}) {
@@ -364,9 +378,11 @@ export function renderAdminHtml() {
       if (state.view === "authors") {
         $("searchInput").placeholder = "搜索作者昵称、徽章文案或 ID...";
         $("officialFilter").style.display = "inline-block";
+        $("entryTypeFilter").style.display = "none";
       } else {
         $("searchInput").placeholder = "搜索名称、作者、标签或简介...";
         $("officialFilter").style.display = "none";
+        $("entryTypeFilter").style.display = state.kind === "config" ? "none" : "inline-block";
       }
     }
 
@@ -387,6 +403,9 @@ export function renderAdminHtml() {
         page: String(state.page),
         pageSize: String(state.pageSize),
       });
+      if (state.kind !== "config" && state.entryType !== "all") {
+        params.set("entryType", state.entryType);
+      }
       if (state.q.trim()) params.set("q", state.q.trim());
       try {
         const data = await apiFetch("/api/admin/items?" + params.toString());
@@ -437,7 +456,13 @@ export function renderAdminHtml() {
         const top = el("div", "row-between");
         top.appendChild(el("div", "title", item.name));
         const rightBadges = el("div", "tags");
-        rightBadges.appendChild(el("span", "badge", item.kind === "config" ? "配置" : "快捷包"));
+        if (item.kind === "config") {
+          rightBadges.appendChild(el("span", "badge", "配置"));
+        } else {
+          rightBadges.appendChild(
+            el("span", item.entryType === "single" ? "badge single" : "badge", shortcutTypeLabel(item))
+          );
+        }
         rightBadges.appendChild(statusBadge(item.status));
         top.appendChild(rightBadges);
         card.appendChild(top);
@@ -466,6 +491,21 @@ export function renderAdminHtml() {
           } else if (item.linkedShortcutPackId) {
             flags.appendChild(el("span", "badge warn", "关联快捷包: " + item.linkedShortcutPackId));
           }
+        } else if (item.entryType === "single") {
+          const preview = item.previewItem;
+          const summaryParts = [];
+          if (preview && preview.actionType) {
+            summaryParts.push("动作: " + preview.actionType);
+          } else if (Array.isArray(item.actionTypes) && item.actionTypes.length > 0) {
+            summaryParts.push("动作: " + item.actionTypes.join(", "));
+          }
+          if (preview && preview.subtitle) {
+            summaryParts.push(preview.subtitle);
+          }
+          if (item.folderCount > 0) {
+            summaryParts.push("含 " + item.folderCount + " 文件夹");
+          }
+          flags.appendChild(el("span", "badge", summaryParts.length > 0 ? summaryParts.join(" · ") : "单项预览"));
         } else {
           flags.appendChild(el("span", "badge", item.shortcutCount + " 项 / " + item.folderCount + " 文件夹"));
         }
@@ -620,7 +660,7 @@ export function renderAdminHtml() {
         state.currentDetail = { kind, id };
         $("detailTitle").textContent = item.name;
         $("detailMeta").textContent =
-          (kind === "config" ? "配置" : "快捷包") +
+          (kind === "config" ? "配置" : shortcutTypeLabel(item)) +
           " · ID: " + item.id +
           " · 作者: " + item.author +
           (item.authorId ? " (AuthorID: " + item.authorId.slice(0, 8) + "...)" : "") +
@@ -630,6 +670,11 @@ export function renderAdminHtml() {
 
         const badges = $("detailBadges");
         badges.innerHTML = "";
+        if (kind === "shortcut") {
+          badges.appendChild(
+            el("span", item.entryType === "single" ? "badge single" : "badge", shortcutTypeLabel(item))
+          );
+        }
         badges.appendChild(statusBadge(item.status));
         const ob = officialBadge(item.authorIsOfficial, item.authorBadgeLabel);
         if (ob) badges.appendChild(ob);
@@ -809,6 +854,12 @@ export function renderAdminHtml() {
         state.kind = btn.dataset.kind;
         state.status = btn.dataset.status;
       }
+      state.page = 1;
+      loadCurrentView();
+    });
+
+    $("entryTypeFilter").addEventListener("change", () => {
+      state.entryType = $("entryTypeFilter").value;
       state.page = 1;
       loadCurrentView();
     });

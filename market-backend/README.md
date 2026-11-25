@@ -5,7 +5,7 @@
 ## 目录结构
 
 - `wrangler.jsonc`：Worker 配置与 D1 数据库绑定（不含任何密钥）
-- `schema.sql`：D1 数据库表结构与索引定义（7 张表 + 12 个索引）
+- `schema.sql`：D1 数据库表结构与索引定义（7 张表 + 13 个索引）
 - `src/index.js`：Worker HTTP 路由、鉴权、作者唯一绑定、限流、去重与 D1 读写入口
 - `src/validator.js`：配置白名单（119 键，纯外观化校验并剥离快捷方式）、快捷项规范化、`base64:` 图片魔数校验与高危动作检测
 - `src/admin.js`：`/admin` 单页审核台与作者管理 HTML/CSS/JS
@@ -94,9 +94,9 @@
 | `POST /api/configs` | 上传配置（需 `X-Author-Secret`）。Body: `{ name, description?, author?, tags?, minAppVersionCode?, appVersion?, linkedShortcutPackId?, jsonBody }`。自动剥离 `shortcuts` / `values.shortcuts_json` 并直接 `approved`，成功返回 `201` 与一次性 `manageToken` |
 | `DELETE /api/configs/:id` | 凭 `X-Author-Secret`（匹配 `author_id`）或 `X-Manage-Token` 自删配置 |
 | `POST /api/configs/:id/report` | 举报公开配置。Body: `{ reason? }` |
-| `GET /api/shortcuts` | 获取已上架快捷包列表。查询参数：`q`, `actionType`, `hasRoot` (`1`/`0`), `hasImages` (`1`/`0`), `sort` (`latest`\|`downloads`), `page`, `pageSize` (1..50)。返回含 `authorId`、`authorIsOfficial`、`authorBadgeLabel` |
-| `GET /api/shortcuts/:id` | 获取单个已上架快捷包详情与 `shortcutsJson`（含动态 `ETag` / `If-None-Match` 304 与 `?download=1`） |
-| `POST /api/shortcuts` | 上传快捷包（需 `X-Author-Secret`）。Body: `{ name, description?, author?, tags?, minAppVersionCode?, appVersion?, shortcutsJson }`。成功返回 `201` 与 `manageToken` |
+| `GET /api/shortcuts` | 获取已上架快捷方式列表（含单个快捷方式与快捷包）。查询参数：`q`, `entryType` (`all`\|`single`\|`pack`), `actionType`, `hasRoot` (`1`/`0`), `hasImages` (`1`/`0`), `sort` (`latest`\|`downloads`), `page`, `pageSize` (1..50)。返回含 `entryType`、`previewItem`（`single` 返回规范化单项对象，`pack` 为 `null`）、`authorId`、`authorIsOfficial`、`authorBadgeLabel` |
+| `GET /api/shortcuts/:id` | 获取单个已上架快捷方式/快捷包详情与 `shortcutsJson`（含 `entryType`、`previewItem`，动态 `ETag` 已纳入 `entryType` 支持 `If-None-Match` 304 与 `?download=1`） |
+| `POST /api/shortcuts` | 上传单个快捷方式或快捷包（需 `X-Author-Secret`）。Body: `{ entryType?, name?, description?, author?, tags?, minAppVersionCode?, appVersion?, shortcutsJson }`。`entryType` 支持 `single` / `pack`（省略或为空默认 `pack`）；`single` 仅允许 1 个快捷项，省略 `name` 时自动取该快捷项 `title` 兜底，并生成 `previewItem`。成功返回 `201` 与 `manageToken` |
 | `DELETE /api/shortcuts/:id` | 凭 `X-Author-Secret`（匹配 `author_id`）或 `X-Manage-Token` 自删快捷包，并自动解绑引用它的配置 (`linked_shortcut_pack_id = NULL`) |
 | `POST /api/shortcuts/:id/report` | 举报公开快捷包。Body: `{ reason? }` |
 
@@ -112,8 +112,11 @@
   - `POST /api/configs` 可传入 `linkedShortcutPackId`（要求目标快捷包存在且为 `approved`，或属于当前作者自己的非隐藏包）
   - 公开接口仅当关联快捷包状态为 `approved` 时返回 `linkedShortcutPackId` 与 `linkedShortcutPack`；若处于 `pending`/`hidden` 或已删除则返回 `null`
   - 删除快捷包时服务端自动将关联配置的 `linked_shortcut_pack_id` 置为 `NULL` 并刷新 `updated_at`
-- **快捷方式规范化**：
-  - 快捷包上传强制把所有项及子项 `customOffsetX = 0`、`customOffsetY = 0`
+- **快捷方式规范化与形态区分（`single` / `pack`）**：
+  - 支持 `entryType` 为 `single`（单个快捷方式）或 `pack`（快捷包，默认）
+  - `single` 模式下要求顶层快捷项数量严格为 `1`，可省略 `name` 并回退取首项 `title`（最多 60 字），同时在列表与详情返回 `previewItem` 对象；去重哈希采用 `single:` 前缀隔离，不与单条 `pack` 冲突
+  - 列表关键字搜索 `q` 仅匹配 `name` / `description` / `author` / `tags_json`，不扫描 `preview_item_json`
+  - 快捷方式上传强制把所有项及子项 `customOffsetX = 0`、`customOffsetY = 0`
   - 顶层 `<= 50` 项，含文件夹子项总数 `<= 100` 项，禁止文件夹嵌套文件夹
 - **自定义图标校验**：仅允许标准 Base64 编码的 `PNG` / `JPEG` / `WEBP`（校验魔数），单张解码体积 `<= 64 KB`，单次上传总数 `<= 24` 张
 - **SHA-256 去重**：同市场存在相同规范化内容的未隐藏条目时返回 `409 Conflict`
@@ -121,7 +124,7 @@
 
 ### 管理员接口（均需 `Authorization: Bearer <ADMIN_TOKEN>`）
 
-- `GET /api/admin/items?kind=all|config|shortcut&status=all|pending|approved|hidden|reported&q=...&page=1&pageSize=20`
+- `GET /api/admin/items?kind=all|config|shortcut&status=all|pending|approved|hidden|reported&entryType=all|single|pack&q=...&page=1&pageSize=20`
 - `GET /api/admin/items/:kind/:id`（返回元数据、`rawBody`、`extractedImages`、`riskSummary`、`reports`）
 - `POST /api/admin/items/:kind/:id/status`（Body: `{ "status": "approved" | "pending" | "hidden" }`）
 - `DELETE /api/admin/items/:kind/:id`（删除快捷包时同步解绑关联配置）
