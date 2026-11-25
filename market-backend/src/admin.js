@@ -64,16 +64,18 @@ export function renderAdminHtml() {
     .badge.ok { background: var(--ok-bg); color: var(--ok); }
     .badge.warn { background: var(--warn-bg); color: var(--warn); }
     .badge.danger { background: var(--danger-bg); color: var(--danger); }
+    .badge.official { background: var(--info-bg); color: var(--primary); border: 1px solid var(--primary); }
     .card {
       background: var(--card); border: 1px solid var(--border); border-radius: 14px;
       padding: 16px;
     }
     .login-box { max-width: 420px; margin: 80px auto; }
-    input[type="text"], input[type="password"], input[type="search"] {
+    input[type="text"], input[type="password"], input[type="search"], select {
       width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
       background: var(--card-2); color: var(--text); font-size: 14px; outline: none;
     }
-    input:focus { border-color: var(--primary); }
+    select { width: auto; min-width: 120px; }
+    input:focus, select:focus { border-color: var(--primary); }
     button {
       border: 1px solid var(--border); background: var(--card-2); color: var(--text);
       padding: 8px 14px; border-radius: 10px; font-size: 13px; font-weight: 600;
@@ -98,12 +100,13 @@ export function renderAdminHtml() {
       background: var(--card); border: 1px solid var(--border); border-radius: 14px;
       padding: 14px; display: flex; flex-direction: column; gap: 8px; cursor: pointer;
     }
+    .item-card.static-card { cursor: default; }
     .item-card:hover { border-color: var(--primary); }
     .row-between { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
     .title { font-weight: 700; font-size: 15px; word-break: break-word; }
     .muted { color: var(--muted); font-size: 12px; }
     .desc { font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-    .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .pagination { display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 20px; }
     .modal-backdrop {
       position: fixed; inset: 0; background: rgba(0, 0, 0, 0.56);
@@ -115,6 +118,7 @@ export function renderAdminHtml() {
       background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px;
       display: flex; flex-direction: column; gap: 16px;
     }
+    .modal.narrow { width: min(480px, 100%); }
     .section-title { font-size: 14px; font-weight: 700; margin: 0 0 8px; }
     .img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
     .img-card {
@@ -129,11 +133,16 @@ export function renderAdminHtml() {
       background: var(--danger-bg); border: 1px solid var(--danger); border-radius: 12px;
       padding: 12px; margin-bottom: 8px;
     }
+    .field-group { display: flex; flex-direction: column; gap: 6px; }
+    .field-label { font-size: 13px; font-weight: 600; }
+    .checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
     pre {
       margin: 6px 0 0; padding: 10px; border-radius: 8px; background: var(--card-2);
       border: 1px solid var(--border); overflow-x: auto; font-size: 12px; white-space: pre-wrap; word-break: break-all;
     }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+    .card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+    .card-actions button { padding: 6px 10px; font-size: 12px; }
     .error-msg { color: var(--danger); font-size: 13px; margin-top: 8px; }
     .empty { text-align: center; padding: 48px 16px; color: var(--muted); }
   </style>
@@ -162,16 +171,22 @@ export function renderAdminHtml() {
       </div>
 
       <div class="tabs" id="tabBar">
-        <button class="tab active" data-kind="config" data-status="pending">待审配置</button>
-        <button class="tab" data-kind="shortcut" data-status="pending">待审快捷包</button>
-        <button class="tab" data-kind="all" data-status="approved">已上架</button>
-        <button class="tab" data-kind="all" data-status="hidden">已隐藏</button>
-        <button class="tab" data-kind="all" data-status="reported">被举报</button>
-        <button class="tab" data-kind="all" data-status="all">全部条目</button>
+        <button class="tab active" data-view="items" data-kind="shortcut" data-status="pending">待审快捷包</button>
+        <button class="tab" data-view="items" data-kind="config" data-status="pending">待审配置</button>
+        <button class="tab" data-view="items" data-kind="all" data-status="approved">已上架</button>
+        <button class="tab" data-view="items" data-kind="all" data-status="hidden">已隐藏</button>
+        <button class="tab" data-view="items" data-kind="all" data-status="reported">被举报</button>
+        <button class="tab" data-view="items" data-kind="all" data-status="all">全部条目</button>
+        <button class="tab" data-view="authors">作者管理</button>
       </div>
 
       <div class="toolbar">
         <input id="searchInput" type="search" placeholder="搜索名称、作者、标签或简介..." />
+        <select id="officialFilter" style="display:none">
+          <option value="all">全部作者</option>
+          <option value="1">仅官方作者</option>
+          <option value="0">非官方作者</option>
+        </select>
         <button id="searchBtn" class="primary">搜索</button>
         <button id="refreshBtn">刷新</button>
       </div>
@@ -199,6 +214,10 @@ export function renderAdminHtml() {
       </div>
       <div id="detailBadges" class="tags"></div>
       <div id="detailDesc" style="font-size:14px"></div>
+      <div id="detailLinkedSection" style="display:none">
+        <h4 class="section-title">关联快捷方式包</h4>
+        <div id="detailLinkedCard" class="card"></div>
+      </div>
       <div id="detailImagesSection" style="display:none">
         <h4 class="section-title">自定义 base64 图标预览</h4>
         <div id="detailImagesGrid" class="img-grid"></div>
@@ -225,17 +244,51 @@ export function renderAdminHtml() {
     </div>
   </div>
 
+  <div id="authorBackdrop" class="modal-backdrop">
+    <div class="modal narrow">
+      <div class="row-between">
+        <div>
+          <div class="title" style="font-size:18px">编辑作者信息</div>
+          <div id="authorModalMeta" class="muted"></div>
+        </div>
+        <button id="closeAuthorModalBtn">关闭</button>
+      </div>
+      <form id="authorEditForm" style="display:flex; flex-direction:column; gap:14px;">
+        <div class="field-group">
+          <label class="field-label" for="authorNameInput">作者昵称（1..40 字，全站不区分大小写唯一）</label>
+          <input id="authorNameInput" type="text" maxlength="40" required />
+        </div>
+        <label class="checkbox-row">
+          <input id="authorOfficialInput" type="checkbox" />
+          <span>点亮官方徽章（isOfficial）</span>
+        </label>
+        <div class="field-group">
+          <label class="field-label" for="authorBadgeInput">徽章文案（如：官方、认证创作者，最多 20 字）</label>
+          <input id="authorBadgeInput" type="text" maxlength="20" placeholder="例如：官方" />
+        </div>
+        <div id="authorModalError" class="error-msg"></div>
+        <div class="actions">
+          <button type="button" id="cancelAuthorBtn">取消</button>
+          <button type="submit" class="primary">保存更改</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script>
     const STORAGE_KEY = "hyperopen_admin_token";
     const state = {
       token: sessionStorage.getItem(STORAGE_KEY) || "",
-      kind: "config",
+      view: "items",
+      kind: "shortcut",
       status: "pending",
+      official: "all",
       q: "",
       page: 1,
       pageSize: 20,
       totalPages: 1,
       currentDetail: null,
+      editingAuthor: null,
     };
 
     const $ = (id) => document.getElementById(id);
@@ -252,10 +305,22 @@ export function renderAdminHtml() {
       return new Date(ms).toLocaleString("zh-CN", { hour12: false });
     }
 
+    function statusText(status) {
+      if (status === "approved") return "已上架";
+      if (status === "hidden") return "已隐藏";
+      return "待审核";
+    }
+
     function statusBadge(status) {
       if (status === "approved") return el("span", "badge ok", "已上架");
       if (status === "hidden") return el("span", "badge danger", "已隐藏");
       return el("span", "badge warn", "待审核");
+    }
+
+    function officialBadge(isOfficial, badgeLabel) {
+      if (!isOfficial) return null;
+      const label = (badgeLabel || "").trim() || "官方";
+      return el("span", "badge official", "✓ " + label);
     }
 
     async function apiFetch(path, options = {}) {
@@ -291,7 +356,27 @@ export function renderAdminHtml() {
       state.token = "";
       sessionStorage.removeItem(STORAGE_KEY);
       closeModal();
+      closeAuthorModal();
       showLogin(msg);
+    }
+
+    function updateToolbarForView() {
+      if (state.view === "authors") {
+        $("searchInput").placeholder = "搜索作者昵称、徽章文案或 ID...";
+        $("officialFilter").style.display = "inline-block";
+      } else {
+        $("searchInput").placeholder = "搜索名称、作者、标签或简介...";
+        $("officialFilter").style.display = "none";
+      }
+    }
+
+    async function loadCurrentView() {
+      updateToolbarForView();
+      if (state.view === "authors") {
+        await loadAuthors();
+      } else {
+        await loadItems();
+      }
     }
 
     async function loadItems() {
@@ -313,14 +398,36 @@ export function renderAdminHtml() {
       }
     }
 
-    function renderItems(items, pag) {
-      const grid = $("itemGrid");
-      grid.innerHTML = "";
-      $("totalBadge").textContent = (pag.total ?? items.length) + " 条";
+    async function loadAuthors() {
+      $("listError").textContent = "";
+      const params = new URLSearchParams({
+        official: state.official,
+        page: String(state.page),
+        pageSize: String(state.pageSize),
+      });
+      if (state.q.trim()) params.set("q", state.q.trim());
+      try {
+        const data = await apiFetch("/api/admin/authors?" + params.toString());
+        renderAuthors(data.items || [], data.pagination || { page: 1, totalPages: 1, total: 0 });
+      } catch (err) {
+        if (err.message !== "Unauthorized") {
+          $("listError").textContent = "加载作者失败: " + err.message;
+        }
+      }
+    }
+
+    function updatePagination(pag) {
+      $("totalBadge").textContent = (pag.total ?? 0) + (state.view === "authors" ? " 位" : " 条");
       state.totalPages = Math.max(1, pag.totalPages || 1);
       $("pageInfo").textContent = "第 " + (pag.page || 1) + " / " + state.totalPages + " 页";
       $("prevBtn").disabled = (pag.page || 1) <= 1;
       $("nextBtn").disabled = (pag.page || 1) >= state.totalPages;
+    }
+
+    function renderItems(items, pag) {
+      const grid = $("itemGrid");
+      grid.innerHTML = "";
+      updatePagination({ ...pag, total: pag.total ?? items.length });
       $("emptyState").style.display = items.length === 0 ? "block" : "none";
 
       for (const item of items) {
@@ -335,7 +442,13 @@ export function renderAdminHtml() {
         top.appendChild(rightBadges);
         card.appendChild(top);
 
-        card.appendChild(el("div", "muted", "作者: " + item.author + " · 下载: " + item.downloads + " · " + formatTime(item.createdAt)));
+        const authorRow = el("div", "tags");
+        authorRow.appendChild(el("span", "muted", "作者: " + item.author));
+        const ob = officialBadge(item.authorIsOfficial, item.authorBadgeLabel);
+        if (ob) authorRow.appendChild(ob);
+        authorRow.appendChild(el("span", "muted", "· 下载: " + item.downloads + " · " + formatTime(item.createdAt)));
+        card.appendChild(authorRow);
+
         if (item.description) {
           card.appendChild(el("div", "desc", item.description));
         }
@@ -346,7 +459,13 @@ export function renderAdminHtml() {
         if (item.reportsCount > 0) flags.appendChild(el("span", "badge danger", "举报 " + item.reportsCount));
         if (item.kind === "config") {
           flags.appendChild(el("span", "badge", item.keyCount + " 键"));
-          if (item.hasShortcuts) flags.appendChild(el("span", "badge", "含 " + item.shortcutCount + " 快捷项"));
+          if (item.linkedShortcutPack) {
+            const lp = item.linkedShortcutPack;
+            const cls = lp.status === "approved" ? "badge ok" : lp.status === "hidden" ? "badge danger" : "badge warn";
+            flags.appendChild(el("span", cls, "关联快捷包: " + lp.name + " (" + statusText(lp.status) + ")"));
+          } else if (item.linkedShortcutPackId) {
+            flags.appendChild(el("span", "badge warn", "关联快捷包: " + item.linkedShortcutPackId));
+          }
         } else {
           flags.appendChild(el("span", "badge", item.shortcutCount + " 项 / " + item.folderCount + " 文件夹"));
         }
@@ -355,10 +474,141 @@ export function renderAdminHtml() {
       }
     }
 
+    function renderAuthors(authors, pag) {
+      const grid = $("itemGrid");
+      grid.innerHTML = "";
+      updatePagination({ ...pag, total: pag.total ?? authors.length });
+      $("emptyState").style.display = authors.length === 0 ? "block" : "none";
+
+      for (const author of authors) {
+        const card = el("div", "item-card static-card");
+        const top = el("div", "row-between");
+        top.appendChild(el("div", "title", author.displayName));
+        const badges = el("div", "tags");
+        const ob = officialBadge(author.isOfficial, author.badgeLabel);
+        if (ob) {
+          badges.appendChild(ob);
+        } else {
+          badges.appendChild(el("span", "badge", "普通作者"));
+          if (author.badgeLabel) {
+            badges.appendChild(el("span", "badge warn", "预设文案: " + author.badgeLabel));
+          }
+        }
+        top.appendChild(badges);
+        card.appendChild(top);
+
+        card.appendChild(el("div", "muted", "规范化名称: " + author.normalizedName + " · ID: " + author.id.slice(0, 8) + "..."));
+        card.appendChild(
+          el(
+            "div",
+            "muted",
+            "作品数: " + author.configCount + " 配置 / " + author.shortcutCount + " 快捷包 · 更新: " + formatTime(author.updatedAt)
+          )
+        );
+
+        const actions = el("div", "card-actions");
+        const toggleBtn = el(
+          "button",
+          author.isOfficial ? "warn" : "ok",
+          author.isOfficial ? "取消官方徽章" : "开启官方徽章"
+        );
+        toggleBtn.addEventListener("click", () => toggleOfficialBadge(author));
+        actions.appendChild(toggleBtn);
+
+        const editBtn = el("button", "primary", "编辑 / 徽章文案");
+        editBtn.addEventListener("click", () => openAuthorModal(author));
+        actions.appendChild(editBtn);
+
+        const delBtn = el("button", "danger", "释放昵称");
+        delBtn.addEventListener("click", () => deleteAuthor(author));
+        actions.appendChild(delBtn);
+
+        card.appendChild(actions);
+        grid.appendChild(card);
+      }
+    }
+
+    async function toggleOfficialBadge(author) {
+      $("listError").textContent = "";
+      const nextOfficial = !author.isOfficial;
+      const nextBadgeLabel = nextOfficial && !(author.badgeLabel || "").trim() ? "官方" : author.badgeLabel || "";
+      try {
+        await apiFetch("/api/admin/authors/" + encodeURIComponent(author.id), {
+          method: "PATCH",
+          body: JSON.stringify({ isOfficial: nextOfficial, badgeLabel: nextBadgeLabel }),
+        });
+        await loadAuthors();
+      } catch (err) {
+        if (err.message !== "Unauthorized") {
+          $("listError").textContent = "操作失败: " + err.message;
+        }
+      }
+    }
+
+    async function deleteAuthor(author) {
+      if (
+        !confirm(
+          "确定删除作者「" +
+            author.displayName +
+            "」并释放该昵称？其已发布配置与快捷包将保留并保留快照作者名，不再绑定原设备。"
+        )
+      ) {
+        return;
+      }
+      $("listError").textContent = "";
+      try {
+        await apiFetch("/api/admin/authors/" + encodeURIComponent(author.id), {
+          method: "DELETE",
+        });
+        await loadAuthors();
+      } catch (err) {
+        if (err.message !== "Unauthorized") {
+          $("listError").textContent = "删除失败: " + err.message;
+        }
+      }
+    }
+
+    function openAuthorModal(author) {
+      state.editingAuthor = author;
+      $("authorModalError").textContent = "";
+      $("authorModalMeta").textContent = "ID: " + author.id + " · 作品: " + author.configCount + " 配置 / " + author.shortcutCount + " 快捷包";
+      $("authorNameInput").value = author.displayName || "";
+      $("authorOfficialInput").checked = Boolean(author.isOfficial);
+      $("authorBadgeInput").value = author.badgeLabel || "";
+      $("authorBackdrop").classList.add("open");
+    }
+
+    function closeAuthorModal() {
+      $("authorBackdrop").classList.remove("open");
+      state.editingAuthor = null;
+    }
+
+    $("authorEditForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!state.editingAuthor) return;
+      $("authorModalError").textContent = "";
+      const displayName = $("authorNameInput").value.trim();
+      const isOfficial = $("authorOfficialInput").checked;
+      const badgeLabel = $("authorBadgeInput").value.trim();
+      try {
+        await apiFetch("/api/admin/authors/" + encodeURIComponent(state.editingAuthor.id), {
+          method: "PATCH",
+          body: JSON.stringify({ displayName, isOfficial, badgeLabel }),
+        });
+        closeAuthorModal();
+        await loadAuthors();
+      } catch (err) {
+        if (err.message !== "Unauthorized") {
+          $("authorModalError").textContent = "保存失败: " + err.message;
+        }
+      }
+    });
+
     async function openDetail(kind, id) {
       $("detailError").textContent = "";
       $("detailBackdrop").classList.add("open");
       $("detailTitle").textContent = "加载中...";
+      $("detailLinkedSection").style.display = "none";
       $("detailImagesSection").style.display = "none";
       $("detailRiskSection").style.display = "none";
       $("detailReportsSection").style.display = "none";
@@ -373,6 +623,7 @@ export function renderAdminHtml() {
           (kind === "config" ? "配置" : "快捷包") +
           " · ID: " + item.id +
           " · 作者: " + item.author +
+          (item.authorId ? " (AuthorID: " + item.authorId.slice(0, 8) + "...)" : "") +
           " · 大小: " + item.sizeBytes + " B" +
           " · SHA256: " + item.sha256.slice(0, 12) + "..." +
           " · 创建: " + formatTime(item.createdAt);
@@ -380,6 +631,8 @@ export function renderAdminHtml() {
         const badges = $("detailBadges");
         badges.innerHTML = "";
         badges.appendChild(statusBadge(item.status));
+        const ob = officialBadge(item.authorIsOfficial, item.authorBadgeLabel);
+        if (ob) badges.appendChild(ob);
         for (const r of (item.reviewReasons || [])) {
           badges.appendChild(el("span", "badge warn", "触发审核: " + r));
         }
@@ -387,6 +640,33 @@ export function renderAdminHtml() {
           badges.appendChild(el("span", "badge", "#" + t));
         }
         $("detailDesc").textContent = item.description || "（无简介）";
+
+        if (kind === "config" && item.linkedShortcutPack) {
+          const lp = item.linkedShortcutPack;
+          const card = $("detailLinkedCard");
+          card.innerHTML = "";
+          const row = el("div", "row-between");
+          const left = el("div");
+          left.appendChild(el("strong", "", lp.name));
+          left.appendChild(
+            el(
+              "div",
+              "muted",
+              "ID: " + lp.id + " · " + lp.shortcutCount + " 项 / " + lp.folderCount + " 文件夹" +
+              (lp.hasRootRisk ? " · 含高危动作" : "") +
+              (lp.customImageCount > 0 ? " · 自定义图 " + lp.customImageCount + " 张" : "")
+            )
+          );
+          row.appendChild(left);
+          const right = el("div", "tags");
+          right.appendChild(statusBadge(lp.status));
+          const jumpBtn = el("button", "primary", "查看快捷包");
+          jumpBtn.addEventListener("click", () => openDetail("shortcut", lp.id));
+          right.appendChild(jumpBtn);
+          row.appendChild(right);
+          card.appendChild(row);
+          $("detailLinkedSection").style.display = "block";
+        }
 
         const imgs = data.extractedImages || [];
         if (imgs.length > 0) {
@@ -462,7 +742,7 @@ export function renderAdminHtml() {
           body: JSON.stringify({ status }),
         });
         closeModal();
-        await loadItems();
+        await loadCurrentView();
       } catch (err) {
         $("detailError").textContent = "更新状态失败: " + err.message;
       }
@@ -478,7 +758,7 @@ export function renderAdminHtml() {
           method: "DELETE",
         });
         closeModal();
-        await loadItems();
+        await loadCurrentView();
       } catch (err) {
         $("detailError").textContent = "删除失败: " + err.message;
       }
@@ -495,7 +775,7 @@ export function renderAdminHtml() {
         sessionStorage.setItem(STORAGE_KEY, token);
         $("tokenInput").value = "";
         showApp();
-        await loadItems();
+        await loadCurrentView();
       } catch (err) {
         state.token = "";
         sessionStorage.removeItem(STORAGE_KEY);
@@ -508,6 +788,12 @@ export function renderAdminHtml() {
     $("detailBackdrop").addEventListener("click", (e) => {
       if (e.target === $("detailBackdrop")) closeModal();
     });
+    $("closeAuthorModalBtn").addEventListener("click", closeAuthorModal);
+    $("cancelAuthorBtn").addEventListener("click", closeAuthorModal);
+    $("authorBackdrop").addEventListener("click", (e) => {
+      if (e.target === $("authorBackdrop")) closeAuthorModal();
+    });
+
     $("btnApprove").addEventListener("click", () => updateStatus("approved"));
     $("btnPending").addEventListener("click", () => updateStatus("pending"));
     $("btnHide").addEventListener("click", () => updateStatus("hidden"));
@@ -518,41 +804,50 @@ export function renderAdminHtml() {
       if (!btn) return;
       for (const node of $("tabBar").querySelectorAll(".tab")) node.classList.remove("active");
       btn.classList.add("active");
-      state.kind = btn.dataset.kind;
-      state.status = btn.dataset.status;
+      state.view = btn.dataset.view || "items";
+      if (state.view === "items") {
+        state.kind = btn.dataset.kind;
+        state.status = btn.dataset.status;
+      }
       state.page = 1;
-      loadItems();
+      loadCurrentView();
+    });
+
+    $("officialFilter").addEventListener("change", () => {
+      state.official = $("officialFilter").value;
+      state.page = 1;
+      loadCurrentView();
     });
 
     $("searchBtn").addEventListener("click", () => {
       state.q = $("searchInput").value;
       state.page = 1;
-      loadItems();
+      loadCurrentView();
     });
     $("searchInput").addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         state.q = $("searchInput").value;
         state.page = 1;
-        loadItems();
+        loadCurrentView();
       }
     });
-    $("refreshBtn").addEventListener("click", loadItems);
+    $("refreshBtn").addEventListener("click", loadCurrentView);
     $("prevBtn").addEventListener("click", () => {
       if (state.page > 1) {
         state.page -= 1;
-        loadItems();
+        loadCurrentView();
       }
     });
     $("nextBtn").addEventListener("click", () => {
       if (state.page < state.totalPages) {
         state.page += 1;
-        loadItems();
+        loadCurrentView();
       }
     });
 
     if (state.token) {
       showApp();
-      loadItems();
+      loadCurrentView();
     } else {
       showLogin();
     }

@@ -794,6 +794,46 @@ export function normalizeShortcuts(rawShortcuts, options = { forceZeroOffsets: f
   };
 }
 
+export function validateAuthorDisplayName(rawName) {
+  if (typeof rawName !== "string") {
+    throw new ValidationError("作者昵称不能为空且必须是字符串");
+  }
+  if (rawName.length > 120) {
+    throw new ValidationError("作者昵称长度超出限制");
+  }
+  if (/[\u0000-\u001F\u007F-\u009F]/.test(rawName)) {
+    throw new ValidationError("作者昵称不能包含控制字符或换行符");
+  }
+  const displayName = rawName.trim();
+  if (!displayName || displayName.length > 40) {
+    throw new ValidationError("作者昵称不能为空且不能超过 40 个字符");
+  }
+  return {
+    displayName,
+    normalizedName: displayName.toLowerCase(),
+  };
+}
+
+export function validateBadgeLabel(rawLabel) {
+  if (rawLabel === undefined || rawLabel === null) {
+    return "";
+  }
+  if (typeof rawLabel !== "string") {
+    throw new ValidationError("徽章文案必须是字符串");
+  }
+  if (rawLabel.length > 80) {
+    throw new ValidationError("徽章文案长度超出限制");
+  }
+  if (/[\u0000-\u001F\u007F-\u009F]/.test(rawLabel)) {
+    throw new ValidationError("徽章文案不能包含控制字符或换行符");
+  }
+  const badgeLabel = rawLabel.trim();
+  if (badgeLabel.length > 20) {
+    throw new ValidationError("徽章文案不能超过 20 个字符");
+  }
+  return badgeLabel;
+}
+
 export function validateAndNormalizeConfig(rawInput) {
   let root = rawInput;
   if (typeof rawInput === "string") {
@@ -838,31 +878,7 @@ export function validateAndNormalizeConfig(rawInput) {
     throw new ValidationError("配置不包含任何有效的面板参数键");
   }
 
-  let shortcutResult = null;
-  if (root.shortcuts !== undefined) {
-    if (!Array.isArray(root.shortcuts)) {
-      throw new ValidationError("shortcuts 字段必须是数组");
-    }
-    shortcutResult = normalizeShortcuts(root.shortcuts, { forceZeroOffsets: false });
-  } else if (root.values.shortcuts_json !== undefined) {
-    const sjEntry = validateTypedPref("shortcuts_json", root.values.shortcuts_json);
-    const trimmed = sjEntry.v.trim();
-    let arr = [];
-    if (trimmed.length > 0) {
-      try {
-        arr = JSON.parse(trimmed);
-      } catch {
-        throw new ValidationError("values.shortcuts_json 不是合法 JSON 数组");
-      }
-      if (!Array.isArray(arr)) {
-        throw new ValidationError("values.shortcuts_json 必须是数组");
-      }
-    }
-    shortcutResult = normalizeShortcuts(arr, { forceZeroOffsets: false });
-  }
-
-  const shortcutCount = shortcutResult ? shortcutResult.shortcutCount : 0;
-  const hasShortcuts = shortcutCount > 0;
+  // 配置市场纯外观化：强制剥离顶层 shortcuts 与 values.shortcuts_json
   const layoutStyle = normalizedValues.layout_style ? normalizedValues.layout_style.v : 0;
   const materialStyle = normalizedValues.material_style ? normalizedValues.material_style.v : 2;
 
@@ -880,35 +896,29 @@ export function validateAndNormalizeConfig(rawInput) {
     appVersion,
     values: normalizedValues,
   };
-  if (hasShortcuts) {
-    canonical.shortcuts = shortcutResult.items;
-  }
 
   const jsonBody = JSON.stringify(canonical);
-  const extractedImages = shortcutResult ? shortcutResult.extractedImages : [];
-  const riskSummary = shortcutResult ? shortcutResult.riskSummary : [];
-  const reviewReasons = [];
-  if (riskSummary.length > 0) reviewReasons.push("root_action");
-  if (extractedImages.length > 0) reviewReasons.push("custom_image");
 
   return {
     jsonBody,
     layoutStyle,
     materialStyle,
     keyCount,
-    shortcutCount,
-    hasShortcuts,
+    shortcutCount: 0,
+    hasShortcuts: false,
     appVersion,
-    extractedImages,
-    customImageCount: extractedImages.length,
-    riskSummary,
-    hasRootRisk: riskSummary.length > 0,
-    reviewReasons,
-    status: reviewReasons.length > 0 ? "pending" : "approved",
+    extractedImages: [],
+    customImageCount: 0,
+    riskSummary: [],
+    hasRootRisk: false,
+    reviewReasons: [],
+    status: "approved",
   };
 }
 
-export function validateUploadMetadata(body) {
+export const validateConfigSubmission = validateAndNormalizeConfig;
+
+export function validateUploadMetadata(body, options = { allowEmptyAuthor: false }) {
   if (!isPlainObject(body)) {
     throw new ValidationError("请求体必须是 JSON 对象");
   }
@@ -920,9 +930,20 @@ export function validateUploadMetadata(body) {
   if (description.length > 500) {
     throw new ValidationError("简介不能超过 500 个字符");
   }
-  const author = asString(body.author, "", "author", 80).trim();
-  if (!author || author.length > 40) {
-    throw new ValidationError("作者名不能为空且不能超过 40 个字符");
+
+  let author = "";
+  let normalizedAuthor = "";
+  const isAuthorEmpty =
+    body.author === undefined ||
+    body.author === null ||
+    (typeof body.author === "string" && body.author.trim() === "");
+  if (isAuthorEmpty && options.allowEmptyAuthor) {
+    author = "";
+    normalizedAuthor = "";
+  } else {
+    const parsedAuthor = validateAuthorDisplayName(body.author);
+    author = parsedAuthor.displayName;
+    normalizedAuthor = parsedAuthor.normalizedName;
   }
 
   const tags = [];
@@ -965,6 +986,7 @@ export function validateUploadMetadata(body) {
     name,
     description,
     author,
+    normalizedAuthor,
     tags,
     minAppVersionCode,
     appVersion,
