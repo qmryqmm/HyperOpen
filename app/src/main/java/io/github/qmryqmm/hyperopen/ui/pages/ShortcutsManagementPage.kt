@@ -166,7 +166,7 @@ fun ShortcutsManagementPage(
                     )
                     ArrowPreference(
                         title = "分享到快捷市场",
-                        summary = "将当前 ${shortcuts.size} 个快捷方式打包脱敏后上传分享",
+                        summary = "上传单个快捷方式或将当前 ${shortcuts.size} 个快捷方式打包分享",
                         startAction = {
                             Icon(
                                 MiuixIcons.UploadCloud,

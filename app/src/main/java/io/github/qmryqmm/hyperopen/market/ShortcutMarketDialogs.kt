@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,6 +57,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import org.json.JSONObject
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -121,6 +123,17 @@ fun parseShortcutPackItems(shortcutsJson: String?): List<ShortcutItem> {
         out.add(ShortcutItem.fromJson(obj))
     }
     return out
+}
+
+/**
+ * 安全解析单个快捷方式条目的内嵌 previewItem JSON 对象；异常或为空时返回 null。
+ */
+fun parseSingleShortcutPreviewItem(previewItemJson: String?): ShortcutItem? {
+    if (previewItemJson.isNullOrBlank()) return null
+    return runCatching {
+        val obj = JSONObject(previewItemJson.trim())
+        ShortcutItem.fromJson(obj)
+    }.getOrNull()
 }
 
 /** 提取需检测本机安装状态的目标应用包名（针对 APP 与带包名的 ACTIVITY）。 */
@@ -431,6 +444,8 @@ fun ShortcutMarketDetailDialog(
     }
 
     val activeMeta = detail?.item ?: summary
+    val isSingleEntry = activeMeta.isSingleShortcut
+    val singleItem = parsedItems.firstOrNull()
     val needsNewerApp = activeMeta.minAppVersionCode > BuildConfig.VERSION_CODE
     val selectedCount = parsedItems.indices.count { selectedIndices[it] == true }
     val allSelected = parsedItems.isNotEmpty() && selectedCount == parsedItems.size
@@ -519,24 +534,43 @@ fun ShortcutMarketDetailDialog(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                MarketBadgePill(
-                                    text = "${activeMeta.shortcutCount} 顶层快捷项",
-                                    textColor = MiuixTheme.colorScheme.primary,
-                                    bgColor = MiuixTheme.colorScheme.primary.copy(alpha = 0.12f),
-                                )
-                                if (activeMeta.folderCount > 0) {
+                                if (isSingleEntry) {
+                                    val resolvedAction = singleItem?.actionType
+                                        ?: activeMeta.actionTypes.firstOrNull()
+                                    if (!resolvedAction.isNullOrBlank()) {
+                                        MarketBadgePill(
+                                            text = shortcutActionTypeFullLabel(resolvedAction),
+                                            textColor = MiuixTheme.colorScheme.primary,
+                                            bgColor = MiuixTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                        )
+                                    }
+                                    if (activeMeta.folderCount > 0) {
+                                        MarketBadgePill(
+                                            text = "${activeMeta.folderCount} 文件夹",
+                                            textColor = MiuixTheme.colorScheme.onSurface,
+                                            bgColor = MiuixTheme.colorScheme.surfaceVariant,
+                                        )
+                                    }
+                                } else {
                                     MarketBadgePill(
-                                        text = "${activeMeta.folderCount} 文件夹",
-                                        textColor = MiuixTheme.colorScheme.onSurface,
-                                        bgColor = MiuixTheme.colorScheme.surfaceVariant,
+                                        text = "${activeMeta.shortcutCount} 顶层快捷项",
+                                        textColor = MiuixTheme.colorScheme.primary,
+                                        bgColor = MiuixTheme.colorScheme.primary.copy(alpha = 0.12f),
                                     )
-                                }
-                                activeMeta.actionTypes.forEach { at ->
-                                    MarketBadgePill(
-                                        text = shortcutActionTypeLabel(at),
-                                        textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                        bgColor = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
-                                    )
+                                    if (activeMeta.folderCount > 0) {
+                                        MarketBadgePill(
+                                            text = "${activeMeta.folderCount} 文件夹",
+                                            textColor = MiuixTheme.colorScheme.onSurface,
+                                            bgColor = MiuixTheme.colorScheme.surfaceVariant,
+                                        )
+                                    }
+                                    activeMeta.actionTypes.forEach { at ->
+                                        MarketBadgePill(
+                                            text = shortcutActionTypeLabel(at),
+                                            textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                            bgColor = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+                                        )
+                                    }
                                 }
                             }
 
@@ -565,16 +599,18 @@ fun ShortcutMarketDetailDialog(
                             }
 
                             if (needsNewerApp) {
+                                val entityNoun = if (isSingleEntry) "快捷方式" else "快捷包"
                                 MarketBannerBox(
-                                    text = "版本兼容提示：此快捷包制作于较高版本模块（建议 versionCode ≥ ${activeMeta.minAppVersionCode}，当前为 ${BuildConfig.VERSION_CODE}），部分新字段将被安全忽略。",
+                                    text = "版本兼容提示：此${entityNoun}制作于较高版本模块（建议 versionCode ≥ ${activeMeta.minAppVersionCode}，当前为 ${BuildConfig.VERSION_CODE}），部分新字段将被安全忽略。",
                                     textColor = MARKET_COLOR_AMBER,
                                     bgColor = MARKET_COLOR_AMBER_BG,
                                 )
                             }
 
                             if (activeMeta.customImageCount > 0) {
+                                val entityNoun = if (isSingleEntry) "快捷方式" else "快捷包"
                                 MarketBannerBox(
-                                    text = "此快捷包携带 ${activeMeta.customImageCount} 张自定义图标图片（已通过格式与 64 KB 上限校验）。",
+                                    text = "此${entityNoun}携带 ${activeMeta.customImageCount} 张自定义图标图片（已通过格式与 64 KB 上限校验）。",
                                     textColor = MARKET_COLOR_AMBER,
                                     bgColor = MARKET_COLOR_AMBER_BG,
                                 )
@@ -598,17 +634,17 @@ fun ShortcutMarketDetailDialog(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    text = if (parsedItems.isNotEmpty()) {
-                                        "包内快捷项清单 (${parsedItems.size})"
-                                    } else {
-                                        "包内快捷项清单"
+                                    text = when {
+                                        isSingleEntry -> "快捷方式详情"
+                                        parsedItems.isNotEmpty() -> "包内快捷项清单 (${parsedItems.size})"
+                                        else -> "包内快捷项清单"
                                     },
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MiuixTheme.colorScheme.onSurface,
                                     modifier = Modifier.weight(1f),
                                 )
-                                if (!isLoading && parsedItems.isNotEmpty()) {
+                                if (!isSingleEntry && !isLoading && parsedItems.isNotEmpty()) {
                                     Text(
                                         text = if (allSelected) "取消全选" else "全选 (${parsedItems.size})",
                                         fontSize = 12.sp,
@@ -633,7 +669,11 @@ fun ShortcutMarketDetailDialog(
                         isLoading -> {
                             item(key = "detail_loading") {
                                 MarketBannerBox(
-                                    text = "正在加载快捷包明细与本机应用安装状态...",
+                                    text = if (isSingleEntry) {
+                                        "正在加载快捷方式明细与本机应用安装状态..."
+                                    } else {
+                                        "正在加载快捷包明细与本机应用安装状态..."
+                                    },
                                     textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                     bgColor = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
                                 )
@@ -665,7 +705,7 @@ fun ShortcutMarketDetailDialog(
                         parsedItems.isEmpty() -> {
                             item(key = "detail_empty") {
                                 MarketBannerBox(
-                                    text = "快捷包正文为空",
+                                    text = if (isSingleEntry) "快捷方式正文为空" else "快捷包正文为空",
                                     textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                     bgColor = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
                                 )
@@ -694,6 +734,7 @@ fun ShortcutMarketDetailDialog(
                                     ShortcutPackTopItemRow(
                                         item = item,
                                         checked = isChecked,
+                                        showCheckbox = !isSingleEntry,
                                         isFolder = isFolder,
                                         childCount = children.size,
                                         expanded = isExpanded,
@@ -780,24 +821,37 @@ fun ShortcutMarketDetailDialog(
                             onBuildSandboxPreview(d, parsedItems)
                         },
                     )
-                    TextButton(
-                        text = if (selectedCount > 0) "导入所选 ($selectedCount)" else "导入所选",
-                        enabled = ready && selectedCount > 0,
-                        onClick = {
-                            val picked = parsedItems.filterIndexed { idx, _ -> selectedIndices[idx] == true }
-                            if (picked.isNotEmpty()) {
-                                onImportSelectedItems(activeMeta, picked, consumeDownloadFlag())
-                            }
-                        },
-                    )
-                    TextButton(
-                        text = "导入全部",
-                        colors = ButtonDefaults.textButtonColorsPrimary(),
-                        enabled = ready,
-                        onClick = {
-                            onOpenImportAll(activeMeta, parsedItems)
-                        },
-                    )
+                    if (isSingleEntry) {
+                        TextButton(
+                            text = "添加到本地",
+                            colors = ButtonDefaults.textButtonColorsPrimary(),
+                            enabled = ready && singleItem != null,
+                            onClick = {
+                                val firstItem = singleItem ?: return@TextButton
+                                onAddSingleItem(activeMeta, firstItem, consumeDownloadFlag())
+                                onDismiss()
+                            },
+                        )
+                    } else {
+                        TextButton(
+                            text = if (selectedCount > 0) "导入所选 ($selectedCount)" else "导入所选",
+                            enabled = ready && selectedCount > 0,
+                            onClick = {
+                                val picked = parsedItems.filterIndexed { idx, _ -> selectedIndices[idx] == true }
+                                if (picked.isNotEmpty()) {
+                                    onImportSelectedItems(activeMeta, picked, consumeDownloadFlag())
+                                }
+                            },
+                        )
+                        TextButton(
+                            text = "导入全部",
+                            colors = ButtonDefaults.textButtonColorsPrimary(),
+                            enabled = ready,
+                            onClick = {
+                                onOpenImportAll(activeMeta, parsedItems)
+                            },
+                        )
+                    }
                 }
 
                 Spacer(Modifier.height(6.dp))
@@ -833,6 +887,7 @@ fun ShortcutMarketDetailDialog(
 private fun ShortcutPackTopItemRow(
     item: ShortcutItem,
     checked: Boolean,
+    showCheckbox: Boolean = true,
     isFolder: Boolean,
     childCount: Int,
     expanded: Boolean,
@@ -843,28 +898,37 @@ private fun ShortcutPackTopItemRow(
     onAddClick: () -> Unit,
 ) {
     val primary = MiuixTheme.colorScheme.primary
-    val bgColor = if (checked) {
+    val bgColor = if (showCheckbox && checked) {
         primary.copy(alpha = 0.08f)
     } else {
         MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
     }
+    val detailStartPadding = if (showCheckbox) 34.dp else 48.dp
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(bgColor)
-            .clickable(onClick = onToggleCheck)
+            .clickable(enabled = showCheckbox || (isFolder && childCount > 0)) {
+                if (showCheckbox) {
+                    onToggleCheck()
+                } else if (isFolder && childCount > 0) {
+                    onToggleExpand()
+                }
+            }
             .padding(horizontal = 10.dp, vertical = 10.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Checkbox(
-                state = if (checked) ToggleableState.On else ToggleableState.Off,
-                onClick = onToggleCheck,
-            )
-            Spacer(Modifier.width(6.dp))
+            if (showCheckbox) {
+                Checkbox(
+                    state = if (checked) ToggleableState.On else ToggleableState.Off,
+                    onClick = onToggleCheck,
+                )
+                Spacer(Modifier.width(6.dp))
+            }
             ShortcutBubbleIcon(
                 item = item,
                 size = 38.dp,
@@ -913,15 +977,17 @@ private fun ShortcutPackTopItemRow(
                     )
                 }
             }
-            Spacer(Modifier.width(4.dp))
-            AddShortcutActionPill(onClick = onAddClick)
+            if (showCheckbox) {
+                Spacer(Modifier.width(4.dp))
+                AddShortcutActionPill(onClick = onAddClick)
+            }
         }
 
         Spacer(Modifier.height(6.dp))
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.padding(start = 34.dp),
+            modifier = Modifier.padding(start = detailStartPadding),
         ) {
             MarketBadgePill(
                 text = shortcutActionTypeLabel(item.actionType),
@@ -957,7 +1023,7 @@ private fun ShortcutPackTopItemRow(
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 34.dp),
+            modifier = Modifier.padding(start = detailStartPadding),
         )
     }
 }
@@ -1043,7 +1109,7 @@ private fun ShortcutPackChildItemRow(
 }
 
 @Composable
-private fun AddShortcutActionPill(onClick: () -> Unit) {
+internal fun AddShortcutActionPill(onClick: () -> Unit) {
     val primary = MiuixTheme.colorScheme.primary
     Box(
         modifier = Modifier
@@ -1304,7 +1370,8 @@ fun ShortcutPackDetailHost(
                         if (reportRes.hidden) {
                             onFlowExit()
                             onHiddenByReport(target.id)
-                            Toast.makeText(ctx, "举报成功，该快捷包因累计举报过多已被暂时隐藏", Toast.LENGTH_LONG).show()
+                            val noun = if (target.isSingleShortcut) "快捷方式" else "快捷包"
+                            Toast.makeText(ctx, "举报成功，该${noun}因累计举报过多已被暂时隐藏", Toast.LENGTH_LONG).show()
                         } else {
                             Toast.makeText(ctx, "已提交举报，感谢您的反馈", Toast.LENGTH_SHORT).show()
                         }
@@ -1360,13 +1427,20 @@ fun ShortcutPackDetailHost(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 快捷方式市场上传弹窗（支持全量列表或 Tab 1 多选子集，父文件夹子项去重）
+// 快捷方式市场上传弹窗（支持单个快捷方式直传或全量/多选打包，父文件夹子项去重）
 // ─────────────────────────────────────────────────────────────────────────────
+
+private data class SingleShortcutCandidate(
+    val key: String,
+    val item: ShortcutItem,
+    val displayName: String,
+)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ShortcutMarketUploadDialog(
     sourceShortcuts: List<ShortcutItem>,
+    allLocalShortcuts: List<ShortcutItem> = sourceShortcuts,
     isSelectionMode: Boolean = false,
     onDismiss: () -> Unit,
     onUploaded: (result: MarketUploadResult, authorUpdated: Boolean) -> Unit,
@@ -1377,11 +1451,72 @@ fun ShortcutMarketUploadDialog(
     val cleanSourceShortcuts = remember(sourceShortcuts) {
         deduplicateShortcutsForUpload(sourceShortcuts)
     }
-    val rawInspection = remember(cleanSourceShortcuts) {
-        MarketSanitizer.inspectShortcuts(cleanSourceShortcuts, stripCustomImages = false)
+    val candidateSource = if (isSelectionMode) cleanSourceShortcuts else allLocalShortcuts
+    val singleCandidates = remember(candidateSource) {
+        val seenIds = HashSet<String>()
+        val list = ArrayList<SingleShortcutCandidate>()
+        var fallbackIdx = 0
+        fun addCandidate(shortcut: ShortcutItem, parentFolderTitle: String?) {
+            val id = shortcut.id?.trim().orEmpty()
+            if (id.isNotEmpty() && !seenIds.add(id)) return
+            val title = shortcut.title.orEmpty().trim().ifBlank { "未命名快捷方式" }
+            val display = if (!parentFolderTitle.isNullOrBlank()) {
+                "$parentFolderTitle / $title"
+            } else {
+                title
+            }
+            val key = if (id.isNotEmpty()) id else "idx_${fallbackIdx++}_$title"
+            list.add(
+                SingleShortcutCandidate(
+                    key = key,
+                    item = shortcut,
+                    displayName = display,
+                )
+            )
+        }
+        for (top in candidateSource) {
+            addCandidate(top, null)
+            if (top.actionType == ShortcutItem.ACTION_FOLDER) {
+                val folderTitle = top.title.orEmpty().trim().ifBlank { "聚合文件夹" }
+                top.parseFolderChildren().forEach { child ->
+                    addCandidate(child, folderTitle)
+                }
+            }
+        }
+        list
     }
 
-    var name by remember(cleanSourceShortcuts) {
+    var uploadEntryType by remember(cleanSourceShortcuts, isSelectionMode) {
+        mutableStateOf(
+            if (isSelectionMode && cleanSourceShortcuts.size == 1) {
+                MarketShortcutPackSummary.ENTRY_TYPE_SINGLE
+            } else {
+                MarketShortcutPackSummary.ENTRY_TYPE_PACK
+            }
+        )
+    }
+    val isSingleMode = uploadEntryType == MarketShortcutPackSummary.ENTRY_TYPE_SINGLE
+
+    var selectedSingleKey by remember(singleCandidates) {
+        mutableStateOf(singleCandidates.firstOrNull()?.key)
+    }
+    val selectedSingleCandidate = remember(singleCandidates, selectedSingleKey) {
+        singleCandidates.firstOrNull { it.key == selectedSingleKey } ?: singleCandidates.firstOrNull()
+    }
+
+    val activeShortcutsToUpload = remember(isSingleMode, selectedSingleCandidate, cleanSourceShortcuts) {
+        if (isSingleMode) {
+            listOfNotNull(selectedSingleCandidate?.item)
+        } else {
+            cleanSourceShortcuts
+        }
+    }
+    val rawInspection = remember(activeShortcutsToUpload) {
+        MarketSanitizer.inspectShortcuts(activeShortcutsToUpload, stripCustomImages = false)
+    }
+
+    var nameTouched by remember(cleanSourceShortcuts) { mutableStateOf(false) }
+    var name by remember(cleanSourceShortcuts, isSelectionMode) {
         mutableStateOf(
             if (isSelectionMode && cleanSourceShortcuts.size == 1) {
                 cleanSourceShortcuts.first().title.orEmpty().trim().take(60)
@@ -1423,8 +1558,8 @@ fun ShortcutMarketUploadDialog(
         }
     }
 
-    LaunchedEffect(cleanSourceShortcuts, keepCustomImages) {
-        if (cleanSourceShortcuts.isEmpty()) {
+    LaunchedEffect(activeShortcutsToUpload, keepCustomImages) {
+        if (activeShortcutsToUpload.isEmpty()) {
             preparedUpload = null
             prepareError = "待上传列表为空，请至少选择一个快捷方式"
             isPreparing = false
@@ -1434,7 +1569,7 @@ fun ShortcutMarketUploadDialog(
         prepareError = null
         val res = runCatching {
             MarketSanitizer.prepareShortcutsForUpload(
-                shortcuts = cleanSourceShortcuts,
+                shortcuts = activeShortcutsToUpload,
                 stripCustomImages = !keepCustomImages,
             )
         }
@@ -1479,50 +1614,245 @@ fun ShortcutMarketUploadDialog(
                     .padding(24.dp),
             ) {
                 Text(
-                    text = if (isSelectionMode) "分享所选快捷方式到市场" else "上传快捷方式到市场",
+                    text = when {
+                        isSingleMode -> "上传单个快捷方式到市场"
+                        isSelectionMode -> "分享所选快捷方式到市场"
+                        else -> "上传快捷包到市场"
+                    },
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = MiuixTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "上传前会自动清零本机坐标偏移并校验动作安全性与图片体积（≤50 顶层 / ≤100 总项 / ≤512 KB）。",
+                    text = if (isSingleMode) {
+                        "仅上传所选单个快捷方式；上传前自动清零坐标偏移并校验安全性与图片体积（单图 ≤64 KB / ≤512 KB）。"
+                    } else {
+                        "上传前会自动清零本机坐标偏移并校验动作安全性与图片体积（≤50 顶层 / ≤100 总项 / ≤512 KB）。"
+                    },
                     fontSize = 12.sp,
                     lineHeight = 17.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
 
                 Spacer(Modifier.height(12.dp))
-                val folderDesc = if (rawInspection.folderCount > 0) "（含 ${rawInspection.folderCount} 个文件夹）" else ""
-                val previewNames = cleanSourceShortcuts.take(4).joinToString("、") {
-                    it.title.orEmpty().ifBlank { "未命名" }
-                } + if (cleanSourceShortcuts.size > 4) " 等" else ""
-                Column(
+                val primary = MiuixTheme.colorScheme.primary
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Text(
-                        text = if (isSelectionMode) {
-                            "已选 ${rawInspection.shortcutCount} 个顶层快捷项$folderDesc · 共 ${rawInspection.totalShortcutCount} 条"
-                        } else {
-                            "当前列表共 ${rawInspection.shortcutCount} 个顶层快捷项$folderDesc · 总计 ${rawInspection.totalShortcutCount} 条"
-                        },
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MiuixTheme.colorScheme.onSurface,
-                    )
-                    if (previewNames.isNotBlank()) {
-                        Spacer(Modifier.height(3.dp))
-                        Text(
-                            text = "包含：$previewNames",
-                            fontSize = 11.sp,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
+                    listOf(
+                        MarketShortcutPackSummary.ENTRY_TYPE_SINGLE to "单个快捷方式",
+                        MarketShortcutPackSummary.ENTRY_TYPE_PACK to "快捷包",
+                    ).forEach { (typeKey, label) ->
+                        val active = uploadEntryType == typeKey
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(
+                                    if (active) primary.copy(alpha = 0.14f)
+                                    else MiuixTheme.colorScheme.surface.copy(alpha = 0f)
+                                )
+                                .clickable(enabled = !isUploading) {
+                                    if (uploadEntryType != typeKey) {
+                                        uploadEntryType = typeKey
+                                        submitError = null
+                                        if (!nameTouched) {
+                                            name = if (typeKey == MarketShortcutPackSummary.ENTRY_TYPE_SINGLE) {
+                                                selectedSingleCandidate?.item?.title.orEmpty().trim().take(60)
+                                            } else {
+                                                ""
+                                            }
+                                        }
+                                    }
+                                }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 13.sp,
+                                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                                color = if (active) primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                if (isSingleMode) {
+                    if (singleCandidates.isEmpty()) {
+                        MarketBannerBox(
+                            text = "暂无可选的单个快捷方式",
+                            textColor = MARKET_COLOR_AMBER,
+                            bgColor = MARKET_COLOR_AMBER_BG,
                         )
+                    } else {
+                        Text(
+                            text = "选择要分享的单个快捷方式（${singleCandidates.size} 个可选）",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 188.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                .verticalScroll(rememberScrollState())
+                                .padding(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            singleCandidates.forEach { candidate ->
+                                val selected = candidate.key == selectedSingleCandidate?.key
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(9.dp))
+                                        .background(
+                                            if (selected) primary.copy(alpha = 0.12f)
+                                            else MiuixTheme.colorScheme.surface.copy(alpha = 0.72f)
+                                        )
+                                        .then(
+                                            if (selected) {
+                                                Modifier.border(
+                                                    1.dp,
+                                                    primary.copy(alpha = 0.35f),
+                                                    RoundedCornerShape(9.dp),
+                                                )
+                                            } else {
+                                                Modifier
+                                            }
+                                        )
+                                        .clickable(enabled = !isUploading) {
+                                            selectedSingleKey = candidate.key
+                                            submitError = null
+                                            if (!nameTouched) {
+                                                name = candidate.item.title.orEmpty().trim().take(60)
+                                            }
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    ShortcutBubbleIcon(
+                                        item = candidate.item,
+                                        size = 32.dp,
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(
+                                        text = candidate.displayName,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                        color = if (selected) primary else MiuixTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    MarketBadgePill(
+                                        text = shortcutActionTypeLabel(candidate.item.actionType),
+                                        textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                        bgColor = MiuixTheme.colorScheme.surfaceVariant,
+                                    )
+                                    if (selected) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = "✓",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = primary,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        selectedSingleCandidate?.item?.let { picked ->
+                            Spacer(Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                ShortcutBubbleIcon(
+                                    item = picked,
+                                    size = 38.dp,
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = picked.title.orEmpty().ifBlank { "未命名快捷方式" },
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MiuixTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (!picked.subtitle.isNullOrBlank()) {
+                                        Text(
+                                            text = picked.subtitle.orEmpty(),
+                                            fontSize = 11.sp,
+                                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = formatShortcutTargetDetails(picked),
+                                        fontSize = 11.sp,
+                                        lineHeight = 15.sp,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    val folderDesc = if (rawInspection.folderCount > 0) "（含 ${rawInspection.folderCount} 个文件夹）" else ""
+                    val previewNames = cleanSourceShortcuts.take(4).joinToString("、") {
+                        it.title.orEmpty().ifBlank { "未命名" }
+                    } + if (cleanSourceShortcuts.size > 4) " 等" else ""
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                    ) {
+                        Text(
+                            text = if (isSelectionMode) {
+                                "已选 ${rawInspection.shortcutCount} 个顶层快捷项$folderDesc · 共 ${rawInspection.totalShortcutCount} 条"
+                            } else {
+                                "当前列表共 ${rawInspection.shortcutCount} 个顶层快捷项$folderDesc · 总计 ${rawInspection.totalShortcutCount} 条"
+                            },
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MiuixTheme.colorScheme.onSurface,
+                        )
+                        if (previewNames.isNotBlank()) {
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = "包含：$previewNames",
+                                fontSize = 11.sp,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
 
@@ -1530,10 +1860,15 @@ fun ShortcutMarketUploadDialog(
                 TextField(
                     value = name,
                     onValueChange = {
+                        nameTouched = true
                         name = it.take(60)
                         submitError = null
                     },
-                    label = "快捷包名称（必填，最多 60 字）",
+                    label = if (isSingleMode) {
+                        "快捷方式名称（必填，最多 60 字）"
+                    } else {
+                        "快捷包名称（必填，最多 60 字）"
+                    },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                     modifier = Modifier.fillMaxWidth(),
@@ -1576,7 +1911,11 @@ fun ShortcutMarketUploadDialog(
                         description = it.take(500)
                         submitError = null
                     },
-                    label = "快捷包简介（可选，说明用途与依赖应用）",
+                    label = if (isSingleMode) {
+                        "快捷方式简介（可选，说明用途与触发场景）"
+                    } else {
+                        "快捷包简介（可选，说明用途与依赖应用）"
+                    },
                     maxLines = 4,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -1708,7 +2047,11 @@ fun ShortcutMarketUploadDialog(
                             val cleanName = name.trim()
                             val cleanAuthor = author.trim()
                             if (cleanName.isEmpty() || cleanAuthor.isEmpty()) {
-                                submitError = "请填写快捷包名称与作者昵称"
+                                submitError = if (isSingleMode) {
+                                    "请填写快捷方式名称与作者昵称"
+                                } else {
+                                    "请填写快捷包名称与作者昵称"
+                                }
                                 return@TextButton
                             }
                             isUploading = true
@@ -1725,6 +2068,7 @@ fun ShortcutMarketUploadDialog(
                                         minAppVersionCode = BuildConfig.VERSION_CODE,
                                         appVersion = BuildConfig.VERSION_NAME,
                                         shortcutsJson = prepared.shortcutsJson,
+                                        entryType = uploadEntryType,
                                     )
                                 }
                                 isUploading = false

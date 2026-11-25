@@ -329,6 +329,7 @@ object MarketApiClient {
     suspend fun listShortcuts(
         ctx: Context,
         query: String = "",
+        entryType: String? = null,
         actionType: String? = null,
         hasRoot: Boolean? = null,
         hasImages: Boolean? = null,
@@ -338,6 +339,7 @@ object MarketApiClient {
     ): MarketPageResult<MarketShortcutPackSummary> = withContext(Dispatchers.IO) {
         val params = buildList {
             if (query.isNotBlank()) add("q=${encodeQuery(query.trim())}")
+            if (!entryType.isNullOrBlank()) add("entryType=${encodeQuery(entryType.trim())}")
             if (!actionType.isNullOrBlank()) add("actionType=${encodeQuery(actionType.trim())}")
             if (hasRoot != null) add("hasRoot=${if (hasRoot) "1" else "0"}")
             if (hasImages != null) add("hasImages=${if (hasImages) "1" else "0"}")
@@ -415,6 +417,7 @@ object MarketApiClient {
         minAppVersionCode: Int,
         appVersion: String,
         shortcutsJson: String,
+        entryType: String = MarketShortcutPackSummary.ENTRY_TYPE_PACK,
     ): MarketUploadResult = withContext(Dispatchers.IO) {
         val payload = JSONObject().apply {
             put("name", name.trim())
@@ -423,6 +426,7 @@ object MarketApiClient {
             if (tags.isNotEmpty()) put("tags", JSONArray(tags))
             if (minAppVersionCode > 0) put("minAppVersionCode", minAppVersionCode)
             if (appVersion.isNotBlank()) put("appVersion", appVersion.trim())
+            put("entryType", entryType)
             put("shortcutsJson", shortcutsJson)
         }
         val bodyText = payload.toString()
@@ -906,6 +910,19 @@ object MarketApiClient {
     }
 
     private fun parseShortcutPackSummary(o: JSONObject): MarketShortcutPackSummary {
+        val rawEntryType = o.optCleanString("entryType", MarketShortcutPackSummary.ENTRY_TYPE_PACK)
+            .trim()
+            .lowercase()
+        val entryType = if (rawEntryType == MarketShortcutPackSummary.ENTRY_TYPE_SINGLE) {
+            MarketShortcutPackSummary.ENTRY_TYPE_SINGLE
+        } else {
+            MarketShortcutPackSummary.ENTRY_TYPE_PACK
+        }
+        val previewItemJson = if (o.has("previewItem") && !o.isNull("previewItem")) {
+            o.optJSONObject("previewItem")?.toString()
+        } else {
+            null
+        }
         return MarketShortcutPackSummary(
             id = o.optString("id", ""),
             name = o.optString("name", ""),
@@ -931,6 +948,8 @@ object MarketApiClient {
             authorId = o.optNullableString("authorId"),
             authorIsOfficial = o.optBoolean("authorIsOfficial", false),
             authorBadgeLabel = o.optCleanString("authorBadgeLabel", "").trim(),
+            entryType = entryType,
+            previewItemJson = previewItemJson,
         )
     }
 

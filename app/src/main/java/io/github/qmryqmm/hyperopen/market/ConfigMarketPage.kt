@@ -54,6 +54,8 @@ import io.github.qmryqmm.hyperopen.config.ConfigBackup
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
 import io.github.qmryqmm.hyperopen.model.ShortcutItem
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -974,11 +976,143 @@ private fun ConfigMarketDetailDialog(
     val primary = MiuixTheme.colorScheme.primary
     var activeAction by remember(item.id) { mutableStateOf<String?>(null) }
     var actionError by remember(item.id) { mutableStateOf<String?>(null) }
+    var showPreviewModeDialog by remember(item.id) { mutableStateOf(false) }
 
     val needsNewerApp = item.minAppVersionCode > BuildConfig.VERSION_CODE
     val softGlassDowngraded =
         !softGlassSupported && item.materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS
     val busy = activeAction != null
+
+    fun launchPreview(withLinkedPack: Boolean) {
+        val linkedPack = item.linkedShortcutPack
+        val useLinkedPack = withLinkedPack && linkedPack != null
+        activeAction = "preview"
+        actionError = null
+        scope.launch {
+            if (!useLinkedPack) {
+                val res = runCatching {
+                    val detail = MarketApiClient.getConfigDetail(ctx, item.id, download = false)
+                    val previewConfig = withContext(Dispatchers.Default) {
+                        ConfigBackup.buildPreviewConfigFromBackupJson(
+                            ctx,
+                            detail.jsonBody,
+                            currentShortcuts,
+                            false,
+                            softGlassSupported,
+                        )
+                    }
+                    MarketSandboxPreview(
+                        kind = MarketSandboxKind.CONFIG,
+                        id = detail.item.id,
+                        title = detail.item.name,
+                        author = detail.item.author,
+                        authorIsOfficial = detail.item.authorIsOfficial,
+                        authorBadgeLabel = detail.item.authorBadgeLabel,
+                        config = previewConfig,
+                        rawConfigJson = detail.jsonBody,
+                        hasShortcuts = false,
+                        shortcutCount = 0,
+                        shortcutList = previewConfig.shortcuts.toList(),
+                        minAppVersionCode = detail.item.minAppVersionCode,
+                        appVersion = detail.item.appVersion,
+                        hasRootRisk = false,
+                        riskSummary = emptyList(),
+                        summary = detail.item,
+                        previewingWithLinkedPack = false,
+                    )
+                }
+                activeAction = null
+                res.onSuccess { preview ->
+                    onEnterSandbox(preview)
+                }.onFailure { err ->
+                    actionError = err.message ?: "无法加载沙箱预览"
+                }
+                return@launch
+            }
+
+            val targetPack = linkedPack
+            val res = runCatching {
+                val (detail, packRes) = coroutineScope {
+                    val configDeferred = async {
+                        MarketApiClient.getConfigDetail(ctx, item.id, download = false)
+                    }
+                    val packDeferred = async {
+                        runCatching {
+                            MarketApiClient.getShortcutDetail(ctx, targetPack.id, download = false)
+                        }
+                    }
+                    configDeferred.await() to packDeferred.await()
+                }
+                val packErr = packRes.exceptionOrNull()
+                if (packErr != null) {
+                    throw LinkedPackPreviewException(packErr)
+                }
+                val packDetail = packRes.getOrThrow()
+                val linkedItems = withContext(Dispatchers.Default) {
+                    parseShortcutPackItems(packDetail.shortcutsJson).map(::cloneShortcutForImport)
+                }
+                val hasLinkedItems = linkedItems.isNotEmpty()
+                val previewConfig = withContext(Dispatchers.Default) {
+                    ConfigBackup.buildPreviewConfigFromBackupJson(
+                        ctx,
+                        detail.jsonBody,
+                        if (hasLinkedItems) linkedItems else currentShortcuts,
+                        false,
+                        softGlassSupported,
+                    )
+                }
+                val preview = MarketSandboxPreview(
+                    kind = MarketSandboxKind.CONFIG,
+                    id = detail.item.id,
+                    title = detail.item.name,
+                    author = detail.item.author,
+                    authorIsOfficial = detail.item.authorIsOfficial,
+                    authorBadgeLabel = detail.item.authorBadgeLabel,
+                    config = previewConfig,
+                    rawConfigJson = detail.jsonBody,
+                    hasShortcuts = hasLinkedItems,
+                    shortcutCount = if (hasLinkedItems) linkedItems.size else 0,
+                    shortcutList = if (hasLinkedItems) linkedItems else previewConfig.shortcuts.toList(),
+                    minAppVersionCode = detail.item.minAppVersionCode,
+                    appVersion = detail.item.appVersion,
+                    hasRootRisk = if (hasLinkedItems) packDetail.item.hasRootRisk else false,
+                    riskSummary = if (hasLinkedItems) packDetail.item.riskSummary else emptyList(),
+                    summary = detail.item,
+                    shortcutPackSummary = if (hasLinkedItems) packDetail.item else null,
+                    previewingWithLinkedPack = hasLinkedItems,
+                    linkedPackName = if (hasLinkedItems) {
+                        packDetail.item.name.ifBlank { targetPack.name }
+                    } else {
+                        null
+                    },
+                )
+                preview to hasLinkedItems
+            }
+            activeAction = null
+            res.onSuccess { (preview, hasLinkedItems) ->
+                if (!hasLinkedItems) {
+                    Toast.makeText(
+                        ctx,
+                        "配套快捷包内容为空，已使用本机快捷方式预览",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                onEnterSandbox(preview)
+            }.onFailure { err ->
+                if (err is LinkedPackPreviewException) {
+                    val cause = err.cause
+                    if (cause is MarketApiException && cause.statusCode == 404) {
+                        actionError = "配套快捷包已被作者删除或下架，请改用「仅预览外观配置」"
+                        onLinkedPackUnavailable()
+                    } else {
+                        actionError = cause?.message ?: "无法加载配套快捷包"
+                    }
+                } else {
+                    actionError = err.message ?: "无法加载沙箱预览"
+                }
+            }
+        }
+    }
 
     Dialog(
         onDismissRequest = { if (!busy) onDismiss() },
@@ -1217,45 +1351,10 @@ private fun ConfigMarketDetailDialog(
                         text = if (activeAction == "preview") "加载预览..." else "临时预览",
                         enabled = !busy,
                         onClick = {
-                            activeAction = "preview"
-                            actionError = null
-                            scope.launch {
-                                val res = runCatching {
-                                    val detail = MarketApiClient.getConfigDetail(ctx, item.id, download = false)
-                                    val previewConfig = withContext(Dispatchers.Default) {
-                                        ConfigBackup.buildPreviewConfigFromBackupJson(
-                                            ctx,
-                                            detail.jsonBody,
-                                            currentShortcuts,
-                                            false,
-                                            softGlassSupported,
-                                        )
-                                    }
-                                    MarketSandboxPreview(
-                                        kind = MarketSandboxKind.CONFIG,
-                                        id = detail.item.id,
-                                        title = detail.item.name,
-                                        author = detail.item.author,
-                                        authorIsOfficial = detail.item.authorIsOfficial,
-                                        authorBadgeLabel = detail.item.authorBadgeLabel,
-                                        config = previewConfig,
-                                        rawConfigJson = detail.jsonBody,
-                                        hasShortcuts = false,
-                                        shortcutCount = 0,
-                                        shortcutList = previewConfig.shortcuts.toList(),
-                                        minAppVersionCode = detail.item.minAppVersionCode,
-                                        appVersion = detail.item.appVersion,
-                                        hasRootRisk = false,
-                                        riskSummary = emptyList(),
-                                        summary = detail.item,
-                                    )
-                                }
-                                activeAction = null
-                                res.onSuccess { preview ->
-                                    onEnterSandbox(preview)
-                                }.onFailure { err ->
-                                    actionError = err.message ?: "无法加载沙箱预览"
-                                }
+                            if (item.linkedShortcutPack == null) {
+                                launchPreview(false)
+                            } else {
+                                showPreviewModeDialog = true
                             }
                         },
                     )
@@ -1323,6 +1422,133 @@ private fun ConfigMarketDetailDialog(
                     TextButton(
                         text = "关闭",
                         enabled = !busy,
+                        onClick = onDismiss,
+                    )
+                }
+            }
+        }
+    }
+
+    val linkedPack = item.linkedShortcutPack
+    if (showPreviewModeDialog && linkedPack != null) {
+        ConfigPreviewModeDialog(
+            linkedPack = linkedPack,
+            onDismiss = { showPreviewModeDialog = false },
+            onSelectConfigOnly = {
+                showPreviewModeDialog = false
+                launchPreview(false)
+            },
+            onSelectWithLinkedPack = {
+                showPreviewModeDialog = false
+                launchPreview(true)
+            },
+        )
+    }
+}
+
+private class LinkedPackPreviewException(cause: Throwable) : Exception(cause)
+
+@Composable
+private fun ConfigPreviewModeDialog(
+    linkedPack: MarketLinkedShortcutPack,
+    onDismiss: () -> Unit,
+    onSelectConfigOnly: () -> Unit,
+    onSelectWithLinkedPack: () -> Unit,
+) {
+    val primary = MiuixTheme.colorScheme.primary
+    val packName = linkedPack.name.ifBlank { "配套快捷方式" }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.90f)
+                .padding(vertical = 16.dp),
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Text(
+                    text = "选择预览方式",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MiuixTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "该配置关联了配套快捷包，请选择纯内存沙箱预览使用的快捷方式：",
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Spacer(Modifier.height(14.dp))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.58f))
+                        .clickable(onClick = onSelectConfigOnly)
+                        .padding(14.dp),
+                ) {
+                    Text(
+                        text = "仅预览外观配置",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "使用你当前本地的快捷方式列表预览外观排版、材质与动效",
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(primary.copy(alpha = 0.08f))
+                        .border(1.dp, primary.copy(alpha = 0.30f), RoundedCornerShape(12.dp))
+                        .clickable(onClick = onSelectWithLinkedPack)
+                        .padding(14.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "与配套快捷包一起预览",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = primary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        MarketBadgePill(
+                            text = "${linkedPack.shortcutCount} 项",
+                            textColor = primary,
+                            bgColor = primary.copy(alpha = 0.14f),
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "同步加载配套快捷包「$packName」（${linkedPack.shortcutCount} 项）在纯内存沙箱中完整体验（不修改本地配置与快捷列表）",
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(
+                        text = "取消",
                         onClick = onDismiss,
                     )
                 }

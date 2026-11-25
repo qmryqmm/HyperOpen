@@ -204,6 +204,7 @@ fun MarketBadgePill(
             fontWeight = FontWeight.Medium,
             color = textColor,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -914,6 +915,15 @@ fun MarketSandboxFloatingBar(
                     badgeLabel = preview.authorBadgeLabel,
                     prefix = "by ",
                     fontSize = 11.sp,
+                )
+            }
+            if (preview.kind == MarketSandboxKind.CONFIG && preview.previewingWithLinkedPack) {
+                Spacer(Modifier.height(6.dp))
+                val packLabel = preview.linkedPackName.orEmpty().ifBlank { "已加载" }
+                MarketBadgePill(
+                    text = "含配套快捷包：$packLabel",
+                    textColor = MARKET_COLOR_GREEN,
+                    bgColor = MARKET_COLOR_GREEN_BG,
                 )
             }
             Spacer(Modifier.height(8.dp))

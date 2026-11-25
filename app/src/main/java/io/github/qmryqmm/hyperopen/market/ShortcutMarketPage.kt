@@ -1,6 +1,7 @@
 package io.github.qmryqmm.hyperopen.market
 
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -44,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.qmryqmm.hyperopen.BuildConfig
 import io.github.qmryqmm.hyperopen.model.ShortcutItem
+import io.github.qmryqmm.hyperopen.ui.components.ShortcutBubbleIcon
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Card
@@ -54,6 +57,7 @@ import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Download
+import top.yukonga.miuix.kmp.icon.extended.Info
 import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.icon.extended.Search
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -84,6 +88,7 @@ class ShortcutMarketState {
     var pagination by mutableStateOf<MarketPagination?>(null)
     var searchQuery by mutableStateOf("")
     var appliedQuery by mutableStateOf("")
+    var entryTypeFilter by mutableStateOf<String?>(null)
     var actionTypeFilter by mutableStateOf<String?>(null)
     var onlySafeFilter by mutableStateOf(false)
     var onlyCustomImagesFilter by mutableStateOf(false)
@@ -150,6 +155,7 @@ fun ShortcutMarketPage(
                 MarketApiClient.listShortcuts(
                     ctx = ctx,
                     query = queryOverride,
+                    entryType = marketState.entryTypeFilter,
                     actionType = marketState.actionTypeFilter,
                     hasRoot = if (marketState.onlySafeFilter) false else null,
                     hasImages = if (marketState.onlyCustomImagesFilter) true else null,
@@ -184,6 +190,7 @@ fun ShortcutMarketPage(
                 MarketApiClient.listShortcuts(
                     ctx = ctx,
                     query = marketState.appliedQuery,
+                    entryType = marketState.entryTypeFilter,
                     actionType = marketState.actionTypeFilter,
                     hasRoot = if (marketState.onlySafeFilter) false else null,
                     hasImages = if (marketState.onlyCustomImagesFilter) true else null,
@@ -263,7 +270,7 @@ fun ShortcutMarketPage(
             MarketTopNoticeCard(
                 onOpenServerSettings = { showServerSettings = true },
                 onOpenUpload = onOpenUpload,
-                uploadLabel = "上传当前快捷项",
+                uploadLabel = "上传分享",
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
         }
@@ -271,6 +278,7 @@ fun ShortcutMarketPage(
         item(key = "shortcut_market_search_filters") {
             ShortcutMarketFilterCard(
                 searchQuery = marketState.searchQuery,
+                entryTypeFilter = marketState.entryTypeFilter,
                 actionTypeFilter = marketState.actionTypeFilter,
                 onlySafeFilter = marketState.onlySafeFilter,
                 onlyCustomImagesFilter = marketState.onlyCustomImagesFilter,
@@ -279,6 +287,12 @@ fun ShortcutMarketPage(
                 totalCount = marketState.pagination?.total,
                 onSearchQueryChange = { marketState.searchQuery = it },
                 onSubmitSearch = { loadFirstPage(marketState.searchQuery.trim()) },
+                onEntryTypeSelect = { next ->
+                    if (marketState.entryTypeFilter != next) {
+                        marketState.entryTypeFilter = next
+                        loadFirstPage()
+                    }
+                },
                 onActionTypeSelect = { next ->
                     if (marketState.actionTypeFilter != next) {
                         marketState.actionTypeFilter = next
@@ -363,15 +377,20 @@ fun ShortcutMarketPage(
                         .fillMaxWidth(),
                 ) {
                     Column(modifier = Modifier.padding(18.dp)) {
+                        val emptyTitle = when (marketState.entryTypeFilter) {
+                            MarketShortcutPackSummary.ENTRY_TYPE_SINGLE -> "没有找到匹配的快捷方式"
+                            MarketShortcutPackSummary.ENTRY_TYPE_PACK -> "没有找到匹配的快捷包"
+                            else -> "没有找到匹配的快捷方式或快捷包"
+                        }
                         Text(
-                            text = "没有找到匹配的快捷包",
+                            text = emptyTitle,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Medium,
                             color = MiuixTheme.colorScheme.onSurface,
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            text = "可以尝试清空关键词或放宽动作类型与安全筛选条件，也可以把你整理好的快捷方式打包分享出来。",
+                            text = "可以尝试清空关键词或放宽形态、动作类型与安全筛选条件，也可以把你整理好的快捷方式分享出来。",
                             fontSize = 13.sp,
                             lineHeight = 18.sp,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -379,6 +398,7 @@ fun ShortcutMarketPage(
                         Spacer(Modifier.height(12.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (marketState.searchQuery.isNotBlank() ||
+                                marketState.entryTypeFilter != null ||
                                 marketState.actionTypeFilter != null ||
                                 marketState.onlySafeFilter ||
                                 marketState.onlyCustomImagesFilter
@@ -388,6 +408,7 @@ fun ShortcutMarketPage(
                                     selected = false,
                                     onClick = {
                                         marketState.searchQuery = ""
+                                        marketState.entryTypeFilter = null
                                         marketState.actionTypeFilter = null
                                         marketState.onlySafeFilter = false
                                         marketState.onlyCustomImagesFilter = false
@@ -396,7 +417,7 @@ fun ShortcutMarketPage(
                                 )
                             }
                             MarketFilterChip(
-                                label = "上传当前快捷项",
+                                label = "上传分享",
                                 selected = true,
                                 onClick = onOpenUpload,
                             )
@@ -420,11 +441,22 @@ fun ShortcutMarketPage(
                 items = marketState.items,
                 key = { it.id },
             ) { item ->
-                ShortcutMarketItemCard(
-                    item = item,
-                    isOwnedLocally = isOwnedLocally(item),
-                    onClick = { selectedDetailItem = item },
-                )
+                if (item.isSingleShortcut) {
+                    ShortcutMarketSingleCard(
+                        item = item,
+                        isOwnedLocally = isOwnedLocally(item),
+                        onClick = { selectedDetailItem = item },
+                        onQuickAdd = { shortcut ->
+                            onAppendItems(item, listOf(shortcut), true)
+                        },
+                    )
+                } else {
+                    ShortcutMarketPackCard(
+                        item = item,
+                        isOwnedLocally = isOwnedLocally(item),
+                        onClick = { selectedDetailItem = item },
+                    )
+                }
             }
 
             if (marketState.pagination?.hasMore == true) {
@@ -501,6 +533,7 @@ fun ShortcutMarketPage(
 @Composable
 private fun ShortcutMarketFilterCard(
     searchQuery: String,
+    entryTypeFilter: String?,
     actionTypeFilter: String?,
     onlySafeFilter: Boolean,
     onlyCustomImagesFilter: Boolean,
@@ -509,6 +542,7 @@ private fun ShortcutMarketFilterCard(
     totalCount: Int?,
     onSearchQueryChange: (String) -> Unit,
     onSubmitSearch: () -> Unit,
+    onEntryTypeSelect: (String?) -> Unit,
     onActionTypeSelect: (String?) -> Unit,
     onToggleSafe: () -> Unit,
     onToggleCustomImages: () -> Unit,
@@ -569,6 +603,29 @@ private fun ShortcutMarketFilterCard(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                MarketFilterChip("全部", entryTypeFilter == null) { onEntryTypeSelect(null) }
+                MarketFilterChip(
+                    "单个快捷方式",
+                    entryTypeFilter == MarketShortcutPackSummary.ENTRY_TYPE_SINGLE,
+                ) {
+                    onEntryTypeSelect(MarketShortcutPackSummary.ENTRY_TYPE_SINGLE)
+                }
+                MarketFilterChip(
+                    "快捷包",
+                    entryTypeFilter == MarketShortcutPackSummary.ENTRY_TYPE_PACK,
+                ) {
+                    onEntryTypeSelect(MarketShortcutPackSummary.ENTRY_TYPE_PACK)
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 SHORTCUT_ACTION_FILTERS.forEach { (actionKey, label) ->
                     MarketFilterChip(
                         label = label,
@@ -598,8 +655,17 @@ private fun ShortcutMarketFilterCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                val countText = if (totalCount != null) {
+                    when (entryTypeFilter) {
+                        MarketShortcutPackSummary.ENTRY_TYPE_SINGLE -> "共 $totalCount 个公开快捷方式"
+                        MarketShortcutPackSummary.ENTRY_TYPE_PACK -> "共 $totalCount 份公开快捷包"
+                        else -> "共 $totalCount 项公开内容"
+                    }
+                } else {
+                    "快捷方式市场列表"
+                }
                 Text(
-                    text = if (totalCount != null) "共 $totalCount 份公开快捷包" else "快捷方式市场列表",
+                    text = countText,
                     fontSize = 11.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.weight(1f),
@@ -632,7 +698,232 @@ private fun ShortcutMarketFilterCard(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ShortcutMarketItemCard(
+private fun ShortcutMarketSingleCard(
+    item: MarketShortcutPackSummary,
+    isOwnedLocally: Boolean,
+    onClick: () -> Unit,
+    onQuickAdd: (ShortcutItem) -> Unit,
+) {
+    val ctx = LocalContext.current
+    val primary = MiuixTheme.colorScheme.primary
+    val needsNewerApp = item.minAppVersionCode > BuildConfig.VERSION_CODE
+    val previewShortcut = remember(item.id, item.previewItemJson) {
+        parseSingleShortcutPreviewItem(item.previewItemJson)
+    }
+    val targetPkg = remember(previewShortcut) {
+        previewShortcut?.let(::extractTargetPackageForInstallCheck)
+    }
+    val isInstalled by produceState<Boolean?>(
+        initialValue = null,
+        key1 = item.id,
+        key2 = targetPkg,
+    ) {
+        value = if (previewShortcut != null && targetPkg != null) {
+            inspectInstalledPackages(ctx, listOf(previewShortcut))[targetPkg]
+        } else {
+            null
+        }
+    }
+
+    Card(
+        modifier = Modifier
+            .padding(horizontal = 12.dp)
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (previewShortcut != null) {
+                    ShortcutBubbleIcon(
+                        item = previewShortcut,
+                        size = 46.dp,
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(23.dp))
+                            .background(primary.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = MiuixIcons.Info,
+                            contentDescription = null,
+                            tint = primary,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = previewShortcut?.title?.ifBlank { item.name } ?: item.name,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MiuixTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (isOwnedLocally) {
+                            Spacer(Modifier.width(6.dp))
+                            MarketBadgePill(
+                                text = "我上传的",
+                                textColor = primary,
+                                bgColor = primary.copy(alpha = 0.12f),
+                            )
+                        }
+                    }
+                    if (!previewShortcut?.subtitle.isNullOrBlank()) {
+                        Text(
+                            text = previewShortcut.subtitle.orEmpty(),
+                            fontSize = 12.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (item.description.isNotBlank()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = item.description,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (previewShortcut != null) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = formatShortcutTargetDetails(previewShortcut),
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.85f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                AddShortcutActionPill(
+                    onClick = {
+                        if (previewShortcut != null) {
+                            onQuickAdd(previewShortcut)
+                        } else {
+                            onClick()
+                        }
+                    },
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MarketAuthorBadgeRow(
+                    author = item.author,
+                    isOfficial = item.authorIsOfficial,
+                    badgeLabel = item.authorBadgeLabel,
+                    prefix = "作者 ",
+                    suffix = "· ${formatMarketShortTime(item.updatedAt)}",
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = MiuixIcons.Download,
+                        contentDescription = null,
+                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(Modifier.width(3.dp))
+                    Text(
+                        text = "${item.downloads}",
+                        fontSize = 12.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                val resolvedActionType = previewShortcut?.actionType ?: item.actionTypes.firstOrNull()
+                if (!resolvedActionType.isNullOrBlank()) {
+                    MarketBadgePill(
+                        text = shortcutActionTypeLabel(resolvedActionType),
+                        textColor = primary,
+                        bgColor = primary.copy(alpha = 0.12f),
+                    )
+                }
+                if (targetPkg != null && isInstalled != null) {
+                    MarketBadgePill(
+                        text = if (isInstalled == true) "本机已安装" else "未安装",
+                        textColor = if (isInstalled == true) MARKET_COLOR_GREEN else MARKET_COLOR_AMBER,
+                        bgColor = if (isInstalled == true) MARKET_COLOR_GREEN_BG else MARKET_COLOR_AMBER_BG,
+                    )
+                }
+                if (item.customImageCount > 0) {
+                    MarketBadgePill(
+                        text = "自定义图",
+                        textColor = MARKET_COLOR_AMBER,
+                        bgColor = MARKET_COLOR_AMBER_BG,
+                    )
+                }
+                if (item.hasRootRisk) {
+                    MarketBadgePill(
+                        text = "含 Root/高危",
+                        textColor = MARKET_COLOR_RED,
+                        bgColor = MARKET_COLOR_RED_BG,
+                    )
+                }
+                if (needsNewerApp) {
+                    MarketBadgePill(
+                        text = "需 vCode≥${item.minAppVersionCode}",
+                        textColor = MARKET_COLOR_AMBER,
+                        bgColor = MARKET_COLOR_AMBER_BG,
+                    )
+                }
+            }
+
+            if (item.tags.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    item.tags.take(3).forEach { tag ->
+                        Text(
+                            text = "#$tag",
+                            fontSize = 11.sp,
+                            color = MiuixTheme.colorScheme.primary.copy(alpha = 0.9f),
+                        )
+                    }
+                    if (item.tags.size > 3) {
+                        Text(
+                            text = "+${item.tags.size - 3}",
+                            fontSize = 11.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ShortcutMarketPackCard(
     item: MarketShortcutPackSummary,
     isOwnedLocally: Boolean,
     onClick: () -> Unit,
@@ -712,7 +1003,7 @@ private fun ShortcutMarketItemCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 MarketBadgePill(
-                    text = "${item.shortcutCount} 快捷项",
+                    text = "快捷包 · ${item.shortcutCount} 项",
                     textColor = primary,
                     bgColor = primary.copy(alpha = 0.12f),
                 )

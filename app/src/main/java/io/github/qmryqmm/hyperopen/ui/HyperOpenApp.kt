@@ -2087,7 +2087,17 @@ fun HyperOpenApp(
                                 val sb = marketSandboxPreview
                                 val packSummary = sb?.shortcutPackSummary
                                 if (packSummary != null && sb.shortcutList.isNotEmpty()) {
-                                    pendingSandboxShortcutImport = packSummary to sb.shortcutList
+                                    if (packSummary.isSingleShortcut) {
+                                        appendMarketShortcuts(
+                                            summary = packSummary,
+                                            rawItems = listOf(sb.shortcutList.first()),
+                                            shouldRecordDownload = true,
+                                        )
+                                        marketSandboxPreview = null
+                                        subPage = 0
+                                    } else {
+                                        pendingSandboxShortcutImport = packSummary to sb.shortcutList
+                                    }
                                 }
                             },
                         )
@@ -2913,6 +2923,7 @@ fun HyperOpenApp(
         if (showShortcutMarketUploadDialog) {
             ShortcutMarketUploadDialog(
                 sourceShortcuts = shortcutUploadSourceItems,
+                allLocalShortcuts = shortcuts.map { it.copy() },
                 isSelectionMode = shortcutUploadFromMultiSelect,
                 onDismiss = { showShortcutMarketUploadDialog = false },
                 onUploaded = { result, authorUpdated ->
@@ -2924,10 +2935,15 @@ fun HyperOpenApp(
                     if (shortcutUploadFromMultiSelect) {
                         shortcutsTreeState.interactionState.clearSelection()
                     }
-                    val msg = if (result.isPendingReview) {
-                        "已提交审核（含高危动作或自定义图片），审核通过后将自动上架快捷市场"
+                    val targetNoun = if (result.shortcutPackItem?.isSingleShortcut == true) {
+                        "单个快捷方式"
                     } else {
-                        "上传成功，已直接上架快捷市场"
+                        "快捷包"
+                    }
+                    val msg = if (result.isPendingReview) {
+                        "${targetNoun}已提交审核（含高危动作或自定义图片），审核通过后将自动上架快捷市场"
+                    } else {
+                        "${targetNoun}上传成功，已直接上架快捷市场"
                     }
                     Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
                 },
@@ -3139,7 +3155,10 @@ private fun PreviewSessionContent(
     val ctx = LocalContext.current
     val isSandbox = sandboxPreview != null
     val activeConfig = sandboxPreview?.config ?: localConfigProvider()
-    var previewPanelVisible by remember(sandboxPreview?.id) { mutableStateOf(false) }
+    var previewPanelVisible by remember(
+        sandboxPreview?.id,
+        sandboxPreview?.previewingWithLinkedPack,
+    ) { mutableStateOf(false) }
     val liveWallpaperBitmap by LiveWallpaperLoader.rememberLiveWallpaper(ctx)
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -3187,7 +3206,11 @@ private fun PreviewSessionContent(
             )
         }
 
-        key(sandboxPreview != null, sandboxPreview?.id ?: "local") {
+        key(
+            sandboxPreview != null,
+            sandboxPreview?.id ?: "local",
+            sandboxPreview?.previewingWithLinkedPack ?: false,
+        ) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { viewCtx ->
@@ -3230,6 +3253,8 @@ private fun PreviewSessionContent(
 
         if (sandboxPreview != null) {
             val isShortcutPack = sandboxPreview.kind == MarketSandboxKind.SHORTCUT_PACK
+            val isSingleShortcutSandbox = isShortcutPack &&
+                sandboxPreview.shortcutPackSummary?.isSingleShortcut == true
             MarketSandboxFloatingBar(
                 preview = sandboxPreview,
                 onExit = onBackClick,
@@ -3244,7 +3269,11 @@ private fun PreviewSessionContent(
                     onSandboxApplyDirectly
                 },
                 exitLabel = if (isShortcutPack) "退出预览" else "退出",
-                primaryLabel = if (isShortcutPack) "导入整个列表" else "直接应用",
+                primaryLabel = when {
+                    isSingleShortcutSandbox -> "添加到本地"
+                    isShortcutPack -> "导入整个列表"
+                    else -> "直接应用"
+                },
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }

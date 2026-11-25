@@ -99,7 +99,7 @@ data class MarketConfigDetail(
     val fromCache: Boolean = false,
 )
 
-/** 快捷方式包列表/详情元数据（供 Stage 3 复用）。 */
+/** 快捷方式或快捷方式包列表/详情元数据（供 Stage 3 复用）。 */
 data class MarketShortcutPackSummary(
     val id: String,
     val name: String,
@@ -125,7 +125,17 @@ data class MarketShortcutPackSummary(
     val authorId: String? = null,
     val authorIsOfficial: Boolean = false,
     val authorBadgeLabel: String = "",
-)
+    val entryType: String = ENTRY_TYPE_PACK,
+    val previewItemJson: String? = null,
+) {
+    val isSingleShortcut: Boolean
+        get() = entryType == ENTRY_TYPE_SINGLE
+
+    companion object {
+        const val ENTRY_TYPE_SINGLE = "single"
+        const val ENTRY_TYPE_PACK = "pack"
+    }
+}
 
 /** 快捷方式包详情正文（供 Stage 3 复用）。 */
 data class MarketShortcutPackDetail(
@@ -212,6 +222,8 @@ data class MarketSandboxPreview(
     val shortcutPackSummary: MarketShortcutPackSummary? = null,
     val authorIsOfficial: Boolean = false,
     val authorBadgeLabel: String = "",
+    val previewingWithLinkedPack: Boolean = false,
+    val linkedPackName: String? = null,
 )
 
 /** 市场接口异常，保留 HTTP 状态码及限流/去重结构化字段以便 UI 精准提示。 */
