@@ -59,6 +59,70 @@ object MarketApiClient {
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // 创作者身份绑定与改名同步接口
+    // ─────────────────────────────────────────────────────────────────────
+
+    suspend fun getMyAuthor(ctx: Context): MarketAuthorProfile? = withContext(Dispatchers.IO) {
+        val url = "${MarketSettings.getBaseUrl(ctx)}/api/author/me"
+        val secret = MarketSettings.getOrCreateAuthorSecret(ctx)
+        val res = executeRequest(
+            ctx,
+            url = url,
+            method = "GET",
+            headers = mapOf("X-Author-Secret" to secret),
+        )
+        if (res.code !in 200..299) {
+            throw buildHttpException(res)
+        }
+        val root = JSONObject(res.body)
+        if (!root.optBoolean("ok", false)) {
+            throw MarketApiException(res.code, root.optString("error", "获取创作者信息失败"))
+        }
+        val authorObj = if (root.has("author") && !root.isNull("author")) {
+            root.optJSONObject("author")
+        } else {
+            null
+        }
+        val profile = parseAuthorProfile(authorObj)
+        MarketSettings.saveAuthorProfile(ctx, profile)
+        profile
+    }
+
+    suspend fun updateMyAuthorName(
+        ctx: Context,
+        displayName: String,
+    ): MarketAuthorProfile = withContext(Dispatchers.IO) {
+        val url = "${MarketSettings.getBaseUrl(ctx)}/api/author/me"
+        val secret = MarketSettings.getOrCreateAuthorSecret(ctx)
+        val bodyText = JSONObject().apply {
+            put("displayName", displayName.trim())
+        }.toString()
+        val res = executeRequest(
+            ctx,
+            url = url,
+            method = "PUT",
+            headers = mapOf("X-Author-Secret" to secret),
+            jsonBody = bodyText,
+        )
+        if (res.code !in 200..299) {
+            throw buildHttpException(res)
+        }
+        val root = JSONObject(res.body)
+        if (!root.optBoolean("ok", false)) {
+            throw MarketApiException(res.code, root.optString("error", "修改作者昵称失败"))
+        }
+        val authorObj = if (root.has("author") && !root.isNull("author")) {
+            root.optJSONObject("author")
+        } else {
+            null
+        }
+        val profile = parseAuthorProfile(authorObj)
+            ?: throw MarketApiException(500, "服务端返回缺少 author 字段")
+        MarketSettings.saveAuthorProfile(ctx, profile)
+        profile
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // 配置市场接口
     // ─────────────────────────────────────────────────────────────────────
 
@@ -153,6 +217,7 @@ object MarketApiClient {
         minAppVersionCode: Int,
         appVersion: String,
         jsonBody: String,
+        linkedShortcutPackId: String? = null,
     ): MarketUploadResult = withContext(Dispatchers.IO) {
         val payload = JSONObject().apply {
             put("name", name.trim())
@@ -161,14 +226,22 @@ object MarketApiClient {
             if (tags.isNotEmpty()) put("tags", JSONArray(tags))
             if (minAppVersionCode > 0) put("minAppVersionCode", minAppVersionCode)
             if (appVersion.isNotBlank()) put("appVersion", appVersion.trim())
+            if (!linkedShortcutPackId.isNullOrBlank()) put("linkedShortcutPackId", linkedShortcutPackId.trim())
             put("jsonBody", jsonBody)
         }
         val bodyText = payload.toString()
         if (bodyText.toByteArray(StandardCharsets.UTF_8).size > MarketSanitizer.MAX_PAYLOAD_BYTES) {
-            throw MarketApiException(413, "上传内容超过 512 KB 上限，请精简快捷项或移除自定义图标")
+            throw MarketApiException(413, "上传内容超过 512 KB 上限，请精简配置参数后重试")
         }
         val url = "${MarketSettings.getBaseUrl(ctx)}/api/configs"
-        val res = executeRequest(ctx, url = url, method = "POST", jsonBody = bodyText)
+        val secret = MarketSettings.getOrCreateAuthorSecret(ctx)
+        val res = executeRequest(
+            ctx,
+            url = url,
+            method = "POST",
+            headers = mapOf("X-Author-Secret" to secret),
+            jsonBody = bodyText,
+        )
         if (res.code !in 200..299) {
             throw buildHttpException(res)
         }
@@ -176,26 +249,41 @@ object MarketApiClient {
         if (!root.optBoolean("ok", false)) {
             throw MarketApiException(res.code, root.optString("error", "上传配置失败"))
         }
+        val configItem = root.optJSONObject("item")?.let(::parseConfigSummary)
+        cacheAuthorFromSummary(
+            ctx = ctx,
+            authorId = configItem?.authorId,
+            authorName = configItem?.author,
+            isOfficial = configItem?.authorIsOfficial ?: false,
+            badgeLabel = configItem?.authorBadgeLabel.orEmpty(),
+            createdAt = configItem?.createdAt ?: 0L,
+            updatedAt = configItem?.updatedAt ?: 0L,
+        )
         MarketUploadResult(
             id = root.optString("id", ""),
             status = root.optString("status", "approved"),
             reviewReasons = parseStringArray(root.optJSONArray("reviewReasons")),
             manageToken = root.optString("manageToken", ""),
-            configItem = root.optJSONObject("item")?.let(::parseConfigSummary),
+            configItem = configItem,
         )
     }
 
     suspend fun deleteConfig(
         ctx: Context,
         id: String,
-        manageToken: String,
+        manageToken: String? = null,
     ): MarketDeleteResult = withContext(Dispatchers.IO) {
         val url = "${MarketSettings.getBaseUrl(ctx)}/api/configs/${encodePathSegment(id)}"
+        val headers = buildMap {
+            put("X-Author-Secret", MarketSettings.getOrCreateAuthorSecret(ctx))
+            val token = manageToken?.trim().orEmpty()
+            if (token.isNotEmpty()) put("X-Manage-Token", token)
+        }
         val res = executeRequest(
             ctx,
             url = url,
             method = "DELETE",
-            headers = mapOf("X-Manage-Token" to manageToken.trim()),
+            headers = headers,
         )
         if (res.code !in 200..299) {
             throw buildHttpException(res)
@@ -342,7 +430,14 @@ object MarketApiClient {
             throw MarketApiException(413, "上传内容超过 512 KB 上限，请精简快捷项或移除自定义图标")
         }
         val url = "${MarketSettings.getBaseUrl(ctx)}/api/shortcuts"
-        val res = executeRequest(ctx, url = url, method = "POST", jsonBody = bodyText)
+        val secret = MarketSettings.getOrCreateAuthorSecret(ctx)
+        val res = executeRequest(
+            ctx,
+            url = url,
+            method = "POST",
+            headers = mapOf("X-Author-Secret" to secret),
+            jsonBody = bodyText,
+        )
         if (res.code !in 200..299) {
             throw buildHttpException(res)
         }
@@ -350,26 +445,41 @@ object MarketApiClient {
         if (!root.optBoolean("ok", false)) {
             throw MarketApiException(res.code, root.optString("error", "上传快捷方式包失败"))
         }
+        val shortcutPackItem = root.optJSONObject("item")?.let(::parseShortcutPackSummary)
+        cacheAuthorFromSummary(
+            ctx = ctx,
+            authorId = shortcutPackItem?.authorId,
+            authorName = shortcutPackItem?.author,
+            isOfficial = shortcutPackItem?.authorIsOfficial ?: false,
+            badgeLabel = shortcutPackItem?.authorBadgeLabel.orEmpty(),
+            createdAt = shortcutPackItem?.createdAt ?: 0L,
+            updatedAt = shortcutPackItem?.updatedAt ?: 0L,
+        )
         MarketUploadResult(
             id = root.optString("id", ""),
             status = root.optString("status", "approved"),
             reviewReasons = parseStringArray(root.optJSONArray("reviewReasons")),
             manageToken = root.optString("manageToken", ""),
-            shortcutPackItem = root.optJSONObject("item")?.let(::parseShortcutPackSummary),
+            shortcutPackItem = shortcutPackItem,
         )
     }
 
     suspend fun deleteShortcutPack(
         ctx: Context,
         id: String,
-        manageToken: String,
+        manageToken: String? = null,
     ): MarketDeleteResult = withContext(Dispatchers.IO) {
         val url = "${MarketSettings.getBaseUrl(ctx)}/api/shortcuts/${encodePathSegment(id)}"
+        val headers = buildMap {
+            put("X-Author-Secret", MarketSettings.getOrCreateAuthorSecret(ctx))
+            val token = manageToken?.trim().orEmpty()
+            if (token.isNotEmpty()) put("X-Manage-Token", token)
+        }
         val res = executeRequest(
             ctx,
             url = url,
             method = "DELETE",
-            headers = mapOf("X-Manage-Token" to manageToken.trim()),
+            headers = headers,
         )
         if (res.code !in 200..299) {
             throw buildHttpException(res)
@@ -685,12 +795,74 @@ object MarketApiClient {
         )
     }
 
+    private fun cacheAuthorFromSummary(
+        ctx: Context,
+        authorId: String?,
+        authorName: String?,
+        isOfficial: Boolean,
+        badgeLabel: String,
+        createdAt: Long,
+        updatedAt: Long,
+    ) {
+        val cleanId = authorId?.trim().orEmpty()
+        val cleanName = authorName?.trim().orEmpty()
+        if (cleanId.isNotEmpty() && cleanName.isNotEmpty()) {
+            MarketSettings.saveAuthorProfile(
+                ctx,
+                MarketAuthorProfile(
+                    id = cleanId,
+                    displayName = cleanName,
+                    isOfficial = isOfficial,
+                    badgeLabel = badgeLabel,
+                    createdAt = createdAt,
+                    updatedAt = updatedAt,
+                ),
+            )
+        }
+    }
+
+    private fun JSONObject.optNullableString(key: String): String? {
+        if (!has(key) || isNull(key)) return null
+        return optString(key, "").trim().takeIf { it.isNotEmpty() }
+    }
+
+    private fun JSONObject.optCleanString(key: String, fallback: String = ""): String {
+        if (!has(key) || isNull(key)) return fallback
+        return optString(key, fallback)
+    }
+
+    private fun parseAuthorProfile(o: JSONObject?): MarketAuthorProfile? {
+        if (o == null) return null
+        val id = o.optNullableString("id") ?: return null
+        return MarketAuthorProfile(
+            id = id,
+            displayName = o.optCleanString("displayName", "").trim(),
+            isOfficial = o.optBoolean("isOfficial", false),
+            badgeLabel = o.optCleanString("badgeLabel", "").trim(),
+            createdAt = o.optLong("createdAt", 0L),
+            updatedAt = o.optLong("updatedAt", 0L),
+        )
+    }
+
+    private fun parseLinkedShortcutPack(o: JSONObject?): MarketLinkedShortcutPack? {
+        if (o == null) return null
+        val id = o.optNullableString("id") ?: return null
+        return MarketLinkedShortcutPack(
+            id = id,
+            name = o.optCleanString("name", ""),
+            shortcutCount = o.optInt("shortcutCount", 0),
+            folderCount = o.optInt("folderCount", 0),
+            hasRootRisk = o.optBoolean("hasRootRisk", false),
+            customImageCount = o.optInt("customImageCount", 0),
+        )
+    }
+
     private fun parseConfigSummary(o: JSONObject): MarketConfigSummary {
         return MarketConfigSummary(
             id = o.optString("id", ""),
             name = o.optString("name", ""),
             description = o.optString("description", ""),
-            author = o.optString("author", ""),
+            author = o.optCleanString("author", ""),
             tags = parseStringArray(o.optJSONArray("tags")),
             layoutStyle = o.optInt("layoutStyle", 0),
             materialStyle = o.optInt("materialStyle", 2),
@@ -702,7 +874,7 @@ object MarketApiClient {
             riskSummary = parseRiskArray(o.optJSONArray("riskSummary")),
             reviewReasons = parseStringArray(o.optJSONArray("reviewReasons")),
             minAppVersionCode = o.optInt("minAppVersionCode", 0),
-            appVersion = o.optString("appVersion", ""),
+            appVersion = o.optCleanString("appVersion", ""),
             downloads = o.optInt("downloads", 0),
             reportsCount = o.optInt("reportsCount", 0),
             status = o.optString("status", "approved"),
@@ -710,6 +882,15 @@ object MarketApiClient {
             sizeBytes = o.optInt("sizeBytes", 0),
             createdAt = o.optLong("createdAt", 0L),
             updatedAt = o.optLong("updatedAt", 0L),
+            authorId = o.optNullableString("authorId"),
+            authorIsOfficial = o.optBoolean("authorIsOfficial", false),
+            authorBadgeLabel = o.optCleanString("authorBadgeLabel", "").trim(),
+            linkedShortcutPackId = o.optNullableString("linkedShortcutPackId"),
+            linkedShortcutPack = if (o.has("linkedShortcutPack") && !o.isNull("linkedShortcutPack")) {
+                parseLinkedShortcutPack(o.optJSONObject("linkedShortcutPack"))
+            } else {
+                null
+            },
         )
     }
 
@@ -729,7 +910,7 @@ object MarketApiClient {
             id = o.optString("id", ""),
             name = o.optString("name", ""),
             description = o.optString("description", ""),
-            author = o.optString("author", ""),
+            author = o.optCleanString("author", ""),
             tags = parseStringArray(o.optJSONArray("tags")),
             shortcutCount = o.optInt("shortcutCount", 0),
             folderCount = o.optInt("folderCount", 0),
@@ -739,7 +920,7 @@ object MarketApiClient {
             riskSummary = parseRiskArray(o.optJSONArray("riskSummary")),
             reviewReasons = parseStringArray(o.optJSONArray("reviewReasons")),
             minAppVersionCode = o.optInt("minAppVersionCode", 0),
-            appVersion = o.optString("appVersion", ""),
+            appVersion = o.optCleanString("appVersion", ""),
             downloads = o.optInt("downloads", 0),
             reportsCount = o.optInt("reportsCount", 0),
             status = o.optString("status", "approved"),
@@ -747,6 +928,9 @@ object MarketApiClient {
             sizeBytes = o.optInt("sizeBytes", 0),
             createdAt = o.optLong("createdAt", 0L),
             updatedAt = o.optLong("updatedAt", 0L),
+            authorId = o.optNullableString("authorId"),
+            authorIsOfficial = o.optBoolean("authorIsOfficial", false),
+            authorBadgeLabel = o.optCleanString("authorBadgeLabel", "").trim(),
         )
     }
 

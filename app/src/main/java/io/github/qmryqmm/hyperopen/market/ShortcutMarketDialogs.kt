@@ -382,6 +382,7 @@ fun deduplicateShortcutsForUpload(items: List<ShortcutItem>): List<ShortcutItem>
 fun ShortcutMarketDetailDialog(
     summary: MarketShortcutPackSummary,
     isOwnedLocally: Boolean,
+    preloadedDetail: MarketShortcutPackDetail? = null,
     onDismiss: () -> Unit,
     onBuildSandboxPreview: (detail: MarketShortcutPackDetail, items: List<ShortcutItem>) -> Unit,
     onAddSingleItem: (summary: MarketShortcutPackSummary, item: ShortcutItem, shouldRecordDownload: Boolean) -> Unit,
@@ -406,7 +407,11 @@ fun ShortcutMarketDetailDialog(
         isLoading = true
         loadError = null
         val res = runCatching {
-            val fetched = MarketApiClient.getShortcutDetail(ctx, summary.id, download = false)
+            val fetched = if (reloadNonce == 0 && preloadedDetail != null && preloadedDetail.item.id == summary.id) {
+                preloadedDetail
+            } else {
+                MarketApiClient.getShortcutDetail(ctx, summary.id, download = false)
+            }
             val parsed = withContext(Dispatchers.Default) {
                 parseShortcutPackItems(fetched.shortcutsJson)
             }
@@ -476,9 +481,17 @@ fun ShortcutMarketDetailDialog(
                 }
 
                 Spacer(Modifier.height(6.dp))
-                val verStr = if (activeMeta.appVersion.isNotBlank()) " · 来源 v${activeMeta.appVersion}" else ""
+                MarketAuthorBadgeRow(
+                    author = activeMeta.author,
+                    isOfficial = activeMeta.authorIsOfficial,
+                    badgeLabel = activeMeta.authorBadgeLabel,
+                    prefix = "作者：",
+                    fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(2.dp))
+                val verStr = if (activeMeta.appVersion.isNotBlank()) "来源 v${activeMeta.appVersion} · " else ""
                 Text(
-                    text = "作者：${activeMeta.author.ifBlank { "匿名" }}$verStr · ${activeMeta.downloads} 次下载 · ${formatMarketSize(activeMeta.sizeBytes)}",
+                    text = "$verStr${activeMeta.downloads} 次下载 · ${formatMarketSize(activeMeta.sizeBytes)}",
                     fontSize = 12.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
@@ -1168,6 +1181,184 @@ fun ShortcutPackImportAllDialog(
     }
 }
 
+private data class ShortcutPackImportAllHostRequest(
+    val summary: MarketShortcutPackSummary,
+    val items: List<ShortcutItem>,
+)
+
+/**
+ * 快捷方式包详情及衍生弹窗宿主（供 ShortcutMarketPage 与 ConfigMarketPage 关联入口共用）：
+ * 统一托管详情查看、整表导入确认、举报与基于 authorId / manageToken 的撤回删除。
+ */
+@Composable
+fun ShortcutPackDetailHost(
+    detailTarget: MarketShortcutPackSummary?,
+    preloadedDetail: MarketShortcutPackDetail? = null,
+    currentShortcutCount: Int,
+    needsBackupSuggestion: Boolean,
+    onDismissDetail: () -> Unit,
+    onFlowExit: () -> Unit = onDismissDetail,
+    onEnterSandboxPreview: (detail: MarketShortcutPackDetail, items: List<ShortcutItem>) -> Unit,
+    onAppendItems: (
+        summary: MarketShortcutPackSummary,
+        items: List<ShortcutItem>,
+        shouldRecordDownload: Boolean,
+    ) -> Unit,
+    onImportAll: (
+        summary: MarketShortcutPackSummary,
+        items: List<ShortcutItem>,
+        replaceExisting: Boolean,
+        backupCurrentFirst: Boolean,
+        shouldRecordDownload: Boolean,
+    ) -> Unit,
+    onHiddenByReport: (id: String) -> Unit = {},
+    onDeleted: (id: String) -> Unit = {},
+) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var importAllRequest by remember { mutableStateOf<ShortcutPackImportAllHostRequest?>(null) }
+    var reportTarget by remember { mutableStateOf<MarketShortcutPackSummary?>(null) }
+    var isReporting by remember { mutableStateOf(false) }
+    var reportError by remember { mutableStateOf<String?>(null) }
+    var deleteTarget by remember { mutableStateOf<MarketShortcutPackSummary?>(null) }
+    var isDeleting by remember { mutableStateOf(false) }
+    var deleteError by remember { mutableStateOf<String?>(null) }
+
+    val localAuthorId = MarketSettings.getAuthorId(ctx)
+    fun isOwned(summary: MarketShortcutPackSummary): Boolean {
+        return (localAuthorId != null && summary.authorId == localAuthorId) ||
+            MarketSettings.hasManageToken(ctx, MarketSettings.KIND_SHORTCUT, summary.id)
+    }
+
+    detailTarget?.let { item ->
+        ShortcutMarketDetailDialog(
+            summary = item,
+            isOwnedLocally = isOwned(item),
+            preloadedDetail = preloadedDetail,
+            onDismiss = onDismissDetail,
+            onBuildSandboxPreview = { detail, parsedItems ->
+                onFlowExit()
+                onEnterSandboxPreview(detail, parsedItems)
+            },
+            onAddSingleItem = { summary, shortcutItem, recordDownload ->
+                onAppendItems(summary, listOf(shortcutItem), recordDownload)
+            },
+            onImportSelectedItems = { summary, pickedItems, recordDownload ->
+                onAppendItems(summary, pickedItems, recordDownload)
+            },
+            onOpenImportAll = { summary, allItems ->
+                onFlowExit()
+                importAllRequest = ShortcutPackImportAllHostRequest(
+                    summary = summary,
+                    items = allItems,
+                )
+            },
+            onOpenReport = {
+                reportError = null
+                reportTarget = item
+            },
+            onOpenDelete = {
+                deleteError = null
+                deleteTarget = item
+            },
+        )
+    }
+
+    importAllRequest?.let { req ->
+        ShortcutPackImportAllDialog(
+            summary = req.summary,
+            items = req.items,
+            currentShortcutCount = currentShortcutCount,
+            needsBackupSuggestion = needsBackupSuggestion,
+            onDismiss = { importAllRequest = null },
+            onConfirm = { replaceExisting, backupCurrentFirst ->
+                importAllRequest = null
+                onImportAll(
+                    req.summary,
+                    req.items,
+                    replaceExisting,
+                    backupCurrentFirst,
+                    true,
+                )
+            },
+        )
+    }
+
+    reportTarget?.let { target ->
+        MarketReportDialog(
+            itemName = target.name,
+            isSubmitting = isReporting,
+            errorMessage = reportError,
+            onDismiss = { if (!isReporting) reportTarget = null },
+            onSubmit = { reason ->
+                isReporting = true
+                reportError = null
+                scope.launch {
+                    val res = runCatching {
+                        MarketApiClient.reportShortcutPack(ctx, target.id, reason)
+                    }
+                    isReporting = false
+                    res.onSuccess { reportRes ->
+                        reportTarget = null
+                        if (reportRes.hidden) {
+                            onFlowExit()
+                            onHiddenByReport(target.id)
+                            Toast.makeText(ctx, "举报成功，该快捷包因累计举报过多已被暂时隐藏", Toast.LENGTH_LONG).show()
+                        } else {
+                            Toast.makeText(ctx, "已提交举报，感谢您的反馈", Toast.LENGTH_SHORT).show()
+                        }
+                    }.onFailure { err ->
+                        reportError = err.message ?: "举报失败"
+                    }
+                }
+            },
+        )
+    }
+
+    deleteTarget?.let { target ->
+        MarketDeleteConfirmDialog(
+            itemName = target.name,
+            isDeleting = isDeleting,
+            errorMessage = deleteError,
+            onDismiss = { if (!isDeleting) deleteTarget = null },
+            onConfirm = {
+                val token = MarketSettings.getManageToken(ctx, MarketSettings.KIND_SHORTCUT, target.id)
+                val canDeleteByAuthor = localAuthorId != null && target.authorId == localAuthorId
+                if (token.isNullOrBlank() && !canDeleteByAuthor) {
+                    deleteError = "本地未找到此条目的管理凭证"
+                    return@MarketDeleteConfirmDialog
+                }
+                isDeleting = true
+                deleteError = null
+                scope.launch {
+                    val res = runCatching {
+                        MarketApiClient.deleteShortcutPack(ctx, target.id, token)
+                    }
+                    isDeleting = false
+                    res.onSuccess {
+                        MarketSettings.removeManageToken(ctx, MarketSettings.KIND_SHORTCUT, target.id)
+                        deleteTarget = null
+                        onFlowExit()
+                        onDeleted(target.id)
+                        Toast.makeText(ctx, "已从快捷市场撤回删除「${target.name}」", Toast.LENGTH_SHORT).show()
+                    }.onFailure { err ->
+                        if (err is MarketApiException && err.statusCode == 404) {
+                            MarketSettings.removeManageToken(ctx, MarketSettings.KIND_SHORTCUT, target.id)
+                            deleteTarget = null
+                            onFlowExit()
+                            onDeleted(target.id)
+                            Toast.makeText(ctx, "该条目已不在市场中，已清理本地凭证", Toast.LENGTH_SHORT).show()
+                        } else {
+                            deleteError = err.message ?: "删除失败"
+                        }
+                    }
+                }
+            },
+        )
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 快捷方式市场上传弹窗（支持全量列表或 Tab 1 多选子集，父文件夹子项去重）
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1178,7 +1369,7 @@ fun ShortcutMarketUploadDialog(
     sourceShortcuts: List<ShortcutItem>,
     isSelectionMode: Boolean = false,
     onDismiss: () -> Unit,
-    onUploaded: (MarketUploadResult) -> Unit,
+    onUploaded: (result: MarketUploadResult, authorUpdated: Boolean) -> Unit,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1200,6 +1391,19 @@ fun ShortcutMarketUploadDialog(
         )
     }
     var author by remember { mutableStateOf(MarketSettings.getLastAuthor(ctx)) }
+    var authorTouched by remember { mutableStateOf(false) }
+    var boundAuthor by remember {
+        mutableStateOf(
+            MarketSettings.getAuthorId(ctx)?.let { id ->
+                MarketAuthorProfile(
+                    id = id,
+                    displayName = MarketSettings.getLastAuthor(ctx),
+                    isOfficial = MarketSettings.isAuthorOfficial(ctx),
+                    badgeLabel = MarketSettings.getAuthorBadgeLabel(ctx),
+                )
+            }
+        )
+    }
     var description by remember { mutableStateOf("") }
     var tagsInput by remember { mutableStateOf("") }
     var keepCustomImages by remember(cleanSourceShortcuts) { mutableStateOf(true) }
@@ -1210,6 +1414,14 @@ fun ShortcutMarketUploadDialog(
 
     var isUploading by remember { mutableStateOf(false) }
     var submitError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        val fetched = runCatching { MarketApiClient.getMyAuthor(ctx) }.getOrNull()
+        boundAuthor = fetched
+        if (fetched != null && !authorTouched) {
+            author = fetched.displayName
+        }
+    }
 
     LaunchedEffect(cleanSourceShortcuts, keepCustomImages) {
         if (cleanSourceShortcuts.isEmpty()) {
@@ -1235,6 +1447,12 @@ fun ShortcutMarketUploadDialog(
         }
     }
 
+    val boundDisplayName = boundAuthor?.displayName?.trim().orEmpty()
+    val isBound = boundAuthor != null
+    val isRenamingAuthor = isBound &&
+        boundDisplayName.isNotEmpty() &&
+        author.trim().isNotEmpty() &&
+        author.trim() != boundDisplayName
     val parsedTags = remember(tagsInput) { parseMarketTagsInput(tagsInput) }
     val inspection = preparedUpload?.inspection
     val canSubmit = !isPreparing &&
@@ -1324,6 +1542,7 @@ fun ShortcutMarketUploadDialog(
                 TextField(
                     value = author,
                     onValueChange = {
+                        authorTouched = true
                         author = it.take(40)
                         submitError = null
                     },
@@ -1332,6 +1551,24 @@ fun ShortcutMarketUploadDialog(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (boundAuthor?.isOfficial == true) {
+                    Spacer(Modifier.height(6.dp))
+                    MarketAuthorBadgeRow(
+                        author = boundDisplayName,
+                        isOfficial = true,
+                        badgeLabel = boundAuthor?.badgeLabel.orEmpty(),
+                        prefix = "本机认证身份：",
+                        fontSize = 11.sp,
+                    )
+                }
+                if (isRenamingAuthor) {
+                    Spacer(Modifier.height(6.dp))
+                    MarketBannerBox(
+                        text = "修改昵称将同步更新你之前发布的所有配置和快捷方式",
+                        textColor = MARKET_COLOR_AMBER,
+                        bgColor = MARKET_COLOR_AMBER_BG,
+                    )
+                }
                 Spacer(Modifier.height(10.dp))
                 TextField(
                     value = description,
@@ -1476,7 +1713,7 @@ fun ShortcutMarketUploadDialog(
                             }
                             isUploading = true
                             submitError = null
-                            MarketSettings.setLastAuthor(ctx, cleanAuthor)
+                            val renamedOnSubmit = isRenamingAuthor
                             scope.launch {
                                 val uploadRes = runCatching {
                                     MarketApiClient.uploadShortcutPack(
@@ -1492,6 +1729,7 @@ fun ShortcutMarketUploadDialog(
                                 }
                                 isUploading = false
                                 uploadRes.onSuccess { res ->
+                                    MarketSettings.setLastAuthor(ctx, res.shortcutPackItem?.author ?: cleanAuthor)
                                     if (res.id.isNotBlank() && res.manageToken.isNotBlank()) {
                                         MarketSettings.saveManageToken(
                                             ctx,
@@ -1500,7 +1738,7 @@ fun ShortcutMarketUploadDialog(
                                             res.manageToken,
                                         )
                                     }
-                                    onUploaded(res)
+                                    onUploaded(res, renamedOnSubmit)
                                 }.onFailure { err ->
                                     submitError = err.message ?: "上传失败"
                                 }

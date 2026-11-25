@@ -2,6 +2,7 @@ package io.github.qmryqmm.hyperopen.market
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -111,12 +112,26 @@ fun ConfigMarketPage(
     localOffsetY: Int,
     needsBackupSuggestion: Boolean,
     onOpenUpload: () -> Unit,
+    onAuthorUpdated: () -> Unit,
+    onShortcutPackDeleted: () -> Unit,
     onEnterSandboxPreview: (MarketSandboxPreview) -> Unit,
+    onEnterShortcutSandboxPreview: (detail: MarketShortcutPackDetail, items: List<ShortcutItem>) -> Unit,
+    onAppendShortcutItems: (
+        summary: MarketShortcutPackSummary,
+        items: List<ShortcutItem>,
+        shouldRecordDownload: Boolean,
+    ) -> Unit,
+    onImportAllShortcuts: (
+        summary: MarketShortcutPackSummary,
+        items: List<ShortcutItem>,
+        replaceExisting: Boolean,
+        backupCurrentFirst: Boolean,
+        shouldRecordDownload: Boolean,
+    ) -> Unit,
     onSaveToLibrary: (
         summary: MarketConfigSummary,
         rawConfigJson: String,
         profileName: String,
-        includeShortcuts: Boolean,
         keepLocalOffsetY: Boolean,
         applyImmediately: Boolean,
         backupCurrentFirst: Boolean,
@@ -124,7 +139,6 @@ fun ConfigMarketPage(
     onApplyDirectly: (
         summary: MarketConfigSummary,
         rawConfigJson: String,
-        includeShortcuts: Boolean,
         keepLocalOffsetY: Boolean,
         backupCurrentFirst: Boolean,
     ) -> Unit,
@@ -134,6 +148,8 @@ fun ConfigMarketPage(
 
     var showServerSettings by remember { mutableStateOf(false) }
     var selectedDetailItem by remember { mutableStateOf<MarketConfigSummary?>(null) }
+    var parentConfigForLinkedPack by remember { mutableStateOf<MarketConfigSummary?>(null) }
+    var linkedShortcutDetail by remember { mutableStateOf<MarketShortcutPackDetail?>(null) }
     var importRequest by remember { mutableStateOf<ConfigMarketImportRequest?>(null) }
     var reportTarget by remember { mutableStateOf<MarketConfigSummary?>(null) }
     var isReporting by remember { mutableStateOf(false) }
@@ -141,6 +157,12 @@ fun ConfigMarketPage(
     var deleteTarget by remember { mutableStateOf<MarketConfigSummary?>(null) }
     var isDeleting by remember { mutableStateOf(false) }
     var deleteError by remember { mutableStateOf<String?>(null) }
+
+    val localAuthorId = MarketSettings.getAuthorId(ctx)
+    fun isOwnedLocally(item: MarketConfigSummary): Boolean {
+        return (localAuthorId != null && item.authorId == localAuthorId) ||
+            MarketSettings.hasManageToken(ctx, MarketSettings.KIND_CONFIG, item.id)
+    }
 
     fun loadFirstPage(queryOverride: String = marketState.searchQuery.trim()) {
         val gen = ++marketState.requestGeneration
@@ -416,7 +438,7 @@ fun ConfigMarketPage(
                 ConfigMarketItemCard(
                     item = item,
                     softGlassSupported = softGlassSupported,
-                    isOwnedLocally = MarketSettings.hasManageToken(ctx, MarketSettings.KIND_CONFIG, item.id),
+                    isOwnedLocally = isOwnedLocally(item),
                     onClick = { selectedDetailItem = item },
                 )
             }
@@ -468,6 +490,9 @@ fun ConfigMarketPage(
                 Toast.makeText(ctx, "市场服务器地址已更新", Toast.LENGTH_SHORT).show()
                 loadFirstPage()
             },
+            onAuthorUpdated = {
+                onAuthorUpdated()
+            },
         )
     }
 
@@ -475,7 +500,7 @@ fun ConfigMarketPage(
         ConfigMarketDetailDialog(
             item = item,
             softGlassSupported = softGlassSupported,
-            isOwnedLocally = MarketSettings.hasManageToken(ctx, MarketSettings.KIND_CONFIG, item.id),
+            isOwnedLocally = isOwnedLocally(item),
             currentShortcuts = currentShortcuts,
             onDismiss = { selectedDetailItem = null },
             onEnterSandbox = { preview ->
@@ -491,6 +516,14 @@ fun ConfigMarketPage(
                     fromSandbox = false,
                 )
             },
+            onOpenLinkedShortcutPack = { packDetail ->
+                parentConfigForLinkedPack = item
+                selectedDetailItem = null
+                linkedShortcutDetail = packDetail
+            },
+            onLinkedPackUnavailable = {
+                loadFirstPage()
+            },
             onOpenReport = {
                 reportError = null
                 reportTarget = item
@@ -502,6 +535,33 @@ fun ConfigMarketPage(
         )
     }
 
+    ShortcutPackDetailHost(
+        detailTarget = linkedShortcutDetail?.item,
+        preloadedDetail = linkedShortcutDetail,
+        currentShortcutCount = currentShortcuts.size,
+        needsBackupSuggestion = needsBackupSuggestion,
+        onDismissDetail = {
+            linkedShortcutDetail = null
+            parentConfigForLinkedPack?.let { selectedDetailItem = it }
+            parentConfigForLinkedPack = null
+        },
+        onFlowExit = {
+            linkedShortcutDetail = null
+            parentConfigForLinkedPack = null
+        },
+        onEnterSandboxPreview = onEnterShortcutSandboxPreview,
+        onAppendItems = onAppendShortcutItems,
+        onImportAll = onImportAllShortcuts,
+        onHiddenByReport = {
+            onShortcutPackDeleted()
+            loadFirstPage()
+        },
+        onDeleted = {
+            onShortcutPackDeleted()
+            loadFirstPage()
+        },
+    )
+
     importRequest?.let { req ->
         ConfigMarketImportDialog(
             request = req,
@@ -510,24 +570,22 @@ fun ConfigMarketPage(
             softGlassSupported = softGlassSupported,
             needsBackupSuggestion = needsBackupSuggestion,
             onDismiss = { importRequest = null },
-            onConfirmSaveToLibrary = { profileName, includeShortcuts, keepLocalOffsetY, applyImmediately, backupCurrentFirst ->
+            onConfirmSaveToLibrary = { profileName, keepLocalOffsetY, applyImmediately, backupCurrentFirst ->
                 importRequest = null
                 onSaveToLibrary(
                     req.summary,
                     req.rawConfigJson,
                     profileName,
-                    includeShortcuts,
                     keepLocalOffsetY,
                     applyImmediately,
                     backupCurrentFirst,
                 )
             },
-            onConfirmApplyDirectly = { includeShortcuts, keepLocalOffsetY, backupCurrentFirst ->
+            onConfirmApplyDirectly = { keepLocalOffsetY, backupCurrentFirst ->
                 importRequest = null
                 onApplyDirectly(
                     req.summary,
                     req.rawConfigJson,
-                    includeShortcuts,
                     keepLocalOffsetY,
                     backupCurrentFirst,
                 )
@@ -576,7 +634,8 @@ fun ConfigMarketPage(
             onDismiss = { if (!isDeleting) deleteTarget = null },
             onConfirm = {
                 val token = MarketSettings.getManageToken(ctx, MarketSettings.KIND_CONFIG, target.id)
-                if (token.isNullOrBlank()) {
+                val canDeleteByAuthor = localAuthorId != null && target.authorId == localAuthorId
+                if (token.isNullOrBlank() && !canDeleteByAuthor) {
                     deleteError = "本地未找到此条目的管理凭证"
                     return@MarketDeleteConfirmDialog
                 }
@@ -813,10 +872,12 @@ private fun ConfigMarketItemCard(
             }
 
             Spacer(Modifier.height(4.dp))
-            Text(
-                text = "作者 ${item.author.ifBlank { "匿名" }} · ${formatMarketShortTime(item.updatedAt)}",
-                fontSize = 11.sp,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            MarketAuthorBadgeRow(
+                author = item.author,
+                isOfficial = item.authorIsOfficial,
+                badgeLabel = item.authorBadgeLabel,
+                prefix = "作者 ",
+                suffix = "· ${formatMarketShortTime(item.updatedAt)}",
             )
 
             if (item.description.isNotBlank()) {
@@ -847,22 +908,15 @@ private fun ConfigMarketItemCard(
                     bgColor = MiuixTheme.colorScheme.surfaceVariant,
                 )
                 MarketBadgePill(
-                    text = if (item.hasShortcuts) "${item.shortcutCount} 快捷项" else "仅参数",
+                    text = "${item.keyCount} 项参数",
                     textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     bgColor = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
                 )
-                if (item.customImageCount > 0) {
+                if (item.linkedShortcutPack != null) {
                     MarketBadgePill(
-                        text = "${item.customImageCount} 自定义图",
-                        textColor = MARKET_COLOR_AMBER,
-                        bgColor = MARKET_COLOR_AMBER_BG,
-                    )
-                }
-                if (item.hasRootRisk) {
-                    MarketBadgePill(
-                        text = "含 Root/高危",
-                        textColor = MARKET_COLOR_RED,
-                        bgColor = MARKET_COLOR_RED_BG,
+                        text = "含配套快捷包",
+                        textColor = MARKET_COLOR_GREEN,
+                        bgColor = MARKET_COLOR_GREEN_BG,
                     )
                 }
                 if (needsNewerApp) {
@@ -910,11 +964,14 @@ private fun ConfigMarketDetailDialog(
     onDismiss: () -> Unit,
     onEnterSandbox: (MarketSandboxPreview) -> Unit,
     onOpenImport: (ConfigMarketImportMode, MarketConfigDetail) -> Unit,
+    onOpenLinkedShortcutPack: (MarketShortcutPackDetail) -> Unit,
+    onLinkedPackUnavailable: () -> Unit,
     onOpenReport: () -> Unit,
     onOpenDelete: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val primary = MiuixTheme.colorScheme.primary
     var activeAction by remember(item.id) { mutableStateOf<String?>(null) }
     var actionError by remember(item.id) { mutableStateOf<String?>(null) }
 
@@ -954,16 +1011,24 @@ private fun ConfigMarketDetailDialog(
                         Spacer(Modifier.width(8.dp))
                         MarketBadgePill(
                             text = "本机上传",
-                            textColor = MiuixTheme.colorScheme.primary,
-                            bgColor = MiuixTheme.colorScheme.primary.copy(alpha = 0.14f),
+                            textColor = primary,
+                            bgColor = primary.copy(alpha = 0.14f),
                         )
                     }
                 }
 
                 Spacer(Modifier.height(6.dp))
-                val verStr = if (item.appVersion.isNotBlank()) " · 来源 v${item.appVersion}" else ""
+                MarketAuthorBadgeRow(
+                    author = item.author,
+                    isOfficial = item.authorIsOfficial,
+                    badgeLabel = item.authorBadgeLabel,
+                    prefix = "作者：",
+                    fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(2.dp))
+                val verStr = if (item.appVersion.isNotBlank()) "来源 v${item.appVersion} · " else ""
                 Text(
-                    text = "作者：${item.author.ifBlank { "匿名" }}$verStr · ${item.downloads} 次下载 · ${formatMarketSize(item.sizeBytes)}",
+                    text = "$verStr${item.downloads} 次下载 · ${formatMarketSize(item.sizeBytes)}",
                     fontSize = 12.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
@@ -980,8 +1045,8 @@ private fun ConfigMarketDetailDialog(
                 ) {
                     MarketBadgePill(
                         text = item.layoutLabel(),
-                        textColor = MiuixTheme.colorScheme.primary,
-                        bgColor = MiuixTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        textColor = primary,
+                        bgColor = primary.copy(alpha = 0.12f),
                     )
                     MarketBadgePill(
                         text = displayMarketMaterialLabel(item.materialStyle, softGlassSupported),
@@ -989,12 +1054,7 @@ private fun ConfigMarketDetailDialog(
                         bgColor = MiuixTheme.colorScheme.surfaceVariant,
                     )
                     MarketBadgePill(
-                        text = "${item.keyCount} 项参数",
-                        textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        bgColor = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                    )
-                    MarketBadgePill(
-                        text = if (item.hasShortcuts) "${item.shortcutCount} 个快捷项" else "仅参数",
+                        text = "${item.keyCount} 项外观参数",
                         textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         bgColor = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
                     )
@@ -1019,8 +1079,99 @@ private fun ConfigMarketDetailDialog(
                         item.tags.forEach { tag ->
                             MarketBadgePill(
                                 text = "#$tag",
-                                textColor = MiuixTheme.colorScheme.primary,
-                                bgColor = MiuixTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                textColor = primary,
+                                bgColor = primary.copy(alpha = 0.1f),
+                            )
+                        }
+                    }
+                }
+
+                item.linkedShortcutPack?.let { linkedPack ->
+                    Spacer(Modifier.height(12.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(primary.copy(alpha = 0.08f))
+                            .border(1.dp, primary.copy(alpha = 0.28f), RoundedCornerShape(12.dp))
+                            .padding(14.dp),
+                    ) {
+                        Text(
+                            text = "配套快捷方式包",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = primary,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = linkedPack.name.ifBlank { "配套快捷方式" },
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MiuixTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            MarketBadgePill(
+                                text = "${linkedPack.shortcutCount} 快捷项",
+                                textColor = primary,
+                                bgColor = primary.copy(alpha = 0.14f),
+                            )
+                            if (linkedPack.folderCount > 0) {
+                                MarketBadgePill(
+                                    text = "${linkedPack.folderCount} 文件夹",
+                                    textColor = MiuixTheme.colorScheme.onSurface,
+                                    bgColor = MiuixTheme.colorScheme.surface.copy(alpha = 0.8f),
+                                )
+                            }
+                            if (linkedPack.customImageCount > 0) {
+                                MarketBadgePill(
+                                    text = "${linkedPack.customImageCount} 自定义图",
+                                    textColor = MARKET_COLOR_AMBER,
+                                    bgColor = MARKET_COLOR_AMBER_BG,
+                                )
+                            }
+                            if (linkedPack.hasRootRisk) {
+                                MarketBadgePill(
+                                    text = "含 Root/高危",
+                                    textColor = MARKET_COLOR_RED,
+                                    bgColor = MARKET_COLOR_RED_BG,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            TextButton(
+                                text = if (activeAction == "linked_pack") "加载快捷包..." else "查看 / 导入配套快捷包",
+                                colors = ButtonDefaults.textButtonColorsPrimary(),
+                                enabled = !busy,
+                                onClick = {
+                                    activeAction = "linked_pack"
+                                    actionError = null
+                                    scope.launch {
+                                        val res = runCatching {
+                                            MarketApiClient.getShortcutDetail(ctx, linkedPack.id, download = false)
+                                        }
+                                        activeAction = null
+                                        res.onSuccess { packDetail ->
+                                            onOpenLinkedShortcutPack(packDetail)
+                                        }.onFailure { err ->
+                                            if (err is MarketApiException && err.statusCode == 404) {
+                                                actionError = "该配套快捷包已被作者删除或下架"
+                                                onLinkedPackUnavailable()
+                                            } else {
+                                                actionError = err.message ?: "无法加载配套快捷包"
+                                            }
+                                        }
+                                    }
+                                },
                             )
                         }
                     }
@@ -1041,24 +1192,6 @@ private fun ConfigMarketDetailDialog(
                         text = "此配置为柔光玻璃材质，当前设备不支持；预览或应用时会自动转为高斯模糊并补偿模糊半径。",
                         textColor = MARKET_COLOR_AMBER,
                         bgColor = MARKET_COLOR_AMBER_BG,
-                    )
-                }
-
-                if (item.customImageCount > 0) {
-                    Spacer(Modifier.height(10.dp))
-                    MarketBannerBox(
-                        text = "此配置携带 ${item.customImageCount} 张自定义图标图片（已通过大小与格式校验）。",
-                        textColor = MARKET_COLOR_AMBER,
-                        bgColor = MARKET_COLOR_AMBER_BG,
-                    )
-                }
-
-                if (item.hasRootRisk || item.riskSummary.isNotEmpty()) {
-                    Spacer(Modifier.height(10.dp))
-                    MarketRiskWarningBox(
-                        riskItems = item.riskSummary,
-                        title = "安全警示：包含 ${item.riskSummary.size} 个高危快捷项",
-                        subtitle = "以下动作涉及 Shell、Root 权限、自定义广播或敏感 Intent，建议先检查详情再决定是否导入快捷项：",
                     )
                 }
 
@@ -1094,7 +1227,7 @@ private fun ConfigMarketDetailDialog(
                                             ctx,
                                             detail.jsonBody,
                                             currentShortcuts,
-                                            detail.item.hasShortcuts,
+                                            false,
                                             softGlassSupported,
                                         )
                                     }
@@ -1103,15 +1236,17 @@ private fun ConfigMarketDetailDialog(
                                         id = detail.item.id,
                                         title = detail.item.name,
                                         author = detail.item.author,
+                                        authorIsOfficial = detail.item.authorIsOfficial,
+                                        authorBadgeLabel = detail.item.authorBadgeLabel,
                                         config = previewConfig,
                                         rawConfigJson = detail.jsonBody,
-                                        hasShortcuts = detail.item.hasShortcuts,
-                                        shortcutCount = detail.item.shortcutCount,
+                                        hasShortcuts = false,
+                                        shortcutCount = 0,
                                         shortcutList = previewConfig.shortcuts.toList(),
                                         minAppVersionCode = detail.item.minAppVersionCode,
                                         appVersion = detail.item.appVersion,
-                                        hasRootRisk = detail.item.hasRootRisk,
-                                        riskSummary = detail.item.riskSummary,
+                                        hasRootRisk = false,
+                                        riskSummary = emptyList(),
                                         summary = detail.item,
                                     )
                                 }

@@ -42,6 +42,7 @@ import io.github.qmryqmm.hyperopen.config.ConfigBackup
 import io.github.qmryqmm.hyperopen.config.ConfigProfile
 import io.github.qmryqmm.hyperopen.config.ConfigProfileStore
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
+import io.github.qmryqmm.hyperopen.model.ShortcutItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -68,9 +69,25 @@ data class ConfigMarketImportRequest(
     val fromSandbox: Boolean = false,
 )
 
+data class ConfigMarketUploadOutcome(
+    val configResult: MarketUploadResult,
+    val linkedShortcutPackId: String? = null,
+    val linkedShortcutPackReused: Boolean = false,
+    val linkedShortcutPackStatus: String? = null,
+    val authorUpdated: Boolean = false,
+)
+
+private fun buildDefaultLinkedPackName(configName: String): String {
+    val suffix = " · 配套快捷方式"
+    val base = configName.trim()
+    if (base.isEmpty()) return "配套快捷方式"
+    val maxBase = (60 - suffix.length).coerceAtLeast(1)
+    return "${base.take(maxBase)}$suffix"
+}
+
 /**
- * 市场配置应用 / 保存到配置库确认弹窗：
- * - 若远程配置含快捷项目，提供「同时导入快捷项目」开关（默认开启）；
+ * 市场纯外观配置应用 / 保存到配置库确认弹窗：
+ * - 严格仅导入外观参数，绝不覆盖本机快捷项目列表；
  * - 默认勾选「保留本机指纹位置偏移 (offsetY)」；
  * - 直接应用且当前配置未归档/有未同步修改时，默认勾选「应用前备份当前配置」。
  */
@@ -84,13 +101,11 @@ fun ConfigMarketImportDialog(
     onDismiss: () -> Unit,
     onConfirmSaveToLibrary: (
         profileName: String,
-        includeShortcuts: Boolean,
         keepLocalOffsetY: Boolean,
         applyImmediately: Boolean,
         backupCurrentFirst: Boolean,
     ) -> Unit,
     onConfirmApplyDirectly: (
-        includeShortcuts: Boolean,
         keepLocalOffsetY: Boolean,
         backupCurrentFirst: Boolean,
     ) -> Unit,
@@ -100,7 +115,6 @@ fun ConfigMarketImportDialog(
     var profileName by remember(request) {
         mutableStateOf(summary.name.take(ConfigProfileStore.MAX_NAME_LENGTH))
     }
-    var includeShortcuts by remember(request) { mutableStateOf(summary.hasShortcuts) }
     var keepLocalOffsetY by remember(request) { mutableStateOf(true) }
     var applyImmediately by remember(request) { mutableStateOf(false) }
     var backupCurrentFirst by remember(request, needsBackupSuggestion) {
@@ -114,7 +128,6 @@ fun ConfigMarketImportDialog(
             if (entry != null && entry.has("v")) entry.optInt("v", 100) else 100
         }.getOrDefault(100)
     }
-    val finalIncludeShortcuts = summary.hasShortcuts && includeShortcuts
     val softGlassDowngraded =
         !softGlassSupported && summary.materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS
     val showBackupOption = needsBackupSuggestion && (!isSaveMode || applyImmediately)
@@ -141,9 +154,8 @@ fun ConfigMarketImportDialog(
                 )
                 Spacer(Modifier.height(6.dp))
                 val matLabel = displayMarketMaterialLabel(summary.materialStyle, softGlassSupported)
-                val shortcutMeta = if (summary.hasShortcuts) "${summary.shortcutCount} 个快捷项" else "仅参数"
                 Text(
-                    text = "「${summary.name}」 · ${summary.layoutLabel()} · $matLabel · ${summary.keyCount} 项参数 · $shortcutMeta",
+                    text = "「${summary.name}」 · ${summary.layoutLabel()} · $matLabel · ${summary.keyCount} 项外观参数",
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -186,42 +198,17 @@ fun ConfigMarketImportDialog(
                     )
                 }
 
-                if (summary.hasRootRisk || summary.riskSummary.isNotEmpty()) {
-                    Spacer(Modifier.height(10.dp))
-                    if (finalIncludeShortcuts) {
-                        MarketRiskWarningBox(
-                            riskItems = summary.riskSummary,
-                            title = "安全提示：包含 ${summary.riskSummary.size} 个高危快捷项",
-                            subtitle = "以下动作涉及 Shell、Root 或敏感广播，请确认作者「${summary.author}」可信：",
-                        )
-                    } else {
-                        MarketBannerBox(
-                            text = "该配置包含 ${summary.riskSummary.size} 个高危快捷项，当前已关闭「同时导入快捷项目」，不会写入这些动作。",
-                            textColor = MARKET_COLOR_AMBER,
-                            bgColor = MARKET_COLOR_AMBER_BG,
-                        )
-                    }
-                }
-
                 Spacer(Modifier.height(12.dp))
-                if (summary.hasShortcuts) {
-                    BasicComponent(
-                        title = "同时导入快捷项目",
-                        summary = "导入此配置自带的 ${summary.shortcutCount} 个快捷项目；关闭后仅导入面板参数，保留您本机原有快捷项。",
-                        endActions = {
-                            Switch(
-                                checked = includeShortcuts,
-                                onCheckedChange = { includeShortcuts = it },
-                            )
-                        },
-                    )
+                val pureTip = if (summary.linkedShortcutPack != null) {
+                    "该配置仅包含面板外观参数，您的本机快捷项目列表将被保留。如需配套快捷方式，可在配置详情查看「${summary.linkedShortcutPack.name}」。"
                 } else {
-                    MarketBannerBox(
-                        text = "该市场配置仅包含面板参数，不含快捷项目；您的本机快捷项目列表将被保留。",
-                        textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        bgColor = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    )
+                    "该市场配置仅包含面板外观参数，您的本机快捷项目列表将被保留。"
                 }
+                MarketBannerBox(
+                    text = pureTip,
+                    textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    bgColor = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                )
 
                 BasicComponent(
                     title = "保留本机指纹位置偏移 (offsetY)",
@@ -276,14 +263,12 @@ fun ConfigMarketImportDialog(
                             if (isSaveMode) {
                                 onConfirmSaveToLibrary(
                                     profileName.trim(),
-                                    finalIncludeShortcuts,
                                     keepLocalOffsetY,
                                     applyImmediately,
                                     applyImmediately && needsBackupSuggestion && backupCurrentFirst,
                                 )
                             } else {
                                 onConfirmApplyDirectly(
-                                    finalIncludeShortcuts,
                                     keepLocalOffsetY,
                                     needsBackupSuggestion && backupCurrentFirst,
                                 )
@@ -298,10 +283,9 @@ fun ConfigMarketImportDialog(
 
 /**
  * 配置市场上传弹窗：
- * - 支持上传「当前生效配置」或本地配置库中的指定 ConfigProfile；
- * - 支持名称、作者（自动预填）、简介、标签；
- * - 「包含快捷项目」默认关闭；当开启且存在 base64: 图片时显示「保留自定义图片（提交后需审核）」开关；
- * - 实时调用 MarketSanitizer 展示本地脱敏与审核预检状态，上传中防重入。
+ * - 上传纯外观参数配置（自动剔除运行态、App 界面键及快捷项），提交后直接上架；
+ * - 接入一设备一作者唯一绑定与改名同步提示；
+ * - 若本地配置包含快捷项，支持开启「同时将快捷方式上传到快捷方式市场并关联」（遇 409 自动复用已有快捷包 ID）。
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -309,7 +293,8 @@ fun ConfigMarketUploadDialog(
     profiles: List<ConfigProfile>,
     initialTargetProfileId: String? = null,
     onDismiss: () -> Unit,
-    onUploaded: (MarketUploadResult) -> Unit,
+    onShortcutPackSideUploaded: () -> Unit = {},
+    onUploaded: (ConfigMarketUploadOutcome) -> Unit,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -330,64 +315,143 @@ fun ConfigMarketUploadDialog(
     }
     var nameTouched by remember { mutableStateOf(false) }
     var author by remember { mutableStateOf(MarketSettings.getLastAuthor(ctx)) }
+    var authorTouched by remember { mutableStateOf(false) }
+    var boundAuthor by remember {
+        mutableStateOf(
+            MarketSettings.getAuthorId(ctx)?.let { id ->
+                MarketAuthorProfile(
+                    id = id,
+                    displayName = MarketSettings.getLastAuthor(ctx),
+                    isOfficial = MarketSettings.isAuthorOfficial(ctx),
+                    badgeLabel = MarketSettings.getAuthorBadgeLabel(ctx),
+                )
+            }
+        )
+    }
     var description by remember { mutableStateOf("") }
     var tagsInput by remember { mutableStateOf("") }
-    var includeShortcuts by remember { mutableStateOf(false) }
+
+    var linkShortcutPack by remember { mutableStateOf(false) }
+    var linkedPackName by remember(initialTargetProfileId) {
+        mutableStateOf(buildDefaultLinkedPackName(initialProfile?.name ?: ""))
+    }
+    var linkedPackNameTouched by remember { mutableStateOf(false) }
     var keepCustomImages by remember { mutableStateOf(true) }
 
     var showSourcePicker by remember { mutableStateOf(false) }
-    var isPreparing by remember { mutableStateOf(false) }
-    var preparedUpload by remember { mutableStateOf<MarketSanitizer.PreparedConfigUpload?>(null) }
-    var rawShortcutImageCount by remember { mutableStateOf(0) }
-    var prepareError by remember { mutableStateOf<String?>(null) }
+    var isPreparingConfig by remember { mutableStateOf(false) }
+    var preparedConfig by remember { mutableStateOf<MarketSanitizer.PreparedConfigUpload?>(null) }
+    var configPrepareError by remember { mutableStateOf<String?>(null) }
+
+    var sourceShortcuts by remember { mutableStateOf<List<ShortcutItem>>(emptyList()) }
+    var isPreparingShortcuts by remember { mutableStateOf(false) }
+    var preparedShortcuts by remember { mutableStateOf<MarketSanitizer.PreparedShortcutsUpload?>(null) }
+    var shortcutPrepareError by remember { mutableStateOf<String?>(null) }
 
     var isUploading by remember { mutableStateOf(false) }
     var submitError by remember { mutableStateOf<String?>(null) }
 
-    // 实时预检：切换目标配置 / 包含快捷项 / 保留自定义图时在 IO 线程运行 MarketSanitizer
-    LaunchedEffect(selectedProfileId, selectedProfile?.updatedAt, includeShortcuts, keepCustomImages) {
-        isPreparing = true
-        prepareError = null
-        val sourceJson = selectedProfile?.backupJson
-        val res = runCatching {
-            val rawCheckJson = withContext(Dispatchers.IO) {
-                sourceJson ?: ConfigBackup.buildExportJson(ctx, true, false)
-            }
-            val rawImgCount = if (includeShortcuts) {
-                val shortcuts = ConfigBackup.parseShortcutsFromBackup(rawCheckJson).orEmpty()
-                MarketSanitizer.inspectShortcuts(shortcuts, stripCustomImages = false).customImageCount
-            } else {
-                0
-            }
-            val prepared = MarketSanitizer.prepareConfigForUpload(
-                ctx = ctx,
-                sourceBackupJson = sourceJson,
-                includeShortcuts = includeShortcuts,
-                stripCustomImages = !keepCustomImages,
-                appVersion = BuildConfig.VERSION_NAME,
-            )
-            rawImgCount to prepared
-        }
-        isPreparing = false
-        res.onSuccess { (rawImgCount, prepared) ->
-            rawShortcutImageCount = rawImgCount
-            preparedUpload = prepared
-        }.onFailure { err ->
-            preparedUpload = null
-            prepareError = err.message ?: "本地预检失败"
+    LaunchedEffect(Unit) {
+        val fetched = runCatching { MarketApiClient.getMyAuthor(ctx) }.getOrNull()
+        boundAuthor = fetched
+        if (fetched != null && !authorTouched) {
+            author = fetched.displayName
         }
     }
 
+    // 预检纯外观配置并提取所选配置中的快捷方式（若存在）
+    LaunchedEffect(selectedProfileId, selectedProfile?.updatedAt) {
+        isPreparingConfig = true
+        configPrepareError = null
+        val sourceJson = selectedProfile?.backupJson
+        val res = runCatching {
+            val prepared = MarketSanitizer.prepareConfigForUpload(
+                ctx = ctx,
+                sourceBackupJson = sourceJson,
+                appVersion = BuildConfig.VERSION_NAME,
+            )
+            val rawCheckJson = withContext(Dispatchers.IO) {
+                sourceJson ?: ConfigBackup.buildExportJson(ctx, true, false)
+            }
+            val parsedShortcuts = withContext(Dispatchers.Default) {
+                deduplicateShortcutsForUpload(
+                    ConfigBackup.parseShortcutsFromBackup(rawCheckJson).orEmpty()
+                )
+            }
+            prepared to parsedShortcuts
+        }
+        isPreparingConfig = false
+        res.onSuccess { (prepared, shortcuts) ->
+            preparedConfig = prepared
+            sourceShortcuts = shortcuts
+            if (shortcuts.isEmpty()) {
+                linkShortcutPack = false
+            }
+        }.onFailure { err ->
+            preparedConfig = null
+            sourceShortcuts = emptyList()
+            linkShortcutPack = false
+            configPrepareError = err.message ?: "本地配置校验失败"
+        }
+    }
+
+    val rawShortcutInspection = remember(sourceShortcuts) {
+        if (sourceShortcuts.isEmpty()) null
+        else MarketSanitizer.inspectShortcuts(sourceShortcuts, stripCustomImages = false)
+    }
+
+    // 开启「同时将快捷方式上传到快捷方式市场并关联」时对快捷方式执行压缩与安全预检
+    LaunchedEffect(sourceShortcuts, linkShortcutPack, keepCustomImages) {
+        if (!linkShortcutPack || sourceShortcuts.isEmpty()) {
+            preparedShortcuts = null
+            shortcutPrepareError = null
+            isPreparingShortcuts = false
+            return@LaunchedEffect
+        }
+        isPreparingShortcuts = true
+        shortcutPrepareError = null
+        val res = runCatching {
+            MarketSanitizer.prepareShortcutsForUpload(
+                shortcuts = sourceShortcuts,
+                stripCustomImages = !keepCustomImages,
+            )
+        }
+        isPreparingShortcuts = false
+        res.onSuccess { prepared ->
+            preparedShortcuts = prepared
+        }.onFailure { err ->
+            preparedShortcuts = null
+            shortcutPrepareError = err.message ?: "配套快捷方式预检失败"
+        }
+    }
+
+    val boundDisplayName = boundAuthor?.displayName?.trim().orEmpty()
+    val isBound = boundAuthor != null
+    val isRenamingAuthor = isBound &&
+        boundDisplayName.isNotEmpty() &&
+        author.trim().isNotEmpty() &&
+        author.trim() != boundDisplayName
+
     val parsedTags = remember(tagsInput) { parseMarketTagsInput(tagsInput) }
-    val selectedHasShortcuts = selectedProfile?.hasShortcuts ?: true
-    val inspection = preparedUpload?.inspection
-    val canSubmit = !isPreparing &&
-        !isUploading &&
-        prepareError == null &&
+    val configInspection = preparedConfig?.inspection
+    val shortcutInspection = preparedShortcuts?.inspection
+
+    val configReady = !isPreparingConfig &&
+        configPrepareError == null &&
+        preparedConfig != null &&
+        (configInspection?.isUploadAllowed == true)
+    val linkedPackReady = !linkShortcutPack || (
+        !isPreparingShortcuts &&
+            shortcutPrepareError == null &&
+            linkedPackName.trim().isNotEmpty() &&
+            preparedShortcuts != null &&
+            (shortcutInspection?.isUploadAllowed == true)
+        )
+    val canSubmit = !isUploading &&
         name.trim().isNotEmpty() &&
         author.trim().isNotEmpty() &&
-        preparedUpload != null &&
-        (inspection?.isUploadAllowed == true)
+        configReady &&
+        linkedPackReady
 
     Dialog(
         onDismissRequest = { if (!isUploading) onDismiss() },
@@ -400,19 +464,19 @@ fun ConfigMarketUploadDialog(
         ) {
             Column(
                 modifier = Modifier
-                    .heightIn(max = 640.dp)
+                    .heightIn(max = 650.dp)
                     .verticalScroll(rememberScrollState())
                     .padding(24.dp),
             ) {
                 Text(
-                    text = "上传配置到市场",
+                    text = "上传外观配置到市场",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = MiuixTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "系统会自动剔除运行态与本机界面偏好键，并可选择仅分享参数或携带脱敏后的快捷项目。",
+                    text = "配置市场仅分享纯外观参数，自动剔除运行态与个人快捷项；若需要，可选择将快捷方式同步上传并关联。",
                     fontSize = 12.sp,
                     lineHeight = 17.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -446,9 +510,9 @@ fun ConfigMarketUploadDialog(
                         )
                         Text(
                             text = if (selectedProfile != null) {
-                                "${selectedProfile.layoutLabel()} · ${selectedProfile.materialLabel()} · ${if (selectedProfile.hasShortcuts) "${selectedProfile.shortcutCount} 快捷项" else "仅参数"}"
+                                "${selectedProfile.layoutLabel()} · ${selectedProfile.materialLabel()}"
                             } else {
-                                "使用当前正在生效的面板参数与快捷项目"
+                                "提取当前正在生效的面板外观参数"
                             },
                             fontSize = 11.sp,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -476,7 +540,7 @@ fun ConfigMarketUploadDialog(
                     ) {
                         UploadSourceOptionRow(
                             title = "当前生效配置",
-                            subtitle = "本机实时生效的参数与快捷项",
+                            subtitle = "提取本机实时生效的外观参数",
                             selected = selectedProfileId == null,
                             onClick = {
                                 selectedProfileId = null
@@ -491,10 +555,11 @@ fun ConfigMarketUploadDialog(
                                 onClick = {
                                     selectedProfileId = profile.id
                                     if (!nameTouched || name.isBlank()) {
-                                        name = profile.name.take(60)
-                                    }
-                                    if (!profile.hasShortcuts) {
-                                        includeShortcuts = false
+                                        val nextName = profile.name.take(60)
+                                        name = nextName
+                                        if (!linkedPackNameTouched) {
+                                            linkedPackName = buildDefaultLinkedPackName(nextName)
+                                        }
                                     }
                                     showSourcePicker = false
                                 },
@@ -509,6 +574,9 @@ fun ConfigMarketUploadDialog(
                     onValueChange = {
                         nameTouched = true
                         name = it.take(60)
+                        if (!linkedPackNameTouched) {
+                            linkedPackName = buildDefaultLinkedPackName(name)
+                        }
                         submitError = null
                     },
                     label = "配置名称（必填，最多 60 字）",
@@ -520,6 +588,7 @@ fun ConfigMarketUploadDialog(
                 TextField(
                     value = author,
                     onValueChange = {
+                        authorTouched = true
                         author = it.take(40)
                         submitError = null
                     },
@@ -528,6 +597,24 @@ fun ConfigMarketUploadDialog(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (boundAuthor?.isOfficial == true) {
+                    Spacer(Modifier.height(6.dp))
+                    MarketAuthorBadgeRow(
+                        author = boundDisplayName,
+                        isOfficial = true,
+                        badgeLabel = boundAuthor?.badgeLabel.orEmpty(),
+                        prefix = "本机认证身份：",
+                        fontSize = 11.sp,
+                    )
+                }
+                if (isRenamingAuthor) {
+                    Spacer(Modifier.height(6.dp))
+                    MarketBannerBox(
+                        text = "修改昵称将同步更新你之前发布的所有配置和快捷方式",
+                        textColor = MARKET_COLOR_AMBER,
+                        bgColor = MARKET_COLOR_AMBER_BG,
+                    )
+                }
                 Spacer(Modifier.height(10.dp))
                 TextField(
                     value = description,
@@ -567,95 +654,170 @@ fun ConfigMarketUploadDialog(
                 HorizontalDivider()
                 Spacer(Modifier.height(6.dp))
 
-                if (selectedHasShortcuts) {
+                if (sourceShortcuts.isNotEmpty() && rawShortcutInspection != null) {
                     BasicComponent(
-                        title = "包含快捷项目",
-                        summary = "默认仅分享面板参数；开启后将一并上传快捷方式列表（不含个人运行态数据）。",
+                        title = "同时将快捷方式上传到快捷方式市场并关联",
+                        summary = "检测到当前配置含 ${rawShortcutInspection.shortcutCount} 个快捷项；开启后将同步上传配套快捷包并在配置详情展示入口。",
                         endActions = {
                             Switch(
-                                checked = includeShortcuts,
-                                onCheckedChange = { if (!isUploading) includeShortcuts = it },
+                                checked = linkShortcutPack,
+                                onCheckedChange = { checked ->
+                                    if (!isUploading) {
+                                        linkShortcutPack = checked
+                                        submitError = null
+                                        if (checked && (!linkedPackNameTouched || linkedPackName.isBlank())) {
+                                            linkedPackName = buildDefaultLinkedPackName(name)
+                                        }
+                                    }
+                                },
                             )
                         },
-                    )
-                } else {
-                    MarketBannerBox(
-                        text = "所选配置方案仅保存了面板参数，不包含快捷项目。",
-                        textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        bgColor = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
                     )
                 }
 
-                if (includeShortcuts && rawShortcutImageCount > 0) {
-                    BasicComponent(
-                        title = "保留自定义图片（提交后需审核）",
-                        summary = "检测到 $rawShortcutImageCount 张本地 base64 图片；关闭将一键剥离并回退应用包名或矢量图标。",
-                        endActions = {
-                            Switch(
-                                checked = keepCustomImages,
-                                onCheckedChange = { if (!isUploading) keepCustomImages = it },
-                            )
+                if (linkShortcutPack && rawShortcutInspection != null) {
+                    Spacer(Modifier.height(8.dp))
+                    TextField(
+                        value = linkedPackName,
+                        onValueChange = {
+                            linkedPackNameTouched = true
+                            linkedPackName = it.take(60)
+                            submitError = null
                         },
+                        label = "配套快捷包名称（必填，最多 60 字）",
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
                     )
+                    Spacer(Modifier.height(8.dp))
+                    val folderNote = if (rawShortcutInspection.folderCount > 0) {
+                        "（含 ${rawShortcutInspection.folderCount} 个文件夹）"
+                    } else {
+                        ""
+                    }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = "配套快捷包统计：${rawShortcutInspection.shortcutCount} 个顶层项$folderNote · 总计 ${rawShortcutInspection.totalShortcutCount} 条",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MiuixTheme.colorScheme.onSurface,
+                        )
+                        if (rawShortcutInspection.customImageCount > 0 || rawShortcutInspection.hasRootRisk) {
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                if (rawShortcutInspection.customImageCount > 0) {
+                                    MarketBadgePill(
+                                        text = "${rawShortcutInspection.customImageCount} 自定义图",
+                                        textColor = MARKET_COLOR_AMBER,
+                                        bgColor = MARKET_COLOR_AMBER_BG,
+                                    )
+                                }
+                                if (rawShortcutInspection.hasRootRisk) {
+                                    MarketBadgePill(
+                                        text = "含 Root/高危 ${rawShortcutInspection.riskItems.size} 项",
+                                        textColor = MARKET_COLOR_RED,
+                                        bgColor = MARKET_COLOR_RED_BG,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (rawShortcutInspection.customImageCount > 0) {
+                        BasicComponent(
+                            title = "保留自定义图片（提交后需审核）",
+                            summary = "检测到 ${rawShortcutInspection.customImageCount} 张本地 base64 图片；关闭将自动剥离并回退应用或矢量图标。",
+                            endActions = {
+                                Switch(
+                                    checked = keepCustomImages,
+                                    onCheckedChange = { if (!isUploading) keepCustomImages = it },
+                                )
+                            },
+                        )
+                    }
                 }
 
                 Spacer(Modifier.height(10.dp))
                 when {
-                    isPreparing -> {
+                    isPreparingConfig -> {
                         MarketBannerBox(
-                            text = "正在执行本地校验与自定义图片压缩检查...",
+                            text = "正在提取并校验纯外观配置参数...",
                             textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             bgColor = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                         )
                     }
-                    prepareError != null -> {
+                    configPrepareError != null -> {
                         MarketBannerBox(
-                            text = "本地校验未通过：$prepareError",
+                            text = "配置参数校验未通过：$configPrepareError",
                             textColor = MARKET_COLOR_RED,
                             bgColor = MARKET_COLOR_RED_BG,
                         )
                     }
-                    inspection != null -> {
-                        val sizeText = formatMarketSize(inspection.totalSizeBytes)
-                        if (!inspection.isUploadAllowed) {
-                            val errMsg = when {
-                                inspection.validationError != null -> inspection.validationError
-                                inspection.exceedsMaxImageCount -> "自定义图片数量 (${inspection.customImageCount}) 超过 24 张上限"
-                                inspection.exceedsPayloadLimit -> "配置总大小 ($sizeText) 超过 512 KB 上限，请减少快捷项或关闭保留图片"
-                                else -> "当前内容不符合上传要求"
-                            }
-                            MarketBannerBox(
-                                text = errMsg,
-                                textColor = MARKET_COLOR_RED,
-                                bgColor = MARKET_COLOR_RED_BG,
-                            )
-                        } else if (!inspection.needsReview) {
-                            val compressNote = if (preparedUpload!!.compressedImageCount > 0) {
-                                "，已自动压缩 ${preparedUpload!!.compressedImageCount} 张大图"
-                            } else {
-                                ""
-                            }
-                            MarketBannerBox(
-                                text = "校验通过，提交后将直接上架（体积 $sizeText$compressNote）",
-                                textColor = MARKET_COLOR_GREEN,
-                                bgColor = MARKET_COLOR_GREEN_BG,
-                            )
-                        } else {
-                            val reasons = buildList {
-                                if (inspection.hasRootRisk) add("Root/高危动作 ${inspection.riskItems.size} 项")
-                                if (inspection.customImageCount > 0) add("自定义图片 ${inspection.customImageCount} 张")
-                            }.joinToString("、")
-                            val compressNote = if (preparedUpload!!.compressedImageCount > 0) {
-                                "（已自动压缩 ${preparedUpload!!.compressedImageCount} 张大图至 64 KB 内）"
-                            } else {
-                                ""
-                            }
-                            MarketBannerBox(
-                                text = "含 $reasons，提交后需等待人工审核（体积 $sizeText）$compressNote",
-                                textColor = MARKET_COLOR_AMBER,
-                                bgColor = MARKET_COLOR_AMBER_BG,
-                            )
+                    configInspection != null && !configInspection.isUploadAllowed -> {
+                        val errMsg = configInspection.validationError ?: "当前外观配置不符合上传要求"
+                        MarketBannerBox(
+                            text = errMsg,
+                            textColor = MARKET_COLOR_RED,
+                            bgColor = MARKET_COLOR_RED_BG,
+                        )
+                    }
+                    !linkShortcutPack -> {
+                        val sizeText = formatMarketSize(configInspection?.totalSizeBytes ?: 0)
+                        MarketBannerBox(
+                            text = "外观配置不含快捷方式，提交后将直接上架（体积 $sizeText）",
+                            textColor = MARKET_COLOR_GREEN,
+                            bgColor = MARKET_COLOR_GREEN_BG,
+                        )
+                    }
+                    isPreparingShortcuts -> {
+                        MarketBannerBox(
+                            text = "正在执行配套快捷包校验与自定义图片压缩检查...",
+                            textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            bgColor = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        )
+                    }
+                    shortcutPrepareError != null -> {
+                        MarketBannerBox(
+                            text = "配套快捷包校验未通过：$shortcutPrepareError",
+                            textColor = MARKET_COLOR_RED,
+                            bgColor = MARKET_COLOR_RED_BG,
+                        )
+                    }
+                    shortcutInspection != null && !shortcutInspection.isUploadAllowed -> {
+                        val sSizeText = formatMarketSize(shortcutInspection.totalSizeBytes)
+                        val errMsg = when {
+                            shortcutInspection.validationError != null -> shortcutInspection.validationError
+                            shortcutInspection.exceedsMaxImageCount -> "配套快捷包自定义图片 (${shortcutInspection.customImageCount}) 超过 24 张上限"
+                            shortcutInspection.exceedsPayloadLimit -> "配套快捷包体积 ($sSizeText) 超过 512 KB 上限，请减少条目或关闭保留图片"
+                            else -> "配套快捷包不符合上传要求"
                         }
+                        MarketBannerBox(
+                            text = errMsg,
+                            textColor = MARKET_COLOR_RED,
+                            bgColor = MARKET_COLOR_RED_BG,
+                        )
+                    }
+                    shortcutInspection != null -> {
+                        val cfgSize = formatMarketSize(configInspection?.totalSizeBytes ?: 0)
+                        val packSize = formatMarketSize(shortcutInspection.totalSizeBytes)
+                        val compressNote = if ((preparedShortcuts?.compressedImageCount ?: 0) > 0) {
+                            "，已压缩 ${preparedShortcuts?.compressedImageCount} 张大图"
+                        } else {
+                            ""
+                        }
+                        MarketBannerBox(
+                            text = "外观配置将直接上架（$cfgSize）；配套快捷包将同步上传至快捷方式市场（$packSize$compressNote，含自定义图或 Root 需审核，过审后配置详情会自动亮出关联入口）",
+                            textColor = if (shortcutInspection.needsReview) MARKET_COLOR_AMBER else MARKET_COLOR_GREEN,
+                            bgColor = if (shortcutInspection.needsReview) MARKET_COLOR_AMBER_BG else MARKET_COLOR_GREEN_BG,
+                        )
                     }
                 }
 
@@ -684,17 +846,78 @@ fun ConfigMarketUploadDialog(
                         colors = ButtonDefaults.textButtonColorsPrimary(),
                         enabled = canSubmit,
                         onClick = {
-                            val prepared = preparedUpload ?: return@TextButton
+                            val preparedCfg = preparedConfig ?: return@TextButton
                             val cleanName = name.trim()
                             val cleanAuthor = author.trim()
                             if (cleanName.isEmpty() || cleanAuthor.isEmpty()) {
                                 submitError = "请填写配置名称与作者昵称"
                                 return@TextButton
                             }
+                            val shouldLink = linkShortcutPack && sourceShortcuts.isNotEmpty()
+                            val preparedPack = if (shouldLink) preparedShortcuts else null
+                            val cleanPackName = linkedPackName.trim()
+                            if (shouldLink && (preparedPack == null || cleanPackName.isEmpty())) {
+                                submitError = "请填写配套快捷包名称"
+                                return@TextButton
+                            }
+
                             isUploading = true
                             submitError = null
-                            MarketSettings.setLastAuthor(ctx, cleanAuthor)
+                            val renamedOnSubmit = isRenamingAuthor
                             scope.launch {
+                                var linkedPackId: String? = null
+                                var linkedPackReused = false
+                                var linkedPackStatus: String? = null
+                                var shortcutPackJustUploaded = false
+
+                                if (shouldLink && preparedPack != null) {
+                                    val packRes = runCatching {
+                                        MarketApiClient.uploadShortcutPack(
+                                            ctx = ctx,
+                                            name = cleanPackName,
+                                            description = "配置「$cleanName」配套快捷方式",
+                                            author = cleanAuthor,
+                                            tags = parsedTags,
+                                            minAppVersionCode = BuildConfig.VERSION_CODE,
+                                            appVersion = BuildConfig.VERSION_NAME,
+                                            shortcutsJson = preparedPack.shortcutsJson,
+                                        )
+                                    }
+                                    val packErr = packRes.exceptionOrNull()
+                                    if (packErr != null) {
+                                        if (packErr is MarketApiException &&
+                                            packErr.statusCode == 409 &&
+                                            !packErr.existingId.isNullOrBlank()
+                                        ) {
+                                            linkedPackId = packErr.existingId
+                                            linkedPackReused = true
+                                            linkedPackStatus = packErr.existingStatus
+                                        } else {
+                                            isUploading = false
+                                            submitError = packErr.message ?: "配套快捷包上传失败"
+                                            return@launch
+                                        }
+                                    } else {
+                                        val uploadedPack = packRes.getOrNull()!!
+                                        linkedPackId = uploadedPack.id.takeIf { it.isNotBlank() }
+                                        linkedPackStatus = uploadedPack.status
+                                        shortcutPackJustUploaded = true
+                                        if (uploadedPack.id.isNotBlank() && uploadedPack.manageToken.isNotBlank()) {
+                                            MarketSettings.saveManageToken(
+                                                ctx,
+                                                MarketSettings.KIND_SHORTCUT,
+                                                uploadedPack.id,
+                                                uploadedPack.manageToken,
+                                            )
+                                        }
+                                        MarketSettings.setLastAuthor(
+                                            ctx,
+                                            uploadedPack.shortcutPackItem?.author ?: cleanAuthor,
+                                        )
+                                        onShortcutPackSideUploaded()
+                                    }
+                                }
+
                                 val uploadRes = runCatching {
                                     MarketApiClient.uploadConfig(
                                         ctx = ctx,
@@ -704,11 +927,13 @@ fun ConfigMarketUploadDialog(
                                         tags = parsedTags,
                                         minAppVersionCode = BuildConfig.VERSION_CODE,
                                         appVersion = BuildConfig.VERSION_NAME,
-                                        jsonBody = prepared.jsonBody,
+                                        jsonBody = preparedCfg.jsonBody,
+                                        linkedShortcutPackId = linkedPackId,
                                     )
                                 }
                                 isUploading = false
                                 uploadRes.onSuccess { res ->
+                                    MarketSettings.setLastAuthor(ctx, res.configItem?.author ?: cleanAuthor)
                                     if (res.id.isNotBlank() && res.manageToken.isNotBlank()) {
                                         MarketSettings.saveManageToken(
                                             ctx,
@@ -717,9 +942,22 @@ fun ConfigMarketUploadDialog(
                                             res.manageToken,
                                         )
                                     }
-                                    onUploaded(res)
+                                    onUploaded(
+                                        ConfigMarketUploadOutcome(
+                                            configResult = res,
+                                            linkedShortcutPackId = linkedPackId,
+                                            linkedShortcutPackReused = linkedPackReused,
+                                            linkedShortcutPackStatus = linkedPackStatus,
+                                            authorUpdated = renamedOnSubmit || shortcutPackJustUploaded,
+                                        )
+                                    )
                                 }.onFailure { err ->
-                                    submitError = err.message ?: "上传失败"
+                                    val prefix = if (shortcutPackJustUploaded) {
+                                        "配套快捷包已上传，但外观配置上传失败："
+                                    } else {
+                                        ""
+                                    }
+                                    submitError = "$prefix${err.message ?: "上传失败"}"
                                 }
                             }
                         },

@@ -87,18 +87,17 @@ object MarketSanitizer {
     )
 
     /**
-     * 准备待上传的配置 JSON：
+     * 准备待上传的纯外观配置 JSON：
+     * 严格剥离 shortcuts / shortcuts_json，仅保留面板外观白名单参数键；
      * @param sourceBackupJson 为 null 时读取当前生效配置；非 null 时清洗指定 ConfigProfile.backupJson。
      */
     suspend fun prepareConfigForUpload(
         ctx: Context,
         sourceBackupJson: String? = null,
-        includeShortcuts: Boolean = false,
-        stripCustomImages: Boolean = false,
         appVersion: String = BuildConfig.VERSION_NAME,
     ): PreparedConfigUpload = withContext(Dispatchers.IO) {
         val rawJson = if (sourceBackupJson.isNullOrBlank()) {
-            ConfigBackup.buildExportJson(ctx, includeShortcuts, false)
+            ConfigBackup.buildExportJson(ctx, false, false)
         } else {
             sourceBackupJson
         }
@@ -140,43 +139,9 @@ object MarketSanitizer {
         canonical.put("appVersion", resolvedAppVersion)
         canonical.put("values", cleanedValues)
 
-        var compressedCount = 0
-        var strippedCount = 0
-        val inspection: MarketLocalInspection
-
-        if (includeShortcuts) {
-            val parsedShortcuts = ConfigBackup.parseShortcutsFromBackup(rawJson).orEmpty()
-            if (parsedShortcuts.isNotEmpty()) {
-                val sanitized = sanitizeShortcutsInternal(
-                    rawShortcuts = parsedShortcuts,
-                    forceZeroOffsets = false,
-                    stripCustomImages = stripCustomImages,
-                    compressOversized = !stripCustomImages,
-                )
-                compressedCount = sanitized.compressedImageCount
-                strippedCount = sanitized.strippedImageCount
-                if (sanitized.items.isNotEmpty()) {
-                    val arr = JSONArray()
-                    for (item in sanitized.items) {
-                        arr.put(item.toJson())
-                    }
-                    canonical.put("shortcuts", arr)
-                }
-                val finalJson = canonical.toString()
-                val totalBytes = finalJson.toByteArray(StandardCharsets.UTF_8).size
-                inspection = sanitized.inspection.copy(totalSizeBytes = totalBytes)
-                return@withContext PreparedConfigUpload(
-                    jsonBody = finalJson,
-                    inspection = inspection,
-                    compressedImageCount = compressedCount,
-                    strippedImageCount = strippedCount,
-                )
-            }
-        }
-
         val finalJson = canonical.toString()
         val totalBytes = finalJson.toByteArray(StandardCharsets.UTF_8).size
-        inspection = MarketLocalInspection(
+        val inspection = MarketLocalInspection(
             hasRootRisk = false,
             riskItems = emptyList(),
             customImageCount = 0,

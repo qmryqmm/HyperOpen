@@ -75,11 +75,6 @@ private val SHORTCUT_ACTION_FILTERS: List<Pair<String?, String>> = listOf(
     ShortcutItem.ACTION_BROADCAST to "广播",
 )
 
-private data class ShortcutPackImportAllRequest(
-    val summary: MarketShortcutPackSummary,
-    val items: List<ShortcutItem>,
-)
-
 /**
  * 快捷方式市场页面状态持有者：提升到 HyperOpenApp 顶层后，
  * 在切换「本地快捷项 | 快捷市场」或进出「沙箱预览」时保留列表、筛选条件与滚动位置。
@@ -116,6 +111,8 @@ fun ShortcutMarketPage(
     currentShortcutCount: Int,
     needsBackupSuggestion: Boolean,
     onOpenUpload: () -> Unit,
+    onAuthorUpdated: () -> Unit,
+    onShortcutPackDeleted: () -> Unit,
     onEnterSandboxPreview: (detail: MarketShortcutPackDetail, items: List<ShortcutItem>) -> Unit,
     onAppendItems: (
         summary: MarketShortcutPackSummary,
@@ -135,13 +132,11 @@ fun ShortcutMarketPage(
 
     var showServerSettings by remember { mutableStateOf(false) }
     var selectedDetailItem by remember { mutableStateOf<MarketShortcutPackSummary?>(null) }
-    var importAllRequest by remember { mutableStateOf<ShortcutPackImportAllRequest?>(null) }
-    var reportTarget by remember { mutableStateOf<MarketShortcutPackSummary?>(null) }
-    var isReporting by remember { mutableStateOf(false) }
-    var reportError by remember { mutableStateOf<String?>(null) }
-    var deleteTarget by remember { mutableStateOf<MarketShortcutPackSummary?>(null) }
-    var isDeleting by remember { mutableStateOf(false) }
-    var deleteError by remember { mutableStateOf<String?>(null) }
+    val localAuthorId = MarketSettings.getAuthorId(ctx)
+    fun isOwnedLocally(item: MarketShortcutPackSummary): Boolean {
+        return (localAuthorId != null && item.authorId == localAuthorId) ||
+            MarketSettings.hasManageToken(ctx, MarketSettings.KIND_SHORTCUT, item.id)
+    }
 
     fun loadFirstPage(queryOverride: String = marketState.searchQuery.trim()) {
         val gen = ++marketState.requestGeneration
@@ -427,7 +422,7 @@ fun ShortcutMarketPage(
             ) { item ->
                 ShortcutMarketItemCard(
                     item = item,
-                    isOwnedLocally = MarketSettings.hasManageToken(ctx, MarketSettings.KIND_SHORTCUT, item.id),
+                    isOwnedLocally = isOwnedLocally(item),
                     onClick = { selectedDetailItem = item },
                 )
             }
@@ -479,139 +474,28 @@ fun ShortcutMarketPage(
                 Toast.makeText(ctx, "市场服务器地址已更新", Toast.LENGTH_SHORT).show()
                 loadFirstPage()
             },
-        )
-    }
-
-    selectedDetailItem?.let { item ->
-        ShortcutMarketDetailDialog(
-            summary = item,
-            isOwnedLocally = MarketSettings.hasManageToken(ctx, MarketSettings.KIND_SHORTCUT, item.id),
-            onDismiss = { selectedDetailItem = null },
-            onBuildSandboxPreview = { detail, parsedItems ->
-                selectedDetailItem = null
-                onEnterSandboxPreview(detail, parsedItems)
-            },
-            onAddSingleItem = { summary, shortcutItem, recordDownload ->
-                onAppendItems(summary, listOf(shortcutItem), recordDownload)
-            },
-            onImportSelectedItems = { summary, pickedItems, recordDownload ->
-                onAppendItems(summary, pickedItems, recordDownload)
-            },
-            onOpenImportAll = { summary, allItems ->
-                selectedDetailItem = null
-                importAllRequest = ShortcutPackImportAllRequest(
-                    summary = summary,
-                    items = allItems,
-                )
-            },
-            onOpenReport = {
-                reportError = null
-                reportTarget = item
-            },
-            onOpenDelete = {
-                deleteError = null
-                deleteTarget = item
+            onAuthorUpdated = {
+                onAuthorUpdated()
             },
         )
     }
 
-    importAllRequest?.let { req ->
-        ShortcutPackImportAllDialog(
-            summary = req.summary,
-            items = req.items,
-            currentShortcutCount = currentShortcutCount,
-            needsBackupSuggestion = needsBackupSuggestion,
-            onDismiss = { importAllRequest = null },
-            onConfirm = { replaceExisting, backupCurrentFirst ->
-                importAllRequest = null
-                onImportAll(
-                    req.summary,
-                    req.items,
-                    replaceExisting,
-                    backupCurrentFirst,
-                    true,
-                )
-            },
-        )
-    }
-
-    reportTarget?.let { target ->
-        MarketReportDialog(
-            itemName = target.name,
-            isSubmitting = isReporting,
-            errorMessage = reportError,
-            onDismiss = { if (!isReporting) reportTarget = null },
-            onSubmit = { reason ->
-                isReporting = true
-                reportError = null
-                scope.launch {
-                    val res = runCatching {
-                        MarketApiClient.reportShortcutPack(ctx, target.id, reason)
-                    }
-                    isReporting = false
-                    res.onSuccess { reportRes ->
-                        reportTarget = null
-                        if (reportRes.hidden) {
-                            marketState.items.removeAll { it.id == target.id }
-                            if (selectedDetailItem?.id == target.id) {
-                                selectedDetailItem = null
-                            }
-                            Toast.makeText(ctx, "举报成功，该快捷包因累计举报过多已被暂时隐藏", Toast.LENGTH_LONG).show()
-                        } else {
-                            Toast.makeText(ctx, "已提交举报，感谢您的反馈", Toast.LENGTH_SHORT).show()
-                        }
-                    }.onFailure { err ->
-                        reportError = err.message ?: "举报失败"
-                    }
-                }
-            },
-        )
-    }
-
-    deleteTarget?.let { target ->
-        MarketDeleteConfirmDialog(
-            itemName = target.name,
-            isDeleting = isDeleting,
-            errorMessage = deleteError,
-            onDismiss = { if (!isDeleting) deleteTarget = null },
-            onConfirm = {
-                val token = MarketSettings.getManageToken(ctx, MarketSettings.KIND_SHORTCUT, target.id)
-                if (token.isNullOrBlank()) {
-                    deleteError = "本地未找到此条目的管理凭证"
-                    return@MarketDeleteConfirmDialog
-                }
-                isDeleting = true
-                deleteError = null
-                scope.launch {
-                    val res = runCatching {
-                        MarketApiClient.deleteShortcutPack(ctx, target.id, token)
-                    }
-                    isDeleting = false
-                    res.onSuccess {
-                        MarketSettings.removeManageToken(ctx, MarketSettings.KIND_SHORTCUT, target.id)
-                        marketState.items.removeAll { it.id == target.id }
-                        if (selectedDetailItem?.id == target.id) {
-                            selectedDetailItem = null
-                        }
-                        deleteTarget = null
-                        Toast.makeText(ctx, "已从快捷市场撤回删除「${target.name}」", Toast.LENGTH_SHORT).show()
-                    }.onFailure { err ->
-                        if (err is MarketApiException && err.statusCode == 404) {
-                            MarketSettings.removeManageToken(ctx, MarketSettings.KIND_SHORTCUT, target.id)
-                            marketState.items.removeAll { it.id == target.id }
-                            if (selectedDetailItem?.id == target.id) {
-                                selectedDetailItem = null
-                            }
-                            deleteTarget = null
-                            Toast.makeText(ctx, "该条目已不在市场中，已清理本地凭证", Toast.LENGTH_SHORT).show()
-                        } else {
-                            deleteError = err.message ?: "删除失败"
-                        }
-                    }
-                }
-            },
-        )
-    }
+    ShortcutPackDetailHost(
+        detailTarget = selectedDetailItem,
+        currentShortcutCount = currentShortcutCount,
+        needsBackupSuggestion = needsBackupSuggestion,
+        onDismissDetail = { selectedDetailItem = null },
+        onEnterSandboxPreview = onEnterSandboxPreview,
+        onAppendItems = onAppendItems,
+        onImportAll = onImportAll,
+        onHiddenByReport = { id ->
+            marketState.items.removeAll { it.id == id }
+        },
+        onDeleted = { id ->
+            marketState.items.removeAll { it.id == id }
+            onShortcutPackDeleted()
+        },
+    )
 }
 
 @Composable
@@ -802,10 +686,12 @@ private fun ShortcutMarketItemCard(
             }
 
             Spacer(Modifier.height(4.dp))
-            Text(
-                text = "作者 ${item.author.ifBlank { "匿名" }} · ${formatMarketShortTime(item.updatedAt)}",
-                fontSize = 11.sp,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            MarketAuthorBadgeRow(
+                author = item.author,
+                isOfficial = item.authorIsOfficial,
+                badgeLabel = item.authorBadgeLabel,
+                prefix = "作者 ",
+                suffix = "· ${formatMarketShortTime(item.updatedAt)}",
             )
 
             if (item.description.isNotBlank()) {

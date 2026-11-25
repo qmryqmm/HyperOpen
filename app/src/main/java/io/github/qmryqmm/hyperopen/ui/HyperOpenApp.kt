@@ -86,6 +86,7 @@ import io.github.qmryqmm.hyperopen.market.MarketConfigSummary
 import io.github.qmryqmm.hyperopen.market.MarketSandboxFloatingBar
 import io.github.qmryqmm.hyperopen.market.MarketSandboxKind
 import io.github.qmryqmm.hyperopen.market.MarketSandboxPreview
+import io.github.qmryqmm.hyperopen.market.MarketShortcutPackDetail
 import io.github.qmryqmm.hyperopen.market.MarketShortcutPackSummary
 import io.github.qmryqmm.hyperopen.market.ShortcutMarketPage
 import io.github.qmryqmm.hyperopen.market.ShortcutMarketUploadDialog
@@ -693,11 +694,12 @@ fun HyperOpenApp(
 
     // 预览界面进入全屏沉浸模式，与真实锁屏 GxzwWindowFrameLayout 1:1 物理屏幕坐标对齐
     DisposableEffect(activity, subPage) {
+        val isPreview = (subPage == 3)
         val window = activity?.window
-        val savedWindowBg = if (subPage == 3) window?.decorView?.background else null
+        val savedWindowBg = if (isPreview) window?.decorView?.background else null
         if (window != null) {
             val controller = WindowCompat.getInsetsController(window, window.decorView)
-            if (subPage == 3) {
+            if (isPreview) {
                 WindowCompat.setDecorFitsSystemWindows(window, false)
                 controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 controller.hide(WindowInsetsCompat.Type.systemBars())
@@ -714,11 +716,11 @@ fun HyperOpenApp(
             if (w != null) {
                 WindowCompat.getInsetsController(w, w.decorView).show(WindowInsetsCompat.Type.systemBars())
                 w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-                if (subPage == 3 && savedWindowBg != null) {
+                if (isPreview && savedWindowBg != null) {
                     w.setBackgroundDrawable(savedWindowBg)
                 }
             }
-            if (subPage == 3) {
+            if (isPreview) {
                 previewViewRef = null
                 pendingSandboxImportRequest = null
                 pendingSandboxShortcutImport = null
@@ -1566,6 +1568,38 @@ fun HyperOpenApp(
             this.shortcuts = ArrayList(overrideShortcuts ?: shortcuts)
             HyperOpenConfig.adaptUnsupportedSoftGlass(this, softGlassSupported)
         }
+    }
+
+    fun refreshAllMarkets() {
+        marketRefreshTrigger++
+        shortcutMarketRefreshTrigger++
+    }
+
+    fun enterShortcutPackSandboxPreview(
+        detail: MarketShortcutPackDetail,
+        parsedItems: List<ShortcutItem>,
+    ) {
+        flushPendingPersist()
+        val previewItems = parsedItems.map(::cloneShortcutForImport)
+        val previewCfg = buildLivePreviewConfig(overrideShortcuts = previewItems)
+        marketSandboxPreview = MarketSandboxPreview(
+            kind = MarketSandboxKind.SHORTCUT_PACK,
+            id = detail.item.id,
+            title = detail.item.name,
+            author = detail.item.author,
+            authorIsOfficial = detail.item.authorIsOfficial,
+            authorBadgeLabel = detail.item.authorBadgeLabel,
+            config = previewCfg,
+            hasShortcuts = previewItems.isNotEmpty(),
+            shortcutCount = previewItems.size,
+            shortcutList = previewItems,
+            minAppVersionCode = detail.item.minAppVersionCode,
+            appVersion = detail.item.appVersion,
+            hasRootRisk = detail.item.hasRootRisk,
+            riskSummary = detail.item.riskSummary,
+            shortcutPackSummary = detail.item,
+        )
+        subPage = 3
     }
 
     fun openShortcutMarketUpload(items: List<ShortcutItem>, fromMultiSelect: Boolean) {
@@ -2456,27 +2490,9 @@ fun HyperOpenApp(
                                                 fromMultiSelect = false,
                                             )
                                         },
-                                        onEnterSandboxPreview = { detail, parsedItems ->
-                                            flushPendingPersist()
-                                            val previewItems = parsedItems.map(::cloneShortcutForImport)
-                                            val previewCfg = buildLivePreviewConfig(overrideShortcuts = previewItems)
-                                            marketSandboxPreview = MarketSandboxPreview(
-                                                kind = MarketSandboxKind.SHORTCUT_PACK,
-                                                id = detail.item.id,
-                                                title = detail.item.name,
-                                                author = detail.item.author,
-                                                config = previewCfg,
-                                                hasShortcuts = previewItems.isNotEmpty(),
-                                                shortcutCount = previewItems.size,
-                                                shortcutList = previewItems,
-                                                minAppVersionCode = detail.item.minAppVersionCode,
-                                                appVersion = detail.item.appVersion,
-                                                hasRootRisk = detail.item.hasRootRisk,
-                                                riskSummary = detail.item.riskSummary,
-                                                shortcutPackSummary = detail.item,
-                                            )
-                                            subPage = 3
-                                        },
+                                        onAuthorUpdated = ::refreshAllMarkets,
+                                        onShortcutPackDeleted = ::refreshAllMarkets,
+                                        onEnterSandboxPreview = ::enterShortcutPackSandboxPreview,
                                         onAppendItems = { summary, pickedItems, recordDownload ->
                                             appendMarketShortcuts(summary, pickedItems, recordDownload)
                                         },
@@ -2555,17 +2571,32 @@ fun HyperOpenApp(
                                         localOffsetY = offsetY.toInt(),
                                         needsBackupSuggestion = needsBackupSuggestion,
                                         onOpenUpload = { openMarketUpload(null) },
+                                        onAuthorUpdated = ::refreshAllMarkets,
+                                        onShortcutPackDeleted = ::refreshAllMarkets,
                                         onEnterSandboxPreview = { preview ->
                                             flushPendingPersist()
                                             marketSandboxPreview = preview
                                             subPage = 3
                                         },
-                                        onSaveToLibrary = { summary, rawJson, profileName, includeShortcuts, keepLocalOffsetY, applyImmediately, backupCurrentFirst ->
+                                        onEnterShortcutSandboxPreview = ::enterShortcutPackSandboxPreview,
+                                        onAppendShortcutItems = { summary, pickedItems, recordDownload ->
+                                            appendMarketShortcuts(summary, pickedItems, recordDownload)
+                                        },
+                                        onImportAllShortcuts = { summary, allItems, replaceExisting, backupCurrentFirst, recordDownload ->
+                                            importMarketShortcutPackAll(
+                                                summary = summary,
+                                                rawItems = allItems,
+                                                replaceExisting = replaceExisting,
+                                                backupCurrentFirst = backupCurrentFirst,
+                                                shouldRecordDownload = recordDownload,
+                                            )
+                                        },
+                                        onSaveToLibrary = { summary, rawJson, profileName, keepLocalOffsetY, applyImmediately, backupCurrentFirst ->
                                             saveMarketConfigToLibrary(
                                                 summary = summary,
                                                 rawConfigJson = rawJson,
                                                 profileName = profileName,
-                                                includeShortcuts = includeShortcuts,
+                                                includeShortcuts = false,
                                                 keepLocalOffsetY = keepLocalOffsetY,
                                                 applyImmediately = applyImmediately,
                                                 backupCurrentFirst = backupCurrentFirst,
@@ -2573,11 +2604,11 @@ fun HyperOpenApp(
                                                 exitSandboxOnApply = false,
                                             )
                                         },
-                                        onApplyDirectly = { summary, rawJson, includeShortcuts, keepLocalOffsetY, backupCurrentFirst ->
+                                        onApplyDirectly = { summary, rawJson, keepLocalOffsetY, backupCurrentFirst ->
                                             applyMarketConfigDirectly(
                                                 summary = summary,
                                                 rawConfigJson = rawJson,
-                                                includeShortcuts = includeShortcuts,
+                                                includeShortcuts = false,
                                                 keepLocalOffsetY = keepLocalOffsetY,
                                                 backupCurrentFirst = backupCurrentFirst,
                                                 shouldRecordDownload = false,
@@ -2816,13 +2847,22 @@ fun HyperOpenApp(
                 profiles = configProfiles,
                 initialTargetProfileId = marketUploadInitialProfileId,
                 onDismiss = { showMarketUploadDialog = false },
-                onUploaded = { result ->
+                onShortcutPackSideUploaded = { shortcutMarketRefreshTrigger++ },
+                onUploaded = { outcome ->
                     showMarketUploadDialog = false
                     marketRefreshTrigger++
-                    val msg = if (result.isPendingReview) {
-                        "已提交审核（含高危动作或自定义图片），审核通过后将自动上架配置市场"
-                    } else {
-                        "上传成功，已直接上架配置市场"
+                    if (outcome.linkedShortcutPackId != null || outcome.authorUpdated) {
+                        shortcutMarketRefreshTrigger++
+                    }
+                    val msg = when {
+                        outcome.linkedShortcutPackId == null ->
+                            "上传成功，外观配置已直接上架配置市场"
+                        outcome.linkedShortcutPackReused ->
+                            "外观配置已直接上架；已自动复用快捷市场中的相同快捷包并关联"
+                        outcome.linkedShortcutPackStatus == "pending" ->
+                            "外观配置已直接上架；配套快捷包已提交审核，过审后配置详情将亮出关联入口"
+                        else ->
+                            "外观配置与配套快捷包均已直接上架并关联"
                     }
                     Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
                 },
@@ -2838,13 +2878,13 @@ fun HyperOpenApp(
                 softGlassSupported = softGlassSupported,
                 needsBackupSuggestion = needsBackupSuggestion,
                 onDismiss = { pendingSandboxImportRequest = null },
-                onConfirmSaveToLibrary = { profileName, includeShortcuts, keepLocalOffsetY, applyImmediately, backupCurrentFirst ->
+                onConfirmSaveToLibrary = { profileName, keepLocalOffsetY, applyImmediately, backupCurrentFirst ->
                     pendingSandboxImportRequest = null
                     saveMarketConfigToLibrary(
                         summary = req.summary,
                         rawConfigJson = req.rawConfigJson,
                         profileName = profileName,
-                        includeShortcuts = includeShortcuts,
+                        includeShortcuts = false,
                         keepLocalOffsetY = keepLocalOffsetY,
                         applyImmediately = applyImmediately,
                         backupCurrentFirst = backupCurrentFirst,
@@ -2852,12 +2892,12 @@ fun HyperOpenApp(
                         exitSandboxOnApply = true,
                     )
                 },
-                onConfirmApplyDirectly = { includeShortcuts, keepLocalOffsetY, backupCurrentFirst ->
+                onConfirmApplyDirectly = { keepLocalOffsetY, backupCurrentFirst ->
                     pendingSandboxImportRequest = null
                     applyMarketConfigDirectly(
                         summary = req.summary,
                         rawConfigJson = req.rawConfigJson,
-                        includeShortcuts = includeShortcuts,
+                        includeShortcuts = false,
                         keepLocalOffsetY = keepLocalOffsetY,
                         backupCurrentFirst = backupCurrentFirst,
                         shouldRecordDownload = true,
@@ -2875,9 +2915,12 @@ fun HyperOpenApp(
                 sourceShortcuts = shortcutUploadSourceItems,
                 isSelectionMode = shortcutUploadFromMultiSelect,
                 onDismiss = { showShortcutMarketUploadDialog = false },
-                onUploaded = { result ->
+                onUploaded = { result, authorUpdated ->
                     showShortcutMarketUploadDialog = false
                     shortcutMarketRefreshTrigger++
+                    if (authorUpdated) {
+                        marketRefreshTrigger++
+                    }
                     if (shortcutUploadFromMultiSelect) {
                         shortcutsTreeState.interactionState.clearSelection()
                     }

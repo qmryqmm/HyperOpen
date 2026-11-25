@@ -24,7 +24,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,6 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -45,6 +48,7 @@ import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Surface
@@ -204,6 +208,60 @@ fun MarketBadgePill(
     }
 }
 
+/** 作者名与官方徽章展示行（isOfficial 为 true 时展示醒目徽章）。 */
+@Composable
+fun MarketAuthorBadgeRow(
+    author: String,
+    isOfficial: Boolean,
+    badgeLabel: String,
+    modifier: Modifier = Modifier,
+    prefix: String = "",
+    suffix: String = "",
+    fontSize: TextUnit = 11.sp,
+    textColor: Color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+) {
+    val primary = MiuixTheme.colorScheme.primary
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "$prefix${author.ifBlank { "匿名" }}",
+            fontSize = fontSize,
+            color = textColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        if (isOfficial) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(primary)
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    text = badgeLabel.ifBlank { "官方" },
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                    maxLines = 1,
+                )
+            }
+        }
+        if (suffix.isNotBlank()) {
+            Text(
+                text = suffix,
+                fontSize = fontSize,
+                color = textColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 @Composable
 fun MarketFilterChip(
     label: String,
@@ -327,11 +385,12 @@ fun MarketRiskWarningBox(
     }
 }
 
-/** 市场服务器地址配置弹窗（支持校验、恢复默认与在线连通性测试）。 */
+/** 市场服务器地址与本机创作者身份设置弹窗（支持连通性测试、查看官方徽章及全量改名同步）。 */
 @Composable
 fun MarketServerSettingsDialog(
     onDismiss: () -> Unit,
     onSaved: (String) -> Unit,
+    onAuthorUpdated: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -339,22 +398,62 @@ fun MarketServerSettingsDialog(
     var testing by remember { mutableStateOf(false) }
     var feedback by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
 
+    var authorReloadTick by remember { mutableIntStateOf(0) }
+    var isLoadingAuthor by remember { mutableStateOf(true) }
+    var authorLoadError by remember { mutableStateOf<String?>(null) }
+    var boundAuthor by remember {
+        mutableStateOf(
+            MarketSettings.getAuthorId(ctx)?.let { id ->
+                MarketAuthorProfile(
+                    id = id,
+                    displayName = MarketSettings.getLastAuthor(ctx),
+                    isOfficial = MarketSettings.isAuthorOfficial(ctx),
+                    badgeLabel = MarketSettings.getAuthorBadgeLabel(ctx),
+                )
+            }
+        )
+    }
+    var authorInput by remember {
+        mutableStateOf(
+            if (MarketSettings.getAuthorId(ctx) != null) MarketSettings.getLastAuthor(ctx) else ""
+        )
+    }
+    var authorInputTouched by remember { mutableStateOf(false) }
+    var isUpdatingAuthor by remember { mutableStateOf(false) }
+    var authorFeedback by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+
+    LaunchedEffect(authorReloadTick) {
+        isLoadingAuthor = true
+        authorLoadError = null
+        val res = runCatching { MarketApiClient.getMyAuthor(ctx) }
+        isLoadingAuthor = false
+        res.onSuccess { profile ->
+            boundAuthor = profile
+            if (!authorInputTouched) {
+                authorInput = profile?.displayName.orEmpty()
+            }
+        }.onFailure { err ->
+            authorLoadError = err.message ?: "无法同步云端创作者信息"
+        }
+    }
+
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!testing && !isUpdatingAuthor) onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Card(
             modifier = Modifier
-                .fillMaxWidth(0.88f)
+                .fillMaxWidth(0.90f)
                 .padding(vertical = 16.dp),
         ) {
             Column(
                 modifier = Modifier
+                    .heightIn(max = 650.dp)
                     .verticalScroll(rememberScrollState())
                     .padding(24.dp),
             ) {
                 Text(
-                    text = "市场服务器地址设置",
+                    text = "市场服务器与创作者设置",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = MiuixTheme.colorScheme.onSurface,
@@ -362,8 +461,8 @@ fun MarketServerSettingsDialog(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = "仅影响模块设置页内的在线市场请求，绝不写入系统配置或传递给 SystemUI。",
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
                 Spacer(Modifier.height(14.dp))
@@ -396,6 +495,7 @@ fun MarketServerSettingsDialog(
                 ) {
                     TextButton(
                         text = "恢复默认",
+                        enabled = !testing && !isUpdatingAuthor,
                         onClick = {
                             urlInput = MarketSettings.DEFAULT_BASE_URL
                             feedback = null
@@ -404,7 +504,7 @@ fun MarketServerSettingsDialog(
                     )
                     TextButton(
                         text = if (testing) "测试中..." else "测试连接",
-                        enabled = !testing,
+                        enabled = !testing && !isUpdatingAuthor,
                         onClick = {
                             val normalized = MarketSettings.normalizeBaseUrl(urlInput)
                             if (normalized == null) {
@@ -424,11 +524,13 @@ fun MarketServerSettingsDialog(
                                 }
                                 testing = false
                                 okResult.onSuccess { ok ->
-                                    feedback = if (ok) {
-                                        true to "连接成功（已自动应用新地址）"
+                                    if (ok) {
+                                        feedback = true to "连接成功（已自动应用新地址）"
+                                        authorInputTouched = false
+                                        authorReloadTick++
                                     } else {
                                         MarketSettings.setBaseUrl(ctx, previous)
-                                        false to "服务器返回状态异常"
+                                        feedback = false to "服务器返回状态异常"
                                     }
                                 }.onFailure { err ->
                                     feedback = false to (err.message ?: "连接失败")
@@ -446,17 +548,165 @@ fun MarketServerSettingsDialog(
                         bgColor = if (ok) MARKET_COLOR_GREEN_BG else MARKET_COLOR_RED_BG,
                     )
                 }
+
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(16.dp))
+
+                Text(
+                    text = "创作者身份与昵称",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MiuixTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "一设备对应唯一创作者昵称；修改昵称将同步更新你之前发布的所有配置和快捷方式。",
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Spacer(Modifier.height(10.dp))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    val activeProfile = boundAuthor
+                    when {
+                        isLoadingAuthor && activeProfile == null -> {
+                            Text(
+                                text = "正在获取本机创作者身份...",
+                                fontSize = 12.sp,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        activeProfile != null -> {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                MarketAuthorBadgeRow(
+                                    author = activeProfile.displayName,
+                                    isOfficial = activeProfile.isOfficial,
+                                    badgeLabel = activeProfile.badgeLabel,
+                                    prefix = "当前绑定：",
+                                    fontSize = 13.sp,
+                                    textColor = MiuixTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (isLoadingAuthor) {
+                                    Text(
+                                        text = "同步中...",
+                                        fontSize = 11.sp,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    )
+                                }
+                            }
+                            if (activeProfile.isOfficial) {
+                                val badgeText = activeProfile.badgeLabel.ifBlank { "官方" }
+                                Text(
+                                    text = "已获得官方认证徽章「$badgeText」，将在你的全部市场作品中展示。",
+                                    fontSize = 11.sp,
+                                    color = MiuixTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                        else -> {
+                            Text(
+                                text = "当前设备尚未绑定创作者昵称（可在此直接设置，或在首次上传作品时自动绑定）。",
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                    }
+                    if (!authorLoadError.isNullOrBlank()) {
+                        Text(
+                            text = authorLoadError!!,
+                            fontSize = 11.sp,
+                            color = MARKET_COLOR_AMBER,
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+                TextField(
+                    value = authorInput,
+                    onValueChange = {
+                        authorInput = it.take(40)
+                        authorInputTouched = true
+                        authorFeedback = null
+                    },
+                    label = "作者昵称（1~40 字）",
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(
+                        text = if (isUpdatingAuthor) "修改中..." else "修改昵称",
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                        enabled = !testing && !isUpdatingAuthor && authorInput.trim().isNotEmpty(),
+                        onClick = {
+                            val cleanName = authorInput.trim()
+                            if (cleanName.isEmpty()) {
+                                authorFeedback = false to "作者昵称不能为空"
+                                return@TextButton
+                            }
+                            isUpdatingAuthor = true
+                            authorFeedback = null
+                            scope.launch {
+                                val res = runCatching {
+                                    MarketApiClient.updateMyAuthorName(ctx, cleanName)
+                                }
+                                isUpdatingAuthor = false
+                                res.onSuccess { updated ->
+                                    boundAuthor = updated
+                                    authorInput = updated.displayName
+                                    authorInputTouched = false
+                                    authorFeedback = true to "昵称已同步为「${updated.displayName}」"
+                                    onAuthorUpdated()
+                                }.onFailure { err ->
+                                    authorFeedback = false to (err.message ?: "修改昵称失败")
+                                }
+                            }
+                        },
+                    )
+                }
+
+                authorFeedback?.let { (ok, msg) ->
+                    Spacer(Modifier.height(8.dp))
+                    MarketBannerBox(
+                        text = msg,
+                        textColor = if (ok) MARKET_COLOR_GREEN else MARKET_COLOR_RED,
+                        bgColor = if (ok) MARKET_COLOR_GREEN_BG else MARKET_COLOR_RED_BG,
+                    )
+                }
+
                 Spacer(Modifier.height(20.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                 ) {
-                    TextButton(text = "取消", onClick = onDismiss)
+                    TextButton(
+                        text = "取消",
+                        enabled = !testing && !isUpdatingAuthor,
+                        onClick = onDismiss,
+                    )
                     Spacer(Modifier.width(10.dp))
                     TextButton(
-                        text = "保存",
+                        text = "保存地址",
                         colors = ButtonDefaults.textButtonColorsPrimary(),
-                        enabled = !testing,
+                        enabled = !testing && !isUpdatingAuthor,
                         onClick = {
                             val normalized = MarketSettings.normalizeBaseUrl(urlInput)
                             if (normalized == null) {
@@ -658,12 +908,12 @@ fun MarketSandboxFloatingBar(
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(6.dp))
-                Text(
-                    text = "by ${preview.author.ifBlank { "匿名" }}",
+                MarketAuthorBadgeRow(
+                    author = preview.author,
+                    isOfficial = preview.authorIsOfficial,
+                    badgeLabel = preview.authorBadgeLabel,
+                    prefix = "by ",
                     fontSize = 11.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Spacer(Modifier.height(8.dp))

@@ -29,6 +29,26 @@ data class MarketPageResult<T>(
     val pagination: MarketPagination,
 )
 
+/** 本机绑定的市场创作者档案（与后端 /api/author/me 对齐）。 */
+data class MarketAuthorProfile(
+    val id: String,
+    val displayName: String,
+    val isOfficial: Boolean = false,
+    val badgeLabel: String = "",
+    val createdAt: Long = 0L,
+    val updatedAt: Long = 0L,
+)
+
+/** 配置关联的配套快捷方式包摘要（与后端 ConfigMetadata.linkedShortcutPack 对齐）。 */
+data class MarketLinkedShortcutPack(
+    val id: String,
+    val name: String,
+    val shortcutCount: Int = 0,
+    val folderCount: Int = 0,
+    val hasRootRisk: Boolean = false,
+    val customImageCount: Int = 0,
+)
+
 /** 配置市场列表/详情元数据（与后端 ConfigMetadata 对齐）。 */
 data class MarketConfigSummary(
     val id: String,
@@ -54,6 +74,11 @@ data class MarketConfigSummary(
     val sizeBytes: Int,
     val createdAt: Long,
     val updatedAt: Long,
+    val authorId: String? = null,
+    val authorIsOfficial: Boolean = false,
+    val authorBadgeLabel: String = "",
+    val linkedShortcutPackId: String? = null,
+    val linkedShortcutPack: MarketLinkedShortcutPack? = null,
 ) {
     fun layoutLabel(): String = when (layoutStyle) {
         HyperOpenConfig.LAYOUT_RING -> "空心圆环"
@@ -97,6 +122,9 @@ data class MarketShortcutPackSummary(
     val sizeBytes: Int,
     val createdAt: Long,
     val updatedAt: Long,
+    val authorId: String? = null,
+    val authorIsOfficial: Boolean = false,
+    val authorBadgeLabel: String = "",
 )
 
 /** 快捷方式包详情正文（供 Stage 3 复用）。 */
@@ -182,6 +210,8 @@ data class MarketSandboxPreview(
     val riskSummary: List<MarketRiskEntry> = emptyList(),
     val summary: MarketConfigSummary? = null,
     val shortcutPackSummary: MarketShortcutPackSummary? = null,
+    val authorIsOfficial: Boolean = false,
+    val authorBadgeLabel: String = "",
 )
 
 /** 市场接口异常，保留 HTTP 状态码及限流/去重结构化字段以便 UI 精准提示。 */
@@ -194,4 +224,7 @@ class MarketApiException(
     val existingStatus: String? = null,
     val isNetworkError: Boolean = false,
     cause: Throwable? = null,
-) : Exception(message, cause)
+) : Exception(message, cause) {
+    val isDuplicateConflict: Boolean
+        get() = statusCode == 409 && !existingId.isNullOrBlank()
+}
