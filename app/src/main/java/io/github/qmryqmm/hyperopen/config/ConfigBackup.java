@@ -534,6 +534,20 @@ public final class ConfigBackup {
             Integer overrideOffsetY,
             boolean includeShortcuts
     ) throws Exception {
+        return prepareBackupJsonForImport(backupJson, overrideOffsetY, includeShortcuts, null);
+    }
+
+    /**
+     * 对待导入/应用的备份 JSON 做一键预检与预处理：
+     * 可选覆写 {@code offset_y}、按需剔除或注入外部快捷项目列表（例如配置市场配套快捷包），
+     * 返回规范化 JSON 供 {@link #apply} 或 {@link ConfigProfileStore#previewImport} 直接复用。
+     */
+    public static String prepareBackupJsonForImport(
+            String backupJson,
+            Integer overrideOffsetY,
+            boolean includeShortcuts,
+            List<ShortcutItem> overrideShortcuts
+    ) throws Exception {
         Result pre = preview(backupJson);
         if (!pre.ok) {
             throw new IllegalArgumentException(pre.message);
@@ -552,6 +566,15 @@ public final class ConfigBackup {
         }
         if (!includeShortcuts) {
             root.remove("shortcuts");
+            values.remove(KEY_SHORTCUTS);
+        } else if (overrideShortcuts != null) {
+            JSONArray arr = new JSONArray();
+            for (ShortcutItem item : overrideShortcuts) {
+                if (item != null) {
+                    arr.put(item.toJson());
+                }
+            }
+            root.put("shortcuts", arr);
             values.remove(KEY_SHORTCUTS);
         }
         return root.toString();

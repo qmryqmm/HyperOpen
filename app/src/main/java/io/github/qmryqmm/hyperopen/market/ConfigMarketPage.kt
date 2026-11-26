@@ -137,12 +137,16 @@ fun ConfigMarketPage(
         keepLocalOffsetY: Boolean,
         applyImmediately: Boolean,
         backupCurrentFirst: Boolean,
+        linkedShortcuts: List<ShortcutItem>?,
+        linkedShortcutPackId: String?,
     ) -> Unit,
     onApplyDirectly: (
         summary: MarketConfigSummary,
         rawConfigJson: String,
         keepLocalOffsetY: Boolean,
         backupCurrentFirst: Boolean,
+        linkedShortcuts: List<ShortcutItem>?,
+        linkedShortcutPackId: String?,
     ) -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -560,7 +564,8 @@ fun ConfigMarketPage(
             softGlassSupported = softGlassSupported,
             needsBackupSuggestion = needsBackupSuggestion,
             onDismiss = { importRequest = null },
-            onConfirmSaveToLibrary = { profileName, keepLocalOffsetY, applyImmediately, backupCurrentFirst ->
+            onLinkedPackUnavailable = { loadFirstPage() },
+            onConfirmSaveToLibrary = { profileName, keepLocalOffsetY, applyImmediately, backupCurrentFirst, linkedShortcuts, linkedPackId ->
                 importRequest = null
                 onSaveToLibrary(
                     req.summary,
@@ -569,15 +574,19 @@ fun ConfigMarketPage(
                     keepLocalOffsetY,
                     applyImmediately,
                     backupCurrentFirst,
+                    linkedShortcuts,
+                    linkedPackId,
                 )
             },
-            onConfirmApplyDirectly = { keepLocalOffsetY, backupCurrentFirst ->
+            onConfirmApplyDirectly = { keepLocalOffsetY, backupCurrentFirst, linkedShortcuts, linkedPackId ->
                 importRequest = null
                 onApplyDirectly(
                     req.summary,
                     req.rawConfigJson,
                     keepLocalOffsetY,
                     backupCurrentFirst,
+                    linkedShortcuts,
+                    linkedPackId,
                 )
             },
         )

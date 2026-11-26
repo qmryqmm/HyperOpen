@@ -1279,8 +1279,11 @@ fun HyperOpenApp(
         backupCurrentFirst: Boolean,
         shouldRecordDownload: Boolean = false,
         exitSandboxOnApply: Boolean = false,
+        linkedShortcuts: List<ShortcutItem>? = null,
+        linkedShortcutPackId: String? = null,
     ) {
         val localOffset = offsetY.toInt()
+        val hasOverrideShortcuts = includeShortcuts && !linkedShortcuts.isNullOrEmpty()
         if (applyImmediately) {
             flushPendingPersist()
             if (backupCurrentFirst) {
@@ -1292,16 +1295,25 @@ fun HyperOpenApp(
                 if (shouldRecordDownload) {
                     runCatching { MarketApiClient.getConfigDetail(ctx, summary.id, download = true) }
                 }
+                val clonedLinkedShortcuts = if (hasOverrideShortcuts) {
+                    linkedShortcuts.map(::cloneShortcutForImport)
+                } else {
+                    null
+                }
+                if (hasOverrideShortcuts && !linkedShortcutPackId.isNullOrBlank()) {
+                    runCatching { MarketApiClient.getShortcutDetail(ctx, linkedShortcutPackId, download = true) }
+                }
                 val preparedJson = ConfigBackup.prepareBackupJsonForImport(
                     rawConfigJson,
                     if (keepLocalOffsetY) localOffset else null,
-                    includeShortcuts,
+                    hasOverrideShortcuts,
+                    clonedLinkedShortcuts,
                 )
                 val preview = ConfigProfileStore.previewImport(ctx, preparedJson, profileName)
                 if (!preview.ok) {
                     throw IllegalStateException(preview.message)
                 }
-                val commitRes = ConfigProfileStore.commitImport(ctx, preview, profileName, includeShortcuts)
+                val commitRes = ConfigProfileStore.commitImport(ctx, preview, profileName, hasOverrideShortcuts)
                 if (!commitRes.ok) {
                     throw IllegalStateException(commitRes.message)
                 }
@@ -1322,13 +1334,18 @@ fun HyperOpenApp(
                         applyConfigProfile(
                             profile = imported,
                             applyParams = true,
-                            applyShortcuts = includeShortcuts && imported.hasShortcuts,
+                            applyShortcuts = hasOverrideShortcuts && imported.hasShortcuts,
                             backupCurrentFirst = backupCurrentFirst,
                         )
                     } else {
+                        val shortcutNote = if (imported?.hasShortcuts == true) {
+                            "（含 ${imported.shortcutCount} 个快捷项）"
+                        } else {
+                            ""
+                        }
                         Toast.makeText(
                             ctx,
-                            "已将「${imported?.name ?: profileName}」保存到本地配置库",
+                            "已将「${imported?.name ?: profileName}」保存到本地配置库$shortcutNote",
                             Toast.LENGTH_SHORT,
                         ).show()
                     }
@@ -1350,10 +1367,13 @@ fun HyperOpenApp(
         keepLocalOffsetY: Boolean,
         backupCurrentFirst: Boolean,
         shouldRecordDownload: Boolean = false,
+        linkedShortcuts: List<ShortcutItem>? = null,
+        linkedShortcutPackId: String? = null,
         onApplied: () -> Unit = {},
     ) {
         val activeSnapshotName = configProfiles.firstOrNull { it.id == activeConfigProfileId }?.name
         val localOffset = offsetY.toInt()
+        val hasOverrideShortcuts = includeShortcuts && !linkedShortcuts.isNullOrEmpty()
         flushPendingPersist()
         if (backupCurrentFirst) {
             persist()
@@ -1362,6 +1382,14 @@ fun HyperOpenApp(
             val outcome = runCatching {
                 if (shouldRecordDownload) {
                     runCatching { MarketApiClient.getConfigDetail(ctx, summary.id, download = true) }
+                }
+                val clonedLinkedShortcuts = if (hasOverrideShortcuts) {
+                    linkedShortcuts.map(::cloneShortcutForImport)
+                } else {
+                    null
+                }
+                if (hasOverrideShortcuts && !linkedShortcutPackId.isNullOrBlank()) {
+                    runCatching { MarketApiClient.getShortcutDetail(ctx, linkedShortcutPackId, download = true) }
                 }
                 var backupProfile: ConfigProfile? = null
                 if (backupCurrentFirst) {
@@ -1376,13 +1404,14 @@ fun HyperOpenApp(
                 val preparedJson = ConfigBackup.prepareBackupJsonForImport(
                     rawConfigJson,
                     if (keepLocalOffsetY) localOffset else null,
-                    includeShortcuts,
+                    hasOverrideShortcuts,
+                    clonedLinkedShortcuts,
                 )
                 val pre = ConfigBackup.preview(preparedJson)
                 if (!pre.ok) {
                     throw IllegalStateException(pre.message)
                 }
-                val finalApplyShortcuts = includeShortcuts && pre.hasShortcuts
+                val finalApplyShortcuts = hasOverrideShortcuts && pre.hasShortcuts
                 val applyResult = ConfigBackup.apply(ctx, preparedJson, true, finalApplyShortcuts)
                 if (!applyResult.ok) {
                     throw IllegalStateException(applyResult.message)
@@ -2070,11 +2099,15 @@ fun HyperOpenApp(
                                 val summary = sb?.summary
                                 val rawJson = sb?.rawConfigJson
                                 if (summary != null && !rawJson.isNullOrBlank()) {
+                                    val withLinked = sb.previewingWithLinkedPack && sb.shortcutList.isNotEmpty()
                                     pendingSandboxImportRequest = ConfigMarketImportRequest(
                                         mode = ConfigMarketImportMode.SAVE_TO_LIBRARY,
                                         summary = summary,
                                         rawConfigJson = rawJson,
                                         fromSandbox = true,
+                                        defaultIncludeLinkedPack = withLinked,
+                                        preloadedLinkedPackSummary = if (withLinked) sb.shortcutPackSummary else null,
+                                        preloadedLinkedShortcuts = if (withLinked) sb.shortcutList else null,
                                     )
                                 }
                             },
@@ -2083,11 +2116,15 @@ fun HyperOpenApp(
                                 val summary = sb?.summary
                                 val rawJson = sb?.rawConfigJson
                                 if (summary != null && !rawJson.isNullOrBlank()) {
+                                    val withLinked = sb.previewingWithLinkedPack && sb.shortcutList.isNotEmpty()
                                     pendingSandboxImportRequest = ConfigMarketImportRequest(
                                         mode = ConfigMarketImportMode.APPLY_DIRECTLY,
                                         summary = summary,
                                         rawConfigJson = rawJson,
                                         fromSandbox = true,
+                                        defaultIncludeLinkedPack = withLinked,
+                                        preloadedLinkedPackSummary = if (withLinked) sb.shortcutPackSummary else null,
+                                        preloadedLinkedShortcuts = if (withLinked) sb.shortcutList else null,
                                     )
                                 }
                             },
@@ -2615,27 +2652,31 @@ fun HyperOpenApp(
                                                 shouldRecordDownload = recordDownload,
                                             )
                                         },
-                                        onSaveToLibrary = { summary, rawJson, profileName, keepLocalOffsetY, applyImmediately, backupCurrentFirst ->
+                                        onSaveToLibrary = { summary, rawJson, profileName, keepLocalOffsetY, applyImmediately, backupCurrentFirst, linkedShortcuts, linkedPackId ->
                                             saveMarketConfigToLibrary(
                                                 summary = summary,
                                                 rawConfigJson = rawJson,
                                                 profileName = profileName,
-                                                includeShortcuts = false,
+                                                includeShortcuts = !linkedShortcuts.isNullOrEmpty(),
                                                 keepLocalOffsetY = keepLocalOffsetY,
                                                 applyImmediately = applyImmediately,
                                                 backupCurrentFirst = backupCurrentFirst,
                                                 shouldRecordDownload = false,
                                                 exitSandboxOnApply = false,
+                                                linkedShortcuts = linkedShortcuts,
+                                                linkedShortcutPackId = linkedPackId,
                                             )
                                         },
-                                        onApplyDirectly = { summary, rawJson, keepLocalOffsetY, backupCurrentFirst ->
+                                        onApplyDirectly = { summary, rawJson, keepLocalOffsetY, backupCurrentFirst, linkedShortcuts, linkedPackId ->
                                             applyMarketConfigDirectly(
                                                 summary = summary,
                                                 rawConfigJson = rawJson,
-                                                includeShortcuts = false,
+                                                includeShortcuts = !linkedShortcuts.isNullOrEmpty(),
                                                 keepLocalOffsetY = keepLocalOffsetY,
                                                 backupCurrentFirst = backupCurrentFirst,
                                                 shouldRecordDownload = false,
+                                                linkedShortcuts = linkedShortcuts,
+                                                linkedShortcutPackId = linkedPackId,
                                             )
                                         },
                                     )
@@ -2903,29 +2944,34 @@ fun HyperOpenApp(
                 softGlassSupported = softGlassSupported,
                 needsBackupSuggestion = needsBackupSuggestion,
                 onDismiss = { pendingSandboxImportRequest = null },
-                onConfirmSaveToLibrary = { profileName, keepLocalOffsetY, applyImmediately, backupCurrentFirst ->
+                onLinkedPackUnavailable = ::refreshAllMarkets,
+                onConfirmSaveToLibrary = { profileName, keepLocalOffsetY, applyImmediately, backupCurrentFirst, linkedShortcuts, linkedPackId ->
                     pendingSandboxImportRequest = null
                     saveMarketConfigToLibrary(
                         summary = req.summary,
                         rawConfigJson = req.rawConfigJson,
                         profileName = profileName,
-                        includeShortcuts = false,
+                        includeShortcuts = !linkedShortcuts.isNullOrEmpty(),
                         keepLocalOffsetY = keepLocalOffsetY,
                         applyImmediately = applyImmediately,
                         backupCurrentFirst = backupCurrentFirst,
                         shouldRecordDownload = true,
                         exitSandboxOnApply = true,
+                        linkedShortcuts = linkedShortcuts,
+                        linkedShortcutPackId = linkedPackId,
                     )
                 },
-                onConfirmApplyDirectly = { keepLocalOffsetY, backupCurrentFirst ->
+                onConfirmApplyDirectly = { keepLocalOffsetY, backupCurrentFirst, linkedShortcuts, linkedPackId ->
                     pendingSandboxImportRequest = null
                     applyMarketConfigDirectly(
                         summary = req.summary,
                         rawConfigJson = req.rawConfigJson,
-                        includeShortcuts = false,
+                        includeShortcuts = !linkedShortcuts.isNullOrEmpty(),
                         keepLocalOffsetY = keepLocalOffsetY,
                         backupCurrentFirst = backupCurrentFirst,
                         shouldRecordDownload = true,
+                        linkedShortcuts = linkedShortcuts,
+                        linkedShortcutPackId = linkedPackId,
                         onApplied = {
                             marketSandboxPreview = null
                             subPage = 0

@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -67,6 +68,9 @@ data class ConfigMarketImportRequest(
     val summary: MarketConfigSummary,
     val rawConfigJson: String,
     val fromSandbox: Boolean = false,
+    val defaultIncludeLinkedPack: Boolean = false,
+    val preloadedLinkedPackSummary: MarketShortcutPackSummary? = null,
+    val preloadedLinkedShortcuts: List<ShortcutItem>? = null,
 )
 
 data class ConfigMarketUploadOutcome(
@@ -86,10 +90,11 @@ private fun buildDefaultLinkedPackName(configName: String): String {
 }
 
 /**
- * 市场纯外观配置应用 / 保存到配置库确认弹窗：
- * - 严格仅导入外观参数，绝不覆盖本机快捷项目列表；
+ * 市场配置应用 / 保存到配置库确认弹窗：
+ * - 若配置未关联配套快捷包，仅导入外观参数并保留本机快捷项目列表；
+ * - 若配置关联了配套快捷包，用户可自由选择是否一并包含配套快捷包（支持异步加载、重试及高危提示）；
  * - 默认勾选「保留本机指纹位置偏移 (offsetY)」；
- * - 直接应用且当前配置未归档/有未同步修改时，默认勾选「应用前备份当前配置」。
+ * - 直接应用或保存后立即应用时，若当前配置有未同步改动或勾选了替换快捷方式，提供「应用前备份当前配置」选项。
  */
 @Composable
 fun ConfigMarketImportDialog(
@@ -99,18 +104,25 @@ fun ConfigMarketImportDialog(
     softGlassSupported: Boolean,
     needsBackupSuggestion: Boolean,
     onDismiss: () -> Unit,
+    onLinkedPackUnavailable: () -> Unit = {},
     onConfirmSaveToLibrary: (
         profileName: String,
         keepLocalOffsetY: Boolean,
         applyImmediately: Boolean,
         backupCurrentFirst: Boolean,
+        includeLinkedShortcuts: List<ShortcutItem>?,
+        linkedPackId: String?,
     ) -> Unit,
     onConfirmApplyDirectly: (
         keepLocalOffsetY: Boolean,
         backupCurrentFirst: Boolean,
+        includeLinkedShortcuts: List<ShortcutItem>?,
+        linkedPackId: String?,
     ) -> Unit,
 ) {
+    val ctx = LocalContext.current
     val summary = request.summary
+    val linkedPack = summary.linkedShortcutPack
     val isSaveMode = request.mode == ConfigMarketImportMode.SAVE_TO_LIBRARY
     var profileName by remember(request) {
         mutableStateOf(summary.name.take(ConfigProfileStore.MAX_NAME_LENGTH))
@@ -119,6 +131,46 @@ fun ConfigMarketImportDialog(
     var applyImmediately by remember(request) { mutableStateOf(false) }
     var backupCurrentFirst by remember(request, needsBackupSuggestion) {
         mutableStateOf(needsBackupSuggestion)
+    }
+
+    var includeLinkedPack by remember(request) {
+        mutableStateOf(linkedPack != null && request.defaultIncludeLinkedPack)
+    }
+    var loadedLinkedShortcuts by remember(request) {
+        mutableStateOf(request.preloadedLinkedShortcuts)
+    }
+    var loadedLinkedPackSummary by remember(request) {
+        mutableStateOf(request.preloadedLinkedPackSummary)
+    }
+    var isLoadingLinkedPack by remember(request) { mutableStateOf(false) }
+    var linkedPackLoadError by remember(request) { mutableStateOf<String?>(null) }
+    var linkedPackReloadTick by remember(request) { mutableIntStateOf(0) }
+
+    LaunchedEffect(includeLinkedPack, linkedPack?.id, linkedPackReloadTick) {
+        if (!includeLinkedPack || linkedPack == null || loadedLinkedShortcuts != null) {
+            return@LaunchedEffect
+        }
+        isLoadingLinkedPack = true
+        linkedPackLoadError = null
+        val res = runCatching {
+            val packDetail = MarketApiClient.getShortcutDetail(ctx, linkedPack.id, download = false)
+            val items = withContext(Dispatchers.Default) {
+                parseShortcutPackItems(packDetail.shortcutsJson).map(::cloneShortcutForImport)
+            }
+            packDetail to items
+        }
+        isLoadingLinkedPack = false
+        res.onSuccess { (packDetail, items) ->
+            loadedLinkedPackSummary = packDetail.item
+            loadedLinkedShortcuts = items
+        }.onFailure { err ->
+            if (err is MarketApiException && err.statusCode == 404) {
+                linkedPackLoadError = "配套快捷包已被作者删除或下架，请关闭「包含配套快捷包」改为仅导入外观"
+                onLinkedPackUnavailable()
+            } else {
+                linkedPackLoadError = err.message ?: "无法加载配套快捷包"
+            }
+        }
     }
 
     val remoteOffsetY = remember(request.rawConfigJson) {
@@ -130,7 +182,7 @@ fun ConfigMarketImportDialog(
     }
     val softGlassDowngraded =
         !softGlassSupported && summary.materialStyle == HyperOpenConfig.MATERIAL_SOFT_GLASS
-    val showBackupOption = needsBackupSuggestion && (!isSaveMode || applyImmediately)
+    val showBackupOption = (!isSaveMode || applyImmediately) && (needsBackupSuggestion || includeLinkedPack)
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -143,6 +195,7 @@ fun ConfigMarketImportDialog(
         ) {
             Column(
                 modifier = Modifier
+                    .heightIn(max = 640.dp)
                     .verticalScroll(rememberScrollState())
                     .padding(24.dp),
             ) {
@@ -199,16 +252,111 @@ fun ConfigMarketImportDialog(
                 }
 
                 Spacer(Modifier.height(12.dp))
-                val pureTip = if (summary.linkedShortcutPack != null) {
-                    "该配置仅包含面板外观参数，您的本机快捷项目列表将被保留。如需配套快捷方式，可在配置详情查看「${summary.linkedShortcutPack.name}」。"
-                } else {
-                    "该市场配置仅包含面板外观参数，您的本机快捷项目列表将被保留。"
+                val packName = linkedPack?.name?.ifBlank { "配套快捷方式" }.orEmpty()
+                val isReplacingCurrentShortcuts = includeLinkedPack && (!isSaveMode || applyImmediately)
+                val pureTip = when {
+                    linkedPack == null ->
+                        "该市场配置仅包含面板外观参数，您的本机快捷项目列表将被保留。"
+                    !includeLinkedPack ->
+                        "当前仅导入面板外观参数，您的本机快捷项目列表将被保留；如需一并导入配套快捷包「$packName」，可开启下方开关。"
+                    isSaveMode && !applyImmediately ->
+                        "将连同配套快捷包「$packName」一起写入本地配置库，不会改动当前生效的快捷方式。"
+                    else ->
+                        "将同步导入配套快捷包「$packName」并替换您当前的本地快捷方式列表。"
                 }
                 MarketBannerBox(
                     text = pureTip,
-                    textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    bgColor = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    textColor = if (isReplacingCurrentShortcuts) {
+                        MARKET_COLOR_AMBER
+                    } else {
+                        MiuixTheme.colorScheme.onSurfaceVariantSummary
+                    },
+                    bgColor = if (isReplacingCurrentShortcuts) {
+                        MARKET_COLOR_AMBER_BG
+                    } else {
+                        MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    },
                 )
+
+                if (linkedPack != null) {
+                    val folderNote = if (linkedPack.folderCount > 0) "（含 ${linkedPack.folderCount} 个文件夹）" else ""
+                    val linkedSummaryText = if (isSaveMode) {
+                        "配套「$packName」· ${linkedPack.shortcutCount} 项$folderNote；开启后将一并保存到本地配置。"
+                    } else {
+                        "配套「$packName」· ${linkedPack.shortcutCount} 项$folderNote；开启后将替换当前本地快捷方式。"
+                    }
+                    BasicComponent(
+                        title = "包含配套快捷包",
+                        summary = linkedSummaryText,
+                        endActions = {
+                            Switch(
+                                checked = includeLinkedPack,
+                                onCheckedChange = { includeLinkedPack = it },
+                            )
+                        },
+                    )
+                    if (includeLinkedPack) {
+                        Spacer(Modifier.height(6.dp))
+                        when {
+                            isLoadingLinkedPack -> {
+                                MarketBannerBox(
+                                    text = "正在加载配套快捷包「$packName」...",
+                                    textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    bgColor = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                )
+                            }
+                            linkedPackLoadError != null -> {
+                                MarketBannerBox(
+                                    text = linkedPackLoadError!!,
+                                    textColor = MARKET_COLOR_RED,
+                                    bgColor = MARKET_COLOR_RED_BG,
+                                )
+                                if (!linkedPackLoadError!!.contains("删除或下架")) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End,
+                                    ) {
+                                        TextButton(
+                                            text = "重试加载",
+                                            onClick = { linkedPackReloadTick++ },
+                                        )
+                                    }
+                                }
+                            }
+                            loadedLinkedShortcuts != null -> {
+                                val loadedList = loadedLinkedShortcuts!!
+                                if (loadedList.isEmpty()) {
+                                    MarketBannerBox(
+                                        text = "配套快捷包内容为空，本次将仅导入外观参数。",
+                                        textColor = MARKET_COLOR_AMBER,
+                                        bgColor = MARKET_COLOR_AMBER_BG,
+                                    )
+                                } else {
+                                    MarketBannerBox(
+                                        text = "已加载「$packName」：共 ${loadedList.size} 个顶层快捷项",
+                                        textColor = MARKET_COLOR_GREEN,
+                                        bgColor = MARKET_COLOR_GREEN_BG,
+                                    )
+                                    val risks = loadedLinkedPackSummary?.riskSummary.orEmpty()
+                                    if (risks.isNotEmpty()) {
+                                        Spacer(Modifier.height(8.dp))
+                                        MarketRiskWarningBox(
+                                            riskItems = risks,
+                                            title = "安全提示：配套快捷包含 ${risks.size} 项高危动作",
+                                        )
+                                    } else if (loadedLinkedPackSummary?.hasRootRisk == true || linkedPack.hasRootRisk) {
+                                        Spacer(Modifier.height(8.dp))
+                                        MarketBannerBox(
+                                            text = "安全提示：该配套快捷包包含 Root / Shell 或跨用户敏感动作，请确认来源可信。",
+                                            textColor = MARKET_COLOR_RED,
+                                            bgColor = MARKET_COLOR_RED_BG,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 BasicComponent(
                     title = "保留本机指纹位置偏移 (offsetY)",
@@ -237,7 +385,11 @@ fun ConfigMarketImportDialog(
                 if (showBackupOption) {
                     BasicComponent(
                         title = "应用前备份当前配置",
-                        summary = "当前生效配置尚未归档或有未保存改动，开启后先另存为备份再切换。",
+                        summary = if (needsBackupSuggestion) {
+                            "当前生效配置尚未归档或有未保存改动，开启后先另存为备份再切换。"
+                        } else {
+                            "替换当前快捷方式或参数前，先将现用配置另存为一份本地备份。"
+                        },
                         endActions = {
                             Switch(
                                 checked = backupCurrentFirst,
@@ -254,23 +406,40 @@ fun ConfigMarketImportDialog(
                 ) {
                     TextButton(text = "取消", onClick = onDismiss)
                     Spacer(Modifier.width(10.dp))
-                    val confirmEnabled = !isSaveMode || profileName.isNotBlank()
+                    val confirmEnabled = (!isSaveMode || profileName.isNotBlank()) &&
+                        (!includeLinkedPack || (!isLoadingLinkedPack && linkedPackLoadError == null))
+                    val confirmText = when {
+                        includeLinkedPack && isLoadingLinkedPack -> "加载快捷包..."
+                        isSaveMode -> "确认保存"
+                        else -> "确认应用"
+                    }
                     TextButton(
-                        text = if (isSaveMode) "确认保存" else "确认应用",
+                        text = confirmText,
                         colors = ButtonDefaults.textButtonColorsPrimary(),
                         enabled = confirmEnabled,
                         onClick = {
+                            val effectiveShortcuts = if (includeLinkedPack && !loadedLinkedShortcuts.isNullOrEmpty()) {
+                                loadedLinkedShortcuts
+                            } else {
+                                null
+                            }
+                            val effectivePackId = if (effectiveShortcuts != null) linkedPack?.id else null
+                            val effectiveBackup = showBackupOption && backupCurrentFirst
                             if (isSaveMode) {
                                 onConfirmSaveToLibrary(
                                     profileName.trim(),
                                     keepLocalOffsetY,
                                     applyImmediately,
-                                    applyImmediately && needsBackupSuggestion && backupCurrentFirst,
+                                    effectiveBackup,
+                                    effectiveShortcuts,
+                                    effectivePackId,
                                 )
                             } else {
                                 onConfirmApplyDirectly(
                                     keepLocalOffsetY,
-                                    needsBackupSuggestion && backupCurrentFirst,
+                                    effectiveBackup,
+                                    effectiveShortcuts,
+                                    effectivePackId,
                                 )
                             }
                         },
