@@ -1049,9 +1049,9 @@ async function handleListShortcuts(url, env) {
   if (q) {
     const pattern = `%${escapeLike(q)}%`;
     where.push(
-      "(s.name LIKE ? ESCAPE '\\' OR s.description LIKE ? ESCAPE '\\' OR COALESCE(a.display_name, s.author) LIKE ? ESCAPE '\\' OR s.tags_json LIKE ? ESCAPE '\\')"
+      "(s.name LIKE ? ESCAPE '\\' OR s.description LIKE ? ESCAPE '\\' OR COALESCE(a.display_name, s.author) LIKE ? ESCAPE '\\' OR s.tags_json LIKE ? ESCAPE '\\' OR s.items_search_text LIKE ? ESCAPE '\\')"
     );
-    params.push(pattern, pattern, pattern, pattern);
+    params.push(pattern, pattern, pattern, pattern, pattern);
   }
 
   const actionType = (url.searchParams.get("actionType") || "").trim().toUpperCase();
@@ -1321,10 +1321,10 @@ async function handleCreateShortcutPack(request, env, ctx) {
         .prepare(
           `INSERT INTO shortcut_packs (
             id, name, description, author, author_id, entry_type, preview_item_json, tags_json, shortcut_count, folder_count, action_types_json,
-            custom_image_count, has_root_risk, risk_summary_json, review_reasons_json,
+            items_search_text, custom_image_count, has_root_risk, risk_summary_json, review_reasons_json,
             min_app_version_code, app_version, downloads, reports_count, status, sha256,
             size_bytes, manage_token_hash, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           id,
@@ -1338,6 +1338,7 @@ async function handleCreateShortcutPack(request, env, ctx) {
           normalized.shortcutCount,
           normalized.folderCount,
           JSON.stringify(normalized.actionTypes),
+          normalized.itemsSearchText,
           normalized.customImageCount,
           normalized.hasRootRisk ? 1 : 0,
           JSON.stringify(compactRisks),
@@ -1430,10 +1431,17 @@ async function handleAdminListItems(url, env) {
     }
     if (q) {
       const pattern = `%${escapeLike(q)}%`;
-      conds.push(
-        `(${alias}name LIKE ? ESCAPE '\\' OR ${alias}description LIKE ? ESCAPE '\\' OR COALESCE(${authorAlias}display_name, ${alias}author) LIKE ? ESCAPE '\\' OR ${alias}tags_json LIKE ? ESCAPE '\\')`
-      );
-      params.push(pattern, pattern, pattern, pattern);
+      if (branchKind === "shortcut") {
+        conds.push(
+          `(${alias}name LIKE ? ESCAPE '\\' OR ${alias}description LIKE ? ESCAPE '\\' OR COALESCE(${authorAlias}display_name, ${alias}author) LIKE ? ESCAPE '\\' OR ${alias}tags_json LIKE ? ESCAPE '\\' OR ${alias}items_search_text LIKE ? ESCAPE '\\')`
+        );
+        params.push(pattern, pattern, pattern, pattern, pattern);
+      } else {
+        conds.push(
+          `(${alias}name LIKE ? ESCAPE '\\' OR ${alias}description LIKE ? ESCAPE '\\' OR COALESCE(${authorAlias}display_name, ${alias}author) LIKE ? ESCAPE '\\' OR ${alias}tags_json LIKE ? ESCAPE '\\')`
+        );
+        params.push(pattern, pattern, pattern, pattern);
+      }
     }
     return {
       whereSql: conds.length ? conds.join(" AND ") : "1=1",

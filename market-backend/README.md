@@ -94,7 +94,7 @@
 | `POST /api/configs` | 上传配置（需 `X-Author-Secret`）。Body: `{ name, description?, author?, tags?, minAppVersionCode?, appVersion?, linkedShortcutPackId?, jsonBody }`。自动剥离 `shortcuts` / `values.shortcuts_json` 并直接 `approved`，成功返回 `201` 与一次性 `manageToken` |
 | `DELETE /api/configs/:id` | 凭 `X-Author-Secret`（匹配 `author_id`）或 `X-Manage-Token` 自删配置 |
 | `POST /api/configs/:id/report` | 举报公开配置。Body: `{ reason? }` |
-| `GET /api/shortcuts` | 获取已上架快捷方式列表（含单个快捷方式与快捷包）。查询参数：`q`, `entryType` (`all`\|`single`\|`pack`), `actionType`, `hasRoot` (`1`/`0`), `hasImages` (`1`/`0`), `sort` (`latest`\|`downloads`), `page`, `pageSize` (1..50)。返回含 `entryType`、`previewItem`（`single` 返回规范化单项对象，`pack` 为 `null`）、`authorId`、`authorIsOfficial`、`authorBadgeLabel` |
+| `GET /api/shortcuts` | 获取已上架快捷方式列表（含单个快捷方式与快捷包）。查询参数：`q`（同时匹配名称、简介、作者、标签与包内项目/文件夹子项索引 `items_search_text`）, `entryType` (`all`\|`single`\|`pack`), `actionType`, `hasRoot` (`1`/`0`), `hasImages` (`1`/`0`), `sort` (`latest`\|`downloads`), `page`, `pageSize` (1..50)。返回含 `entryType`、`previewItem`（`single` 返回规范化单项对象，`pack` 为 `null`）、`authorId`、`authorIsOfficial`、`authorBadgeLabel` |
 | `GET /api/shortcuts/:id` | 获取单个已上架快捷方式/快捷包详情与 `shortcutsJson`（含 `entryType`、`previewItem`，动态 `ETag` 已纳入 `entryType` 支持 `If-None-Match` 304 与 `?download=1`） |
 | `POST /api/shortcuts` | 上传单个快捷方式或快捷包（需 `X-Author-Secret`）。Body: `{ entryType?, name?, description?, author?, tags?, minAppVersionCode?, appVersion?, shortcutsJson }`。`entryType` 支持 `single` / `pack`（省略或为空默认 `pack`）；`single` 仅允许 1 个快捷项，省略 `name` 时自动取该快捷项 `title` 兜底，并生成 `previewItem`。成功返回 `201` 与 `manageToken` |
 | `DELETE /api/shortcuts/:id` | 凭 `X-Author-Secret`（匹配 `author_id`）或 `X-Manage-Token` 自删快捷包，并自动解绑引用它的配置 (`linked_shortcut_pack_id = NULL`) |
@@ -115,7 +115,7 @@
 - **快捷方式规范化与形态区分（`single` / `pack`）**：
   - 支持 `entryType` 为 `single`（单个快捷方式）或 `pack`（快捷包，默认）
   - `single` 模式下要求顶层快捷项数量严格为 `1`，可省略 `name` 并回退取首项 `title`（最多 60 字），同时在列表与详情返回 `previewItem` 对象；去重哈希采用 `single:` 前缀隔离，不与单条 `pack` 冲突
-  - 列表关键字搜索 `q` 仅匹配 `name` / `description` / `author` / `tags_json`，不扫描 `preview_item_json`
+  - 列表关键字搜索 `q` 匹配 `name` / `description` / `author` / `tags_json` 与冗余纯文本检索列 `items_search_text`（在上传时由服务端递归提取顶层项及 `FOLDER` 子项的 `title`、`subtitle`、`actionType`、非 `base64:` 的 `iconPackage` 及动作目标包名/组件/参数，总长上限 `8192` 字符且绝不含 `base64:` 图片），不扫描 `preview_item_json` 与 `shortcuts_json`
   - 快捷方式上传强制把所有项及子项 `customOffsetX = 0`、`customOffsetY = 0`
   - 顶层 `<= 50` 项，含文件夹子项总数 `<= 100` 项，禁止文件夹嵌套文件夹
 - **自定义图标校验**：仅允许标准 Base64 编码的 `PNG` / `JPEG` / `WEBP`（校验魔数），单张解码体积 `<= 64 KB`，单次上传总数 `<= 24` 张

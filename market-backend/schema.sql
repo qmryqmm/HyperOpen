@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS shortcut_packs (
   shortcut_count INTEGER NOT NULL DEFAULT 0,
   folder_count INTEGER NOT NULL DEFAULT 0,
   action_types_json TEXT NOT NULL DEFAULT '[]',
+  items_search_text TEXT NOT NULL DEFAULT '',
   custom_image_count INTEGER NOT NULL DEFAULT 0,
   has_root_risk INTEGER NOT NULL DEFAULT 0,
   risk_summary_json TEXT NOT NULL DEFAULT '[]',

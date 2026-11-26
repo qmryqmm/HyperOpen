@@ -779,10 +779,12 @@ export function normalizeShortcuts(rawShortcuts, options = { forceZeroOffsets: f
   }
 
   const normalizedItems = rawShortcuts.map((item) => normalizeOne(item, 0, ""));
+  const itemsSearchText = buildShortcutsSearchText(normalizedItems);
 
   return {
     items: normalizedItems,
     shortcutsJson: JSON.stringify(normalizedItems),
+    itemsSearchText,
     shortcutCount: normalizedItems.length,
     totalShortcutCount: totalCount,
     folderCount,
@@ -792,6 +794,108 @@ export function normalizeShortcuts(rawShortcuts, options = { forceZeroOffsets: f
     riskSummary,
     hasRootRisk: riskSummary.length > 0,
   };
+}
+
+const MAX_ITEMS_SEARCH_TEXT_LEN = 8192;
+
+/**
+ * 递归提取快捷方式列表及文件夹子项中的明文检索词片段，拼接为纯文本索引字符串
+ * 仅保留标题、副标题、动作类型、非 base64 图标包名与动作目标关键字段，绝不包含 base64 图片数据
+ * @param {Array} items 规范化后的或原始的快捷方式数组
+ * @returns {string} 空格分隔、去重且长度不超过 8192 字符的检索文本
+ */
+export function buildShortcutsSearchText(items) {
+  if (!Array.isArray(items) || items.length === 0) return "";
+
+  const tokens = [];
+  const seen = new Set();
+  let visitedCount = 0;
+
+  function addToken(rawValue, maxLen = 0) {
+    if (typeof rawValue !== "string") return;
+    let text = rawValue.replace(/\s+/g, " ").trim();
+    if (!text || text.startsWith("base64:")) return;
+    if (maxLen > 0 && text.length > maxLen) {
+      text = text.slice(0, maxLen).trim();
+    }
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    tokens.push(text);
+  }
+
+  function visitList(list, depth) {
+    if (!Array.isArray(list)) return;
+    for (const item of list) {
+      if (visitedCount >= MAX_TOTAL_SHORTCUTS) return;
+      if (!isPlainObject(item)) continue;
+      visitedCount += 1;
+
+      const actionType = typeof item.actionType === "string" ? item.actionType.trim() : "";
+      addToken(item.title, 128);
+      addToken(item.subtitle, 256);
+      addToken(actionType, 32);
+
+      if (typeof item.iconPackage === "string" && !item.iconPackage.trim().startsWith("base64:")) {
+        addToken(item.iconPackage, 256);
+      }
+
+      if (actionType === "FOLDER") {
+        // 兼容已规范化结构（actionPayload 为 JSON 数组字符串）与原始数组结构
+        let children = null;
+        if (Array.isArray(item.actionPayload)) {
+          children = item.actionPayload;
+        } else if (typeof item.actionPayload === "string" && item.actionPayload.trim()) {
+          try {
+            const parsed = JSON.parse(item.actionPayload);
+            if (Array.isArray(parsed)) children = parsed;
+          } catch {
+            // 忽略非法 JSON
+          }
+        }
+        if (children && depth < 1) {
+          visitList(children, depth + 1);
+        }
+      } else if (actionType === "APP") {
+        addToken(item.actionPayload, 256);
+      } else if (actionType === "ACTIVITY") {
+        if (typeof item.actionPayload === "string" && item.actionPayload.trim()) {
+          try {
+            const spec = JSON.parse(item.actionPayload);
+            if (isPlainObject(spec)) {
+              addToken(spec.package, 256);
+              addToken(spec.component, 256);
+              addToken(spec.action, 256);
+              addToken(spec.data, 200);
+            }
+          } catch {
+            // 忽略非法 JSON
+          }
+        }
+      } else if (
+        actionType === "INTENT_URI" ||
+        actionType === "BROADCAST" ||
+        actionType === "SHELL"
+      ) {
+        addToken(item.actionPayload, 200);
+      }
+    }
+  }
+
+  visitList(items, 0);
+
+  if (tokens.length === 0) return "";
+  let result = "";
+  for (const token of tokens) {
+    const next = result ? `${result} ${token}` : token;
+    if (next.length > MAX_ITEMS_SEARCH_TEXT_LEN) {
+      if (!result) {
+        result = token.slice(0, MAX_ITEMS_SEARCH_TEXT_LEN);
+      }
+      break;
+    }
+    result = next;
+  }
+  return result;
 }
 
 export function validateAuthorDisplayName(rawName) {
