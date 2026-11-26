@@ -580,7 +580,7 @@ object MarketApiClient {
         } catch (e: UnknownHostException) {
             throw MarketApiException(
                 statusCode = 0,
-                message = "无法解析市场服务器域名，请检查网络或服务器地址",
+                message = "无法解析市场服务器域名，请检查网络连接",
                 isNetworkError = true,
                 cause = e,
             )
@@ -594,14 +594,14 @@ object MarketApiClient {
         } catch (e: ConnectException) {
             throw MarketApiException(
                 statusCode = 0,
-                message = "无法连接到市场服务器，请检查网络或服务器地址",
+                message = "无法连接到市场服务器，请检查网络连接",
                 isNetworkError = true,
                 cause = e,
             )
         } catch (e: SSLException) {
             throw MarketApiException(
                 statusCode = 0,
-                message = "HTTPS 安全连接失败，请检查系统时间或服务器地址",
+                message = "HTTPS 安全连接失败，请检查系统时间或网络连接",
                 isNetworkError = true,
                 cause = e,
             )

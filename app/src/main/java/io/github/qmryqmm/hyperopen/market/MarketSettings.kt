@@ -58,10 +58,8 @@ object MarketSettings {
         }
     }
 
-    fun getBaseUrl(ctx: Context): String {
-        val stored = prefs(ctx).getString(KEY_BASE_URL, null)
-        return normalizeBaseUrl(stored) ?: DEFAULT_BASE_URL
-    }
+    @Suppress("UNUSED_PARAMETER")
+    fun getBaseUrl(ctx: Context): String = DEFAULT_BASE_URL
 
     fun setBaseUrl(ctx: Context, rawUrl: String): String {
         val normalized = normalizeBaseUrl(rawUrl)

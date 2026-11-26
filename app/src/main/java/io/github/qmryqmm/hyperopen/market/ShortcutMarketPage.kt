@@ -1,6 +1,5 @@
 package io.github.qmryqmm.hyperopen.market
 
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -354,18 +353,11 @@ fun ShortcutMarketPage(
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                         Spacer(Modifier.height(12.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            MarketFilterChip(
-                                label = "点击重试",
-                                selected = true,
-                                onClick = { loadFirstPage() },
-                            )
-                            MarketFilterChip(
-                                label = "检查服务器地址",
-                                selected = false,
-                                onClick = { showServerSettings = true },
-                            )
-                        }
+                        MarketFilterChip(
+                            label = "点击重试",
+                            selected = true,
+                            onClick = { loadFirstPage() },
+                        )
                     }
                 }
             }
@@ -501,11 +493,6 @@ fun ShortcutMarketPage(
     if (showServerSettings) {
         MarketServerSettingsDialog(
             onDismiss = { showServerSettings = false },
-            onSaved = {
-                showServerSettings = false
-                Toast.makeText(ctx, "市场服务器地址已更新", Toast.LENGTH_SHORT).show()
-                loadFirstPage()
-            },
             onAuthorUpdated = {
                 onAuthorUpdated()
             },

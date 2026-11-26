@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -48,7 +47,6 @@ import io.github.qmryqmm.hyperopen.config.HyperOpenConfig
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Surface
@@ -113,7 +111,7 @@ fun parseMarketTagsInput(raw: String): List<String> {
     return result
 }
 
-/** 顶部透明说明卡 + 服务器地址设置与上传工具按钮（Stage 2/3 共用）。 */
+/** 顶部透明说明卡 + 创作者身份与市场设置、上传工具按钮（Stage 2/3 共用）。 */
 @Composable
 fun MarketTopNoticeCard(
     onOpenServerSettings: () -> Unit,
@@ -153,7 +151,7 @@ fun MarketTopNoticeCard(
         ) {
             Icon(
                 imageVector = MiuixIcons.Settings,
-                contentDescription = "服务器地址设置",
+                contentDescription = "创作者身份与市场设置",
                 tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.size(19.dp),
             )
@@ -386,16 +384,16 @@ fun MarketRiskWarningBox(
     }
 }
 
-/** 市场服务器地址与本机创作者身份设置弹窗（支持连通性测试、查看官方徽章及全量改名同步）。 */
+/** 创作者身份与市场设置弹窗（支持查看官方徽章、全量改名同步及内置市场连通性测试）。 */
+@Suppress("UNUSED_PARAMETER")
 @Composable
 fun MarketServerSettingsDialog(
     onDismiss: () -> Unit,
-    onSaved: (String) -> Unit,
+    onSaved: (String) -> Unit = {},
     onAuthorUpdated: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var urlInput by remember { mutableStateOf(MarketSettings.getBaseUrl(ctx)) }
     var testing by remember { mutableStateOf(false) }
     var feedback by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
 
@@ -454,7 +452,7 @@ fun MarketServerSettingsDialog(
                     .padding(24.dp),
             ) {
                 Text(
-                    text = "市场服务器与创作者设置",
+                    text = "创作者身份与市场设置",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = MiuixTheme.colorScheme.onSurface,
@@ -466,92 +464,6 @@ fun MarketServerSettingsDialog(
                     lineHeight = 18.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
-                Spacer(Modifier.height(14.dp))
-                TextField(
-                    value = urlInput,
-                    onValueChange = {
-                        urlInput = it
-                        feedback = null
-                    },
-                    label = "API Base URL (http:// 或 https://)",
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(
-                        onDone = {
-                            val normalized = MarketSettings.normalizeBaseUrl(urlInput)
-                            if (normalized == null) {
-                                feedback = false to "请输入有效的 http:// 或 https:// 地址"
-                            } else {
-                                MarketSettings.setBaseUrl(ctx, normalized)
-                                onSaved(normalized)
-                            }
-                        }
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    TextButton(
-                        text = "恢复默认",
-                        enabled = !testing && !isUpdatingAuthor,
-                        onClick = {
-                            urlInput = MarketSettings.DEFAULT_BASE_URL
-                            feedback = null
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(
-                        text = if (testing) "测试中..." else "测试连接",
-                        enabled = !testing && !isUpdatingAuthor,
-                        onClick = {
-                            val normalized = MarketSettings.normalizeBaseUrl(urlInput)
-                            if (normalized == null) {
-                                feedback = false to "请输入有效的 http:// 或 https:// 地址"
-                                return@TextButton
-                            }
-                            testing = true
-                            feedback = null
-                            val previous = MarketSettings.getBaseUrl(ctx)
-                            scope.launch {
-                                val okResult = runCatching {
-                                    MarketSettings.setBaseUrl(ctx, normalized)
-                                    MarketApiClient.checkHealth(ctx)
-                                }
-                                if (okResult.isFailure) {
-                                    MarketSettings.setBaseUrl(ctx, previous)
-                                }
-                                testing = false
-                                okResult.onSuccess { ok ->
-                                    if (ok) {
-                                        feedback = true to "连接成功（已自动应用新地址）"
-                                        authorInputTouched = false
-                                        authorReloadTick++
-                                    } else {
-                                        MarketSettings.setBaseUrl(ctx, previous)
-                                        feedback = false to "服务器返回状态异常"
-                                    }
-                                }.onFailure { err ->
-                                    feedback = false to (err.message ?: "连接失败")
-                                }
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                feedback?.let { (ok, msg) ->
-                    Spacer(Modifier.height(10.dp))
-                    MarketBannerBox(
-                        text = msg,
-                        textColor = if (ok) MARKET_COLOR_GREEN else MARKET_COLOR_RED,
-                        bgColor = if (ok) MARKET_COLOR_GREEN_BG else MARKET_COLOR_RED_BG,
-                    )
-                }
-
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider()
                 Spacer(Modifier.height(16.dp))
 
                 Text(
@@ -693,30 +605,51 @@ fun MarketServerSettingsDialog(
                     )
                 }
 
+                feedback?.let { (ok, msg) ->
+                    Spacer(Modifier.height(10.dp))
+                    MarketBannerBox(
+                        text = msg,
+                        textColor = if (ok) MARKET_COLOR_GREEN else MARKET_COLOR_RED,
+                        bgColor = if (ok) MARKET_COLOR_GREEN_BG else MARKET_COLOR_RED_BG,
+                    )
+                }
+
                 Spacer(Modifier.height(20.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     TextButton(
-                        text = "取消",
-                        enabled = !testing && !isUpdatingAuthor,
-                        onClick = onDismiss,
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    TextButton(
-                        text = "保存地址",
-                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                        text = if (testing) "测试中..." else "测试连接",
                         enabled = !testing && !isUpdatingAuthor,
                         onClick = {
-                            val normalized = MarketSettings.normalizeBaseUrl(urlInput)
-                            if (normalized == null) {
-                                feedback = false to "请输入有效的 http:// 或 https:// 地址"
-                            } else {
-                                MarketSettings.setBaseUrl(ctx, normalized)
-                                onSaved(normalized)
+                            testing = true
+                            feedback = null
+                            scope.launch {
+                                val okResult = runCatching {
+                                    MarketApiClient.checkHealth(ctx)
+                                }
+                                testing = false
+                                okResult.onSuccess { ok ->
+                                    if (ok) {
+                                        feedback = true to "市场服务连接正常"
+                                        authorInputTouched = false
+                                        authorReloadTick++
+                                    } else {
+                                        feedback = false to "服务器返回状态异常"
+                                    }
+                                }.onFailure { err ->
+                                    feedback = false to (err.message ?: "连接失败")
+                                }
                             }
                         },
+                    )
+                    TextButton(
+                        text = "关闭",
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                        enabled = !testing && !isUpdatingAuthor,
+                        onClick = onDismiss,
                     )
                 }
             }

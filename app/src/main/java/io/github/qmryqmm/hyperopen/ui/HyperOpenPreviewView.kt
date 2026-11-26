@@ -191,7 +191,7 @@ class HyperOpenPreviewView(
     /** 预览松手是否真正执行选中的快捷方式（默认关闭，避免调参时误启动） */
     private var executeShortcutOnRelease: Boolean = false
     private var executeToggleButton: TextView? = null
-    /** 纯内存沙箱预览模式（配置市场预览用）：禁止长按编辑、拖拽与松手执行，仅保留真实壁纸、材质、鱼眼与文件夹交互 */
+    /** 纯内存沙箱预览模式（配置市场预览用）：禁止长按编辑与拖拽，保留真实壁纸、材质、鱼眼、文件夹交互与「松手执行」开关 */
     private var sandboxMode: Boolean = false
     private val freePlacedBubbles = mutableSetOf<CircularBubbleView>()
 
@@ -498,6 +498,11 @@ class HyperOpenPreviewView(
                 executeShortcutOnRelease = !executeShortcutOnRelease
                 persistExecuteShortcutOnRelease()
                 text = executeToggleText()
+                if (::headerTitle.isInitialized && ::headerSubtitle.isInitialized &&
+                    currentSelectedBubble == null && activeFolderBubble == null && !isEditMode
+                ) {
+                    headerSubtitle.text = defaultHeaderSubtitle()
+                }
                 triggerHaptic()
                 android.widget.Toast.makeText(
                     context,
@@ -779,13 +784,16 @@ class HyperOpenPreviewView(
     /** 当前面板是否可见（供 Compose 层读取，决定压暗层是否绘制）。 */
     fun isPanelVisible(): Boolean = panelVisible
 
-    private fun defaultHeaderSubtitle(): String =
-        if (sandboxMode) "沙箱预览模式 · 松手仅收起不触发动作" else "移至目标图标后松手直接打开"
+    private fun defaultHeaderSubtitle(): String = when {
+        sandboxMode && executeShortcutOnRelease -> "沙箱预览模式 · 移至目标图标后松手直接打开"
+        sandboxMode -> "沙箱预览模式 · 松手仅收起不触发动作"
+        else -> "移至目标图标后松手直接打开"
+    }
 
     /**
      * 切换纯内存沙箱预览模式：
-     * 开启后禁止长按进入排版编辑、禁止拖拽、禁用松手触发快捷方式执行，
-     * 并隐藏编辑态提示与「松手执行」开关，保留真实壁纸、材质、鱼眼与文件夹交互；
+     * 开启后禁止长按进入排版编辑、禁止拖拽图标与调整标题高度，并隐藏编辑态提示，
+     * 保留真实壁纸、材质、鱼眼、文件夹交互与「松手执行」开关；
      * 关闭时恢复默认预览与排版能力。
      */
     fun setSandboxMode(enabled: Boolean) {
@@ -802,7 +810,7 @@ class HyperOpenPreviewView(
             }
             isDraggingActive = false
             draggingBubble = null
-            executeToggleButton?.visibility = View.GONE
+            executeToggleButton?.visibility = View.VISIBLE
             snapToggleButton?.visibility = View.GONE
             if (::editBanner.isInitialized) {
                 editBanner.visibility = View.GONE
@@ -811,11 +819,19 @@ class HyperOpenPreviewView(
                 lp.topMargin = dpToPx(46f).toInt()
                 alwaysShowToggleButton?.layoutParams = lp
             }
+            (executeToggleButton?.layoutParams as? LayoutParams)?.let { lp ->
+                lp.topMargin = dpToPx(94f).toInt()
+                executeToggleButton?.layoutParams = lp
+            }
         } else {
             executeToggleButton?.visibility = View.VISIBLE
             (alwaysShowToggleButton?.layoutParams as? LayoutParams)?.let { lp ->
                 lp.topMargin = dpToPx(94f).toInt()
                 alwaysShowToggleButton?.layoutParams = lp
+            }
+            (executeToggleButton?.layoutParams as? LayoutParams)?.let { lp ->
+                lp.topMargin = dpToPx(142f).toInt()
+                executeToggleButton?.layoutParams = lp
             }
         }
         if (::headerTitle.isInitialized && ::headerSubtitle.isInitialized &&
@@ -1688,7 +1704,7 @@ class HyperOpenPreviewView(
         ) {
             val isUp = event.actionMasked == MotionEvent.ACTION_UP
             val resolvedShortcut = if (isUp && !isEditMode) resolveSelectedShortcut() else null
-            val selectedToRun = if (!sandboxMode && executeShortcutOnRelease) resolvedShortcut else null
+            val selectedToRun = if (executeShortcutOnRelease) resolvedShortcut else null
             val popBubble = if (resolvedShortcut != null) currentSelectedBubble else null
             fingerprintHolding = false
             removeCallbacks(expandRunnable)
@@ -1786,7 +1802,7 @@ class HyperOpenPreviewView(
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                val selected = if (!sandboxMode && event.actionMasked == MotionEvent.ACTION_UP &&
+                val selected = if (event.actionMasked == MotionEvent.ACTION_UP &&
                     executeShortcutOnRelease && !isEditMode && !isDraggingActive
                 ) {
                     resolveSelectedShortcut()
