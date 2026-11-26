@@ -136,6 +136,7 @@ fun ShortcutMarketPage(
 
     var showServerSettings by remember { mutableStateOf(false) }
     var selectedDetailItem by remember { mutableStateOf<MarketShortcutPackSummary?>(null) }
+    var pendingTestConfirmItem by remember { mutableStateOf<ShortcutItem?>(null) }
     val localAuthorId = MarketSettings.getAuthorId(ctx)
     fun isOwnedLocally(item: MarketShortcutPackSummary): Boolean {
         return (localAuthorId != null && item.authorId == localAuthorId) ||
@@ -441,6 +442,9 @@ fun ShortcutMarketPage(
                         onQuickAdd = { shortcut ->
                             onAppendItems(item, listOf(shortcut), true)
                         },
+                        onTestLaunch = { shortcut ->
+                            triggerMarketShortcutTest(ctx, shortcut) { pendingTestConfirmItem = it }
+                        },
                     )
                 } else {
                     ShortcutMarketPackCard(
@@ -503,6 +507,7 @@ fun ShortcutMarketPage(
         detailTarget = selectedDetailItem,
         currentShortcutCount = currentShortcutCount,
         needsBackupSuggestion = needsBackupSuggestion,
+        highlightQuery = marketState.appliedQuery,
         onDismissDetail = { selectedDetailItem = null },
         onEnterSandboxPreview = onEnterSandboxPreview,
         onAppendItems = onAppendItems,
@@ -515,6 +520,17 @@ fun ShortcutMarketPage(
             onShortcutPackDeleted()
         },
     )
+
+    pendingTestConfirmItem?.let { target ->
+        MarketShortcutTestConfirmDialog(
+            item = target,
+            onDismiss = { pendingTestConfirmItem = null },
+            onConfirm = {
+                pendingTestConfirmItem = null
+                target.executeAsync(ctx)
+            },
+        )
+    }
 }
 
 @Composable
@@ -549,7 +565,7 @@ private fun ShortcutMarketFilterCard(
                 TextField(
                     value = searchQuery,
                     onValueChange = onSearchQueryChange,
-                    label = "搜索名称、简介、作者或标签",
+                    label = "搜索名称、包内项目、包名、作者或标签",
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { onSubmitSearch() }),
@@ -690,6 +706,7 @@ private fun ShortcutMarketSingleCard(
     isOwnedLocally: Boolean,
     onClick: () -> Unit,
     onQuickAdd: (ShortcutItem) -> Unit,
+    onTestLaunch: (ShortcutItem) -> Unit,
 ) {
     val ctx = LocalContext.current
     val primary = MiuixTheme.colorScheme.primary
@@ -798,15 +815,26 @@ private fun ShortcutMarketSingleCard(
                     }
                 }
                 Spacer(Modifier.width(8.dp))
-                AddShortcutActionPill(
-                    onClick = {
-                        if (previewShortcut != null) {
-                            onQuickAdd(previewShortcut)
-                        } else {
-                            onClick()
-                        }
-                    },
-                )
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    AddShortcutActionPill(
+                        onClick = {
+                            if (previewShortcut != null) {
+                                onQuickAdd(previewShortcut)
+                            } else {
+                                onClick()
+                            }
+                        },
+                    )
+                    if (previewShortcut != null && previewShortcut.actionType != ShortcutItem.ACTION_FOLDER) {
+                        TestShortcutActionPill(
+                            text = "启动测试",
+                            onClick = { onTestLaunch(previewShortcut) },
+                        )
+                    }
+                }
             }
 
             Spacer(Modifier.height(8.dp))

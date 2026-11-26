@@ -396,6 +396,7 @@ fun ShortcutMarketDetailDialog(
     summary: MarketShortcutPackSummary,
     isOwnedLocally: Boolean,
     preloadedDetail: MarketShortcutPackDetail? = null,
+    highlightQuery: String = "",
     onDismiss: () -> Unit,
     onBuildSandboxPreview: (detail: MarketShortcutPackDetail, items: List<ShortcutItem>) -> Unit,
     onAddSingleItem: (summary: MarketShortcutPackSummary, item: ShortcutItem, shouldRecordDownload: Boolean) -> Unit,
@@ -412,6 +413,7 @@ fun ShortcutMarketDetailDialog(
     var parsedItems by remember(summary.id) { mutableStateOf<List<ShortcutItem>>(emptyList()) }
     var installedMap by remember(summary.id) { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
     var hasRecordedDownload by remember(summary.id) { mutableStateOf(false) }
+    var pendingTestItem by remember(summary.id) { mutableStateOf<ShortcutItem?>(null) }
 
     val selectedIndices = remember(summary.id) { mutableStateMapOf<Int, Boolean>() }
     val expandedFolders = remember(summary.id) { mutableStateMapOf<Int, Boolean>() }
@@ -438,6 +440,16 @@ fun ShortcutMarketDetailDialog(
             installedMap = pkgStatus
             selectedIndices.clear()
             expandedFolders.clear()
+            val trimmedQuery = highlightQuery.trim()
+            if (trimmedQuery.isNotEmpty()) {
+                parsed.forEachIndexed { idx, parsedItem ->
+                    if (parsedItem.actionType == ShortcutItem.ACTION_FOLDER &&
+                        parsedItem.parseFolderChildren().any { child -> shortcutMatchesQuery(child, trimmedQuery) }
+                    ) {
+                        expandedFolders[idx] = true
+                    }
+                }
+            }
         }.onFailure { err ->
             loadError = err.message ?: "加载快捷包详情失败"
         }
@@ -749,6 +761,9 @@ fun ShortcutMarketDetailDialog(
                                         onAddClick = {
                                             onAddSingleItem(activeMeta, item, consumeDownloadFlag())
                                         },
+                                        onTestClick = {
+                                            triggerMarketShortcutTest(ctx, item) { pendingTestItem = it }
+                                        },
                                     )
 
                                     if (isExpanded && children.isNotEmpty()) {
@@ -792,6 +807,9 @@ fun ShortcutMarketDetailDialog(
                                                         onAddClick = {
                                                             onAddSingleItem(activeMeta, child, consumeDownloadFlag())
                                                         },
+                                                        onTestClick = {
+                                                            triggerMarketShortcutTest(ctx, child) { pendingTestItem = it }
+                                                        },
                                                     )
                                                 }
                                             }
@@ -822,6 +840,15 @@ fun ShortcutMarketDetailDialog(
                         },
                     )
                     if (isSingleEntry) {
+                        if (singleItem != null && singleItem.actionType != ShortcutItem.ACTION_FOLDER) {
+                            TextButton(
+                                text = "启动测试",
+                                enabled = ready,
+                                onClick = {
+                                    triggerMarketShortcutTest(ctx, singleItem) { pendingTestItem = it }
+                                },
+                            )
+                        }
                         TextButton(
                             text = "添加到本地",
                             colors = ButtonDefaults.textButtonColorsPrimary(),
@@ -880,6 +907,17 @@ fun ShortcutMarketDetailDialog(
             }
         }
     }
+
+    pendingTestItem?.let { target ->
+        MarketShortcutTestConfirmDialog(
+            item = target,
+            onDismiss = { pendingTestItem = null },
+            onConfirm = {
+                pendingTestItem = null
+                target.executeAsync(ctx)
+            },
+        )
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -896,6 +934,7 @@ private fun ShortcutPackTopItemRow(
     onToggleCheck: () -> Unit,
     onToggleExpand: () -> Unit,
     onAddClick: () -> Unit,
+    onTestClick: () -> Unit,
 ) {
     val primary = MiuixTheme.colorScheme.primary
     val bgColor = if (showCheckbox && checked) {
@@ -978,7 +1017,11 @@ private fun ShortcutPackTopItemRow(
                 }
             }
             if (showCheckbox) {
-                Spacer(Modifier.width(4.dp))
+                if (!isFolder) {
+                    Spacer(Modifier.width(4.dp))
+                    TestShortcutActionPill(text = "测试", onClick = onTestClick)
+                }
+                Spacer(Modifier.width(6.dp))
                 AddShortcutActionPill(onClick = onAddClick)
             }
         }
@@ -1035,6 +1078,7 @@ private fun ShortcutPackChildItemRow(
     targetPkg: String?,
     isInstalled: Boolean?,
     onAddClick: () -> Unit,
+    onTestClick: () -> Unit,
 ) {
     val primary = MiuixTheme.colorScheme.primary
     Column(
@@ -1072,6 +1116,8 @@ private fun ShortcutPackChildItemRow(
                     )
                 }
             }
+            Spacer(Modifier.width(6.dp))
+            TestShortcutActionPill(text = "测试", onClick = onTestClick)
             Spacer(Modifier.width(6.dp))
             AddShortcutActionPill(onClick = onAddClick)
         }
@@ -1126,6 +1172,153 @@ internal fun AddShortcutActionPill(onClick: () -> Unit) {
             color = primary,
             maxLines = 1,
         )
+    }
+}
+
+/** 检测快捷方式是否包含高危动作（Shell / Root / 广播 / 跨用户 / 高危 Intent）。 */
+internal fun isHighRiskShortcutForTest(item: ShortcutItem): Boolean {
+    return MarketSanitizer.inspectShortcuts(listOf(item), stripCustomImages = false).hasRootRisk
+}
+
+/** 统一触发市场快捷方式启动测试：文件夹提示不支持，高危动作弹出二次确认，普通动作直接执行。 */
+internal fun triggerMarketShortcutTest(
+    ctx: Context,
+    item: ShortcutItem,
+    onRequireConfirm: (ShortcutItem) -> Unit,
+) {
+    if (item.actionType == ShortcutItem.ACTION_FOLDER) {
+        Toast.makeText(
+            ctx,
+            "聚合文件夹在锁屏悬停展开子项，不支持直接启动测试",
+            Toast.LENGTH_SHORT,
+        ).show()
+        return
+    }
+    if (isHighRiskShortcutForTest(item)) {
+        onRequireConfirm(item)
+    } else {
+        item.executeAsync(ctx)
+    }
+}
+
+private fun shortcutMatchesQuery(item: ShortcutItem, query: String): Boolean {
+    if (query.isBlank()) return false
+    return item.title.orEmpty().contains(query, ignoreCase = true) ||
+        item.subtitle.orEmpty().contains(query, ignoreCase = true) ||
+        item.actionPayload.orEmpty().contains(query, ignoreCase = true) ||
+        item.iconPackage.orEmpty().contains(query, ignoreCase = true)
+}
+
+@Composable
+internal fun TestShortcutActionPill(
+    text: String = "启动测试",
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f))
+            .border(
+                width = 0.8.dp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.22f),
+                shape = RoundedCornerShape(8.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = MiuixTheme.colorScheme.onSurface,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+internal fun MarketShortcutTestConfirmDialog(
+    item: ShortcutItem,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.90f)
+                .padding(vertical = 16.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+            ) {
+                Text(
+                    text = "高危快捷方式启动确认",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MiuixTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = item.title.orEmpty().ifBlank { "未命名快捷方式" },
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MiuixTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "动作类型：${shortcutActionTypeFullLabel(item.actionType)}",
+                    fontSize = 12.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Spacer(Modifier.height(10.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                        .padding(12.dp),
+                ) {
+                    Text(
+                        text = "目标参数明文",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = formatShortcutTargetDetails(item),
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                MarketBannerBox(
+                    text = "风险提示：该快捷方式包含 Shell、Root、自定义广播、跨用户或高危 Intent 动作。请仔细核对上方目标参数，确认安全可信后再执行启动测试。",
+                    textColor = MARKET_COLOR_RED,
+                    bgColor = MARKET_COLOR_RED_BG,
+                )
+                Spacer(Modifier.height(20.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(text = "取消", onClick = onDismiss)
+                    Spacer(Modifier.width(10.dp))
+                    TextButton(
+                        text = "确认启动测试",
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                        onClick = onConfirm,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1262,6 +1455,7 @@ fun ShortcutPackDetailHost(
     preloadedDetail: MarketShortcutPackDetail? = null,
     currentShortcutCount: Int,
     needsBackupSuggestion: Boolean,
+    highlightQuery: String = "",
     onDismissDetail: () -> Unit,
     onFlowExit: () -> Unit = onDismissDetail,
     onEnterSandboxPreview: (detail: MarketShortcutPackDetail, items: List<ShortcutItem>) -> Unit,
@@ -1302,6 +1496,7 @@ fun ShortcutPackDetailHost(
             summary = item,
             isOwnedLocally = isOwned(item),
             preloadedDetail = preloadedDetail,
+            highlightQuery = highlightQuery,
             onDismiss = onDismissDetail,
             onBuildSandboxPreview = { detail, parsedItems ->
                 onFlowExit()
