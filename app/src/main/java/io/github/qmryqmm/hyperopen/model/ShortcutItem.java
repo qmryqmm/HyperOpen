@@ -20,13 +20,16 @@ import android.widget.Toast;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+import io.github.qmryqmm.hyperopen.log.ShortcutLaunchLogStore;
 import io.github.qmryqmm.hyperopen.util.IpcExecutor;
 
 public class ShortcutItem {
@@ -397,48 +400,90 @@ public class ShortcutItem {
      * 也不会阻塞 SystemUI 主线程与手势收尾。
      */
     public void executeAsync(final Context context) {
+        String defaultSource = isOwnAppProcess(context)
+                ? ShortcutLaunchLogStore.SOURCE_UNKNOWN
+                : ShortcutLaunchLogStore.SOURCE_LOCKSCREEN;
+        executeAsync(context, defaultSource);
+    }
+
+    /**
+     * 在后台 IPC 线程池中异步执行该快捷方式动作，并记录触发来源。
+     */
+    public void executeAsync(final Context context, final String source) {
         if (context == null) return;
         final Context appCtx = context.getApplicationContext() != null ? context.getApplicationContext() : context;
+        final String resolvedSource = (source == null || source.isEmpty())
+                ? (isOwnAppProcess(appCtx) ? ShortcutLaunchLogStore.SOURCE_UNKNOWN : ShortcutLaunchLogStore.SOURCE_LOCKSCREEN)
+                : source;
         IpcExecutor.runShortcutAsync(new Runnable() {
             @Override
             public void run() {
-                execute(appCtx);
+                execute(appCtx, resolvedSource);
             }
         });
     }
 
     /**
-     * 在 SystemUI 上下文中分发执行该快捷方式动作
+     * 在 SystemUI 或 App 上下文中分发执行该快捷方式动作
      */
     public void execute(Context context) {
+        String defaultSource = isOwnAppProcess(context)
+                ? ShortcutLaunchLogStore.SOURCE_UNKNOWN
+                : ShortcutLaunchLogStore.SOURCE_LOCKSCREEN;
+        execute(context, defaultSource);
+    }
+
+    /**
+     * 分发执行该快捷方式动作并记录唯一一条启动日志
+     */
+    public void execute(Context context, String source) {
         if (context == null) return;
+        final long startMs = System.currentTimeMillis();
+        final String resolvedSource = (source == null || source.isEmpty())
+                ? (isOwnAppProcess(context) ? ShortcutLaunchLogStore.SOURCE_UNKNOWN : ShortcutLaunchLogStore.SOURCE_LOCKSCREEN)
+                : source;
+        final ShortcutLaunchLogStore.Entry entry = createLogTemplate(resolvedSource, actionPayload, false);
+        boolean delegatedOrLogged = false;
         try {
             switch (actionType) {
                 case ACTION_APP: {
                     String pkg = actionPayload != null ? actionPayload.trim() : "";
+                    entry.params = "pkg=" + pkg + (userId > 0 ? ", user=" + userId : "");
                     if (pkg.isEmpty()) {
                         showToast(context, "未指定目标应用包名");
+                        recordExecutionLog(context, entry, startMs, false, "未指定目标应用包名", "");
+                        delegatedOrLogged = true;
                         break;
                     }
                     Intent intent = context.getPackageManager().getLaunchIntentForPackage(pkg);
                     if (intent != null) {
                         if (userId > 0) {
                             // 编辑界面「启动用户」指定了跨用户（如 999 应用双开/分身）
-                            launchAsUser(context, intent, userId);
+                            launchAsUser(context, intent, userId, entry, startMs);
+                            delegatedOrLogged = true;
                             break;
                         }
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
                         context.startActivity(intent);
+                        recordExecutionLog(context, entry, startMs, true, "", "");
+                        delegatedOrLogged = true;
                     } else if (userId > 0) {
-                        launchDualAppFallback(context, pkg, userId);
+                        launchDualAppFallback(context, pkg, userId, entry, startMs);
+                        delegatedOrLogged = true;
                     } else {
-                        showToast(context, "未找到目标应用: " + actionPayload);
+                        String errMsg = "未找到目标应用: " + actionPayload;
+                        showToast(context, errMsg);
+                        recordExecutionLog(context, entry, startMs, false, errMsg, "");
+                        delegatedOrLogged = true;
                     }
                     break;
                 }
                 case ACTION_INTENT_URI: {
+                    entry.params = actionPayload != null ? actionPayload : "";
                     if (actionPayload == null || actionPayload.trim().isEmpty()) {
                         showToast(context, "Intent URI 为空");
+                        recordExecutionLog(context, entry, startMs, false, "Intent URI 为空", "");
+                        delegatedOrLogged = true;
                         break;
                     }
                     // 最终目标用户提到 try 外：失败兜底时要据此禁止回落主空间应用
@@ -449,36 +494,60 @@ public class ShortcutItem {
                         // 编辑界面「启动用户」字段（userId>0）优先，其次 URI 内嵌标记
                         int uriUser = extractTargetUser(intent);
                         if (targetUser <= 0) targetUser = uriUser;
+                        entry.userId = targetUser > 0 ? targetUser : userId;
                         if (targetUser > 0) {
                             // 指定了目标用户（如 999 应用双开/分身），走跨用户启动
-                            launchAsUser(context, intent, targetUser);
+                            launchAsUser(context, intent, targetUser, entry, startMs);
+                            delegatedOrLogged = true;
                             break;
                         }
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                         context.startActivity(intent);
+                        recordExecutionLog(context, entry, startMs, true, "", "");
+                        delegatedOrLogged = true;
                     } catch (SecurityException se) {
                         Log.w(TAG, "直接拉起 Intent 被安全权限拦截，尝试通过 Root/Shell 兜底执行: " + actionPayload, se);
                         // 当从 MainActivity 运行且遇到非导出组件权限问题时，通过 su 执行 am start
-                        runRootAmStart(context, actionPayload);
+                        entry.useRoot = true;
+                        runRootAmStart(context, actionPayload, entry);
+                        delegatedOrLogged = true;
                     } catch (Throwable t) {
                         Log.e(TAG, "启动 Intent 异常: " + actionPayload, t);
                         // 指定了目标用户却失败时绝不回落主空间应用（否则表现为"开的是主微信"），只提示失败
                         if (targetUser > 0) {
-                            showToast(context, "跨用户启动失败(用户 " + targetUser + "): " + t.getMessage());
+                            String errMsg = "跨用户启动失败(用户 " + targetUser + "): " + describe(t);
+                            showToast(context, errMsg);
+                            recordExecutionLog(context, entry, startMs, false, errMsg, "");
+                            delegatedOrLogged = true;
                         } else if (actionPayload.contains("com.tencent.mm")) {
                             Intent launch = context.getPackageManager().getLaunchIntentForPackage("com.tencent.mm");
                             if (launch != null) {
                                 launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                                 context.startActivity(launch);
+                                recordExecutionLog(context, entry, startMs, true, "", "回落启动微信主应用");
+                            } else {
+                                String errMsg = "启动失败: " + describe(t);
+                                showToast(context, errMsg);
+                                recordExecutionLog(context, entry, startMs, false, errMsg, "");
                             }
+                            delegatedOrLogged = true;
                         } else if (actionPayload.contains("com.eg.android.AlipayGphone") || actionPayload.contains("alipays://")) {
                             Intent launch = context.getPackageManager().getLaunchIntentForPackage("com.eg.android.AlipayGphone");
                             if (launch != null) {
                                 launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                                 context.startActivity(launch);
+                                recordExecutionLog(context, entry, startMs, true, "", "回落启动支付宝主应用");
+                            } else {
+                                String errMsg = "启动失败: " + describe(t);
+                                showToast(context, errMsg);
+                                recordExecutionLog(context, entry, startMs, false, errMsg, "");
                             }
+                            delegatedOrLogged = true;
                         } else {
-                            showToast(context, "启动失败: " + t.getMessage());
+                            String errMsg = "启动失败: " + describe(t);
+                            showToast(context, errMsg);
+                            recordExecutionLog(context, entry, startMs, false, errMsg, "");
+                            delegatedOrLogged = true;
                         }
                     }
                     break;
@@ -486,6 +555,8 @@ public class ShortcutItem {
                 case ACTION_ACTIVITY: {
                     // 结构化 Intent：组件 / Data URI / Extra / Action / NEW_TASK / Root 见 ActivityLaunchSpec JSON
                     ActivityLaunchSpec spec = ActivityLaunchSpec.fromJson(actionPayload);
+                    entry.useRoot = spec.useRoot;
+                    entry.params = describeActivitySpec(spec, actionPayload);
                     if (spec.useRoot) {
                         // Root 打开：只识别 目标组件 / 目标包名（am start -n，可与「启动用户」组合），其余参数忽略
                         ComponentName cn = spec.resolveComponent();
@@ -497,65 +568,153 @@ public class ShortcutItem {
                             }
                         }
                         if (cn == null) {
-                            showToast(context, "Root 打开失败：请填写目标组件（仅类名）与目标包名");
+                            String errMsg = "Root 打开失败：请填写目标组件（仅类名）与目标包名";
+                            showToast(context, errMsg);
+                            recordExecutionLog(context, entry, startMs, false, errMsg, "");
+                            delegatedOrLogged = true;
                             break;
                         }
                         String cmd = "am start " + (userId > 0 ? "--user " + userId + " " : "")
                                 + "-n " + quoteForSh(cn.flattenToString());
-                        runRootCommand(context, cmd);
+                        entry.params = cmd;
+                        runRootCommand(context, cmd, entry, true);
+                        delegatedOrLogged = true;
                     } else {
                         Intent intent = spec.buildIntent();
                         if (!(context instanceof Activity)) {
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                         }
                         if (userId > 0) {
-                            launchAsUser(context, intent, userId);
+                            launchAsUser(context, intent, userId, entry, startMs);
+                            delegatedOrLogged = true;
                         } else {
                             context.startActivity(intent);
+                            recordExecutionLog(context, entry, startMs, true, "", "");
+                            delegatedOrLogged = true;
                         }
                     }
                     break;
                 }
                 case ACTION_BROADCAST: {
+                    entry.params = actionPayload != null ? actionPayload : "";
                     Intent intent = new Intent(actionPayload);
                     context.sendBroadcast(intent);
+                    recordExecutionLog(context, entry, startMs, true, "", "");
+                    delegatedOrLogged = true;
                     break;
                 }
                 case ACTION_FLASHLIGHT: {
-                    toggleFlashlight(context);
+                    entry.params = "手电筒开关";
+                    toggleFlashlight(context, entry, startMs);
+                    delegatedOrLogged = true;
                     break;
                 }
                 case ACTION_XIAOAI: {
-                    wakeUpXiaoAi(context);
+                    entry.params = "唤醒小爱同学";
+                    wakeUpXiaoAi(context, entry, startMs);
+                    delegatedOrLogged = true;
                     break;
                 }
                 case ACTION_MUTE: {
-                    toggleSilentMode(context);
+                    entry.params = "静音/响铃切换";
+                    toggleSilentMode(context, entry, startMs);
+                    delegatedOrLogged = true;
                     break;
                 }
                 case ACTION_DND: {
-                    toggleDndMode(context);
+                    entry.params = "勿扰模式切换";
+                    toggleDndMode(context, entry, startMs);
+                    delegatedOrLogged = true;
                     break;
                 }
                 case ACTION_CAMERA: {
-                    openCamera(context);
+                    entry.params = "系统相机";
+                    openCamera(context, entry, startMs);
+                    delegatedOrLogged = true;
                     break;
                 }
                 case ACTION_SHELL: {
-                    runShellCommand(context, actionPayload, shellUseRoot);
+                    entry.useRoot = shellUseRoot;
+                    entry.params = actionPayload != null ? actionPayload : "";
+                    if (actionPayload == null || actionPayload.trim().isEmpty()) {
+                        showToast(context, "Shell 命令为空");
+                        recordExecutionLog(context, entry, startMs, false, "Shell 命令为空", "");
+                        delegatedOrLogged = true;
+                        break;
+                    }
+                    runShellCommand(context, actionPayload, shellUseRoot, entry, false);
+                    delegatedOrLogged = true;
                     break;
                 }
                 default:
                     Log.w(TAG, "未知动作类型: " + actionType);
+                    recordExecutionLog(context, entry, startMs, false, "未知动作类型: " + actionType, "");
+                    delegatedOrLogged = true;
                     break;
             }
         } catch (Throwable t) {
             Log.e(TAG, "执行快捷动作失败: " + title, t);
-            showToast(context, "启动失败: " + t.getMessage());
+            String errMsg = "启动失败: " + describe(t);
+            showToast(context, errMsg);
+            if (!delegatedOrLogged) {
+                recordExecutionLog(context, entry, startMs, false, errMsg, "");
+            }
         }
     }
 
-    private static void wakeUpXiaoAi(Context context) {
+    private ShortcutLaunchLogStore.Entry createLogTemplate(String source, String params, boolean useRoot) {
+        ShortcutLaunchLogStore.Entry e = new ShortcutLaunchLogStore.Entry();
+        e.id = UUID.randomUUID().toString();
+        e.timestamp = System.currentTimeMillis();
+        e.source = source != null && !source.isEmpty() ? source : ShortcutLaunchLogStore.SOURCE_UNKNOWN;
+        e.shortcutTitle = title != null ? title : "";
+        e.actionType = actionType != null ? actionType : "";
+        e.useRoot = useRoot;
+        e.userId = userId;
+        e.params = params != null ? params : "";
+        return e;
+    }
+
+    private static void recordExecutionLog(Context context, ShortcutLaunchLogStore.Entry entry,
+            long startMs, boolean success, String errorMessage, String outputSnippet) {
+        if (context == null || entry == null) return;
+        try {
+            entry.durationMs = Math.max(0L, System.currentTimeMillis() - startMs);
+            entry.success = success;
+            entry.errorMessage = errorMessage != null ? errorMessage : "";
+            entry.outputSnippet = outputSnippet != null ? outputSnippet : "";
+            ShortcutLaunchLogStore.recordFromAnyProcess(context, entry);
+        } catch (Throwable t) {
+            Log.w(TAG, "记录执行日志异常", t);
+        }
+    }
+
+    private static String describeActivitySpec(ActivityLaunchSpec spec, String fallbackPayload) {
+        if (spec == null) {
+            return fallbackPayload != null ? fallbackPayload : "";
+        }
+        StringBuilder sb = new StringBuilder();
+        ComponentName cn = spec.resolveComponent();
+        if (cn != null) {
+            sb.append(cn.flattenToShortString());
+        } else if (spec.packageName != null && !spec.packageName.trim().isEmpty()) {
+            sb.append(spec.packageName.trim());
+        }
+        if (spec.action != null && !spec.action.trim().isEmpty()) {
+            if (sb.length() > 0) sb.append(" | ");
+            sb.append("action=").append(spec.action.trim());
+        }
+        if (spec.data != null && !spec.data.trim().isEmpty()) {
+            if (sb.length() > 0) sb.append(" | ");
+            sb.append("data=").append(spec.data.trim());
+        }
+        if (sb.length() == 0 && fallbackPayload != null) {
+            return fallbackPayload;
+        }
+        return sb.toString();
+    }
+
+    private static void wakeUpXiaoAi(Context context, ShortcutLaunchLogStore.Entry entry, long startMs) {
         try {
             Intent wakeBroadcast = new Intent("com.miui.voiceassist.WAKEUP");
             wakeBroadcast.setPackage("com.miui.voiceassist");
@@ -568,6 +727,7 @@ public class ShortcutItem {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             if (intent.resolveActivity(context.getPackageManager()) != null) {
                 context.startActivity(intent);
+                recordExecutionLog(context, entry, startMs, true, "", "VOICE_COMMAND");
                 return;
             }
         } catch (Throwable ignored) {}
@@ -576,16 +736,22 @@ public class ShortcutItem {
             Intent assistIntent = new Intent(Intent.ACTION_ASSIST);
             assistIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             context.startActivity(assistIntent);
+            recordExecutionLog(context, entry, startMs, true, "", "ACTION_ASSIST");
         } catch (Throwable t) {
             Log.e(TAG, "唤醒小爱失败", t);
-            showToast(context, "唤醒小爱失败: " + t.getMessage());
+            String errMsg = "唤醒小爱失败: " + describe(t);
+            showToast(context, errMsg);
+            recordExecutionLog(context, entry, startMs, false, errMsg, "");
         }
     }
 
-    private static void toggleSilentMode(Context context) {
+    private static void toggleSilentMode(Context context, ShortcutLaunchLogStore.Entry entry, long startMs) {
         android.media.AudioManager am =
                 (android.media.AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
-        if (am == null) return;
+        if (am == null) {
+            recordExecutionLog(context, entry, startMs, false, "AudioManager 不可用", "");
+            return;
+        }
         final boolean ownApp = isOwnAppProcess(context);
         try {
             int currentMode = am.getRingerMode();
@@ -596,55 +762,75 @@ public class ShortcutItem {
                     : android.media.AudioManager.RINGER_MODE_SILENT;
             try {
                 am.setRingerMode(target);
-                showToast(context, toNormal ? "已开启响铃模式" : "已开启静音模式");
+                String okMsg = toNormal ? "已开启响铃模式" : "已开启静音模式";
+                showToast(context, okMsg);
+                recordExecutionLog(context, entry, startMs, true, "", okMsg);
             } catch (Throwable direct) {
                 // 直调被权限/厂商限制（App 进程缺权限、SystemUI 个别 ROM 拒绝等）
                 // AOSP AudioManagerShellCommand：cmd audio set-ringer-mode NORMAL|VIBRATE|SILENT（大小写敏感）
                 Log.w(TAG, "setRingerMode 直调失败: " + describe(direct));
+                if (entry != null) entry.useRoot = true;
+                String cmd = "cmd audio set-ringer-mode " + (toNormal ? "NORMAL" : "SILENT");
                 if (ownApp) {
                     // App 进程：同步 Root 执行并立即回读——真成功/真失败当下见分晓，不再等 1.8s
-                    runRootCommandSync(
-                            "cmd audio set-ringer-mode " + (toNormal ? "NORMAL" : "SILENT"), 8000);
+                    ShellExecResult res = runRootCommandSyncWithResult(cmd, 8000);
                     if (am.getRingerMode() == target) {
-                        showToast(context, toNormal ? "已开启响铃模式" : "已开启静音模式");
+                        String okMsg = toNormal ? "已开启响铃模式" : "已开启静音模式";
+                        showToast(context, okMsg);
+                        recordExecutionLog(context, entry, startMs, true, "", okMsg + " (Root)");
                     } else {
+                        String errMsg = "切换静音失败: " + describe(direct)
+                                + (res.errorDetail.isEmpty() ? "；Root 兜底未生效" : "；" + res.errorDetail);
                         showToast(context, "切换静音失败: " + describe(direct)
                                 + "；Root 兜底未生效，请检查本应用 Root 权限");
+                        recordExecutionLog(context, entry, startMs, false, errMsg, buildOutputSnippet(res));
                     }
                 } else {
-                    // SystemUI 进程：su 弹不了授权 → 桥接到模块 App 进程执行，1.8s 后延迟复读诚实提示
-                    runRootCommand(context,
-                            "cmd audio set-ringer-mode " + (toNormal ? "NORMAL" : "SILENT"));
-                    verifyRingerLater(context, am, target, toNormal, direct, ownApp);
+                    // SystemUI 进程：su 弹不了授权 → 桥接到模块 App 进程执行，1.8s 后延迟复读诚实提示并记日志
+                    runRootCommand(context, cmd, null, false);
+                    verifyRingerLater(context, am, target, toNormal, direct, ownApp, entry, startMs);
                 }
             }
         } catch (Throwable t) {
             Log.e(TAG, "切换静音失败", t);
-            showToast(context, "切换静音失败: " + describe(t));
+            String errMsg = "切换静音失败: " + describe(t);
+            showToast(context, errMsg);
+            recordExecutionLog(context, entry, startMs, false, errMsg, "");
         }
     }
 
-    /** 静音切换 Root 兜底后的延迟复读校验（1.8s 后回查铃声模式，成功/失败如实提示） */
+    /** 静音切换 Root 兜底后的延迟复读校验（1.8s 后回查铃声模式，成功/失败如实提示并记录终态日志） */
     private static void verifyRingerLater(Context context, android.media.AudioManager am,
-            int target, boolean toNormal, Throwable direct, boolean ownApp) {
+            int target, boolean toNormal, Throwable direct, boolean ownApp,
+            ShortcutLaunchLogStore.Entry entry, long startMs) {
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             try {
                 if (am.getRingerMode() == target) {
-                    showToast(context, toNormal ? "已开启响铃模式" : "已开启静音模式");
+                    String okMsg = toNormal ? "已开启响铃模式" : "已开启静音模式";
+                    showToast(context, okMsg);
+                    recordExecutionLog(context, entry, startMs, true, "", okMsg + " (Root)");
                 } else {
+                    String errMsg = "切换静音失败: " + describe(direct)
+                            + (ownApp ? "；Root 兜底未生效，请检查本应用 Root 权限" : "；Root 兜底未生效");
                     showToast(context, "切换静音失败: " + describe(direct)
                             + (ownApp ? "；Root 兜底未生效，请检查本应用 Root 权限" : ""));
+                    recordExecutionLog(context, entry, startMs, false, errMsg, "");
                 }
             } catch (Throwable t) {
-                showToast(context, "切换静音失败: " + describe(t));
+                String errMsg = "切换静音失败: " + describe(t);
+                showToast(context, errMsg);
+                recordExecutionLog(context, entry, startMs, false, errMsg, "");
             }
         }, 1800);
     }
 
-    private static void toggleDndMode(Context context) {
+    private static void toggleDndMode(Context context, ShortcutLaunchLogStore.Entry entry, long startMs) {
         android.app.NotificationManager nm =
                 (android.app.NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (nm == null) return;
+        if (nm == null) {
+            recordExecutionLog(context, entry, startMs, false, "NotificationManager 不可用", "");
+            return;
+        }
         final boolean ownApp = isOwnAppProcess(context);
         try {
             // 1) 读取当前过滤器（App 进程无「勿扰访问」权限时读取可能被拒 → -1）
@@ -660,7 +846,9 @@ public class ShortcutItem {
             if (currentFilter < 0) {
                 // 读不到状态无法计算切换方向：如实失败；无权限时引导系统授权页
                 Log.w(TAG, "勿扰状态读取失败 hasAccess=" + hasAccess);
-                showToast(context, "切换勿扰失败: 无法读取勿扰状态（请检查勿扰权限）");
+                String errMsg = "切换勿扰失败: 无法读取勿扰状态（请检查勿扰权限）";
+                showToast(context, errMsg);
+                recordExecutionLog(context, entry, startMs, false, errMsg, "");
                 if (ownApp && !hasAccess) guideDndAccessSettings(context);
                 return;
             }
@@ -671,53 +859,70 @@ public class ShortcutItem {
                     : android.app.NotificationManager.INTERRUPTION_FILTER_ALL;
             try {
                 nm.setInterruptionFilter(target);
-                showToast(context, toPriority ? "已开启勿扰模式" : "已关闭勿扰模式");
+                String okMsg = toPriority ? "已开启勿扰模式" : "已关闭勿扰模式";
+                showToast(context, okMsg);
+                recordExecutionLog(context, entry, startMs, true, "", okMsg);
             } catch (Throwable direct) {
                 // 通知策略访问未授予（App 进程必现 SecurityException / SystemUI 个别 ROM 也未授）
                 Log.w(TAG, "setInterruptionFilter 直调失败: " + describe(direct));
+                if (entry != null) entry.useRoot = true;
+                String setCmd = "cmd notification set_dnd " + (toPriority ? "priority" : "off");
                 if (ownApp) {
                     // App 进程：同步 Root 直接执行本次切换并立即回读——真成功/真失败当下见分晓
-                    runRootCommandSync(
-                            "cmd notification set_dnd " + (toPriority ? "priority" : "off"), 8000);
+                    ShellExecResult res = runRootCommandSyncWithResult(setCmd, 8000);
                     if (readDndFilterQuiet(nm) == target) {
-                        showToast(context, toPriority ? "已开启勿扰模式" : "已关闭勿扰模式");
+                        String okMsg = toPriority ? "已开启勿扰模式" : "已关闭勿扰模式";
+                        showToast(context, okMsg);
+                        recordExecutionLog(context, entry, startMs, true, "", okMsg + " (Root)");
                     } else {
+                        String errMsg = "切换勿扰失败: " + describe(direct)
+                                + (res.errorDetail.isEmpty() ? "" : "；" + res.errorDetail);
                         showToast(context, "切换勿扰失败: " + describe(direct));
+                        recordExecutionLog(context, entry, startMs, false, errMsg, buildOutputSnippet(res));
                         if (!hasDndAccess(nm)) guideDndAccessSettings(context);
                     }
                 } else {
                     // SystemUI 进程：su 弹不了授权 → 桥接到模块 App 进程执行 + 延迟回读
-                    runRootCommand(context, "cmd notification allow_dnd " + context.getPackageName());
-                    runRootCommand(context,
-                            "cmd notification set_dnd " + (toPriority ? "priority" : "off"));
-                    verifyDndLater(context, nm, target, toPriority, direct);
+                    runRootCommand(context, "cmd notification allow_dnd " + context.getPackageName(), null, false);
+                    runRootCommand(context, setCmd, null, false);
+                    verifyDndLater(context, nm, target, toPriority, direct, entry, startMs);
                 }
             }
         } catch (Throwable t) {
             Log.e(TAG, "切换勿扰模式失败", t);
-            showToast(context, "切换勿扰失败: " + describe(t));
+            String errMsg = "切换勿扰失败: " + describe(t);
+            showToast(context, errMsg);
+            recordExecutionLog(context, entry, startMs, false, errMsg, "");
         }
     }
 
-    /** 勿扰切换 Root 兜底后的延迟复读校验（1.8s 后回查过滤器，回读受权限挡住时如实说明） */
+    /** 勿扰切换 Root 兜底后的延迟复读校验（1.8s 后回查过滤器，回读受权限挡住时如实说明并记录终态日志） */
     private static void verifyDndLater(Context context, android.app.NotificationManager nm,
-            int target, boolean toPriority, Throwable direct) {
+            int target, boolean toPriority, Throwable direct,
+            ShortcutLaunchLogStore.Entry entry, long startMs) {
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             try {
                 if (nm.getCurrentInterruptionFilter() == target) {
-                    showToast(context, toPriority ? "已开启勿扰模式" : "已关闭勿扰模式");
+                    String okMsg = toPriority ? "已开启勿扰模式" : "已关闭勿扰模式";
+                    showToast(context, okMsg);
+                    recordExecutionLog(context, entry, startMs, true, "", okMsg + " (Root)");
                 } else {
-                    showToast(context, "切换勿扰失败: " + describe(direct));
+                    String errMsg = "切换勿扰失败: " + describe(direct);
+                    showToast(context, errMsg);
+                    recordExecutionLog(context, entry, startMs, false, errMsg, "");
                 }
             } catch (Throwable t) {
                 // 回读也被策略权限挡住：无法证伪，如实说明是 Root 提交而非确认成功
-                showToast(context, "已通过 Root 提交勿扰切换（状态回读受限）");
+                String msg = "已通过 Root 提交勿扰切换（状态回读受限）";
+                showToast(context, msg);
+                recordExecutionLog(context, entry, startMs, true, "", msg);
             }
         }, 1800);
     }
 
     /** 异常可读描述：message 为 null 时退回类名，避免 toast 出现 "null" */
     private static String describe(Throwable t) {
+        if (t == null) return "未知异常";
         String msg = t.getMessage();
         return (msg == null || msg.isEmpty()) ? t.getClass().getSimpleName() : msg;
     }
@@ -737,7 +942,11 @@ public class ShortcutItem {
      * 仅限 ownApp 调用——SystemUI 进程 su 授权弹窗不可见会挂起，那里必须走异步桥接。
      */
     private static boolean runRootCommandSync(String cmd, long timeoutMs) {
-        return executeShellProcess(resolveSuBinary(), cmd, timeoutMs);
+        return runRootCommandSyncWithResult(cmd, timeoutMs).success;
+    }
+
+    private static ShellExecResult runRootCommandSyncWithResult(String cmd, long timeoutMs) {
+        return executeShellProcess(resolveSuBinary(), cmd, timeoutMs, false);
     }
 
     /** 读取当前勿扰过滤器；被权限拒绝等异常时返回 -1 */
@@ -772,19 +981,23 @@ public class ShortcutItem {
         }
     }
 
-    private static void openCamera(Context context) {
+    private static void openCamera(Context context, ShortcutLaunchLogStore.Entry entry, long startMs) {
         try {
             Intent intent = new Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             context.startActivity(intent);
+            recordExecutionLog(context, entry, startMs, true, "", "");
         } catch (Throwable t) {
             try {
                 Intent fallback = new Intent("android.media.action.STILL_IMAGE_CAMERA");
                 fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 context.startActivity(fallback);
+                recordExecutionLog(context, entry, startMs, true, "", "fallback: STILL_IMAGE_CAMERA");
             } catch (Throwable t2) {
                 Log.e(TAG, "打开相机失败", t2);
-                showToast(context, "打开相机失败: " + t2.getMessage());
+                String errMsg = "打开相机失败: " + describe(t2);
+                showToast(context, errMsg);
+                recordExecutionLog(context, entry, startMs, false, errMsg, "");
             }
         }
     }
@@ -851,25 +1064,32 @@ public class ShortcutItem {
         }
     }
 
-    private static void toggleFlashlight(Context context) {
+    private static void toggleFlashlight(Context context, ShortcutLaunchLogStore.Entry entry, long startMs) {
         try {
             CameraManager cm = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
-            if (cm != null) {
-                String cameraId = resolveTorchCameraId(cm);
-                if (cameraId != null) {
-                    targetTorchCameraId = cameraId;
-                    ensureTorchCallback(cm);
-                    boolean nextState = !isFlashlightOn;
-                    cm.setTorchMode(cameraId, nextState);
-                    isFlashlightOn = nextState;
-                }
+            if (cm == null) {
+                recordExecutionLog(context, entry, startMs, false, "CameraManager 不可用", "");
+                return;
             }
+            String cameraId = resolveTorchCameraId(cm);
+            if (cameraId == null) {
+                recordExecutionLog(context, entry, startMs, false, "未找到支持闪光灯的相机", "");
+                return;
+            }
+            targetTorchCameraId = cameraId;
+            ensureTorchCallback(cm);
+            boolean nextState = !isFlashlightOn;
+            cm.setTorchMode(cameraId, nextState);
+            isFlashlightOn = nextState;
+            recordExecutionLog(context, entry, startMs, true, "", nextState ? "手电筒已开启" : "手电筒已关闭");
         } catch (Throwable t) {
             Log.e(TAG, "切换手电筒状态失败", t);
+            recordExecutionLog(context, entry, startMs, false, "切换手电筒失败: " + describe(t), "");
         }
     }
 
-    private static void launchDualAppFallback(Context context, String pkg, int userId) {
+    private static void launchDualAppFallback(Context context, String pkg, int userId,
+            ShortcutLaunchLogStore.Entry entry, long startMs) {
         if (android.os.Build.VERSION.SDK_INT >= 21) {
             try {
                 LauncherApps la = (LauncherApps) context.getSystemService(Context.LAUNCHER_APPS_SERVICE);
@@ -880,6 +1100,7 @@ public class ShortcutItem {
                         ComponentName comp = activities.get(0).getComponentName();
                         try {
                             la.startMainActivity(comp, target, null, null);
+                            recordExecutionLog(context, entry, startMs, true, "", "LauncherApps: " + comp.flattenToShortString());
                             return;
                         } catch (Throwable t) {
                             Log.w(TAG, "LauncherApps.startMainActivity 启动双开失败，改走 launchAsUser: " + comp, t);
@@ -888,7 +1109,7 @@ public class ShortcutItem {
                         fallbackIntent.addCategory(Intent.CATEGORY_LAUNCHER);
                         fallbackIntent.setComponent(comp);
                         fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                        launchAsUser(context, fallbackIntent, userId);
+                        launchAsUser(context, fallbackIntent, userId, entry, startMs);
                         return;
                     }
                 }
@@ -905,7 +1126,8 @@ public class ShortcutItem {
                 + "else am start --user " + userId
                 + " -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "
                 + quotedPkg + "; fi";
-        runRootCommand(context, cmd);
+        if (entry != null) entry.useRoot = true;
+        runRootCommand(context, cmd, entry, true);
     }
 
     /**
@@ -914,7 +1136,8 @@ public class ShortcutItem {
      * 1) 系统上下文 createContextAsUser（需 INTERACT_ACROSS_USERS[_FULL]，SystemUI/系统签名可直连）
      * 2) Root 兜底：su -c 'am start --user N "intent:..."'
      */
-    private static void launchAsUser(Context context, Intent intent, int userId) {
+    private static void launchAsUser(Context context, Intent intent, int userId,
+            ShortcutLaunchLogStore.Entry entry, long startMs) {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         if (android.os.Build.VERSION.SDK_INT >= 30) {
             // getUserHandleForUid(uid) 按 uid/PER_USER_RANGE(100000) 取用户 → userId*100000 即该用户的 UserHandle
@@ -926,6 +1149,7 @@ public class ShortcutItem {
                 java.lang.reflect.Method m =
                         Context.class.getMethod("startActivityAsUser", Intent.class, android.os.UserHandle.class);
                 m.invoke(context, intent, target);
+                recordExecutionLog(context, entry, startMs, true, "", "startActivityAsUser(" + userId + ")");
                 return;
             } catch (Throwable t) {
                 Log.w(TAG, "startActivityAsUser 启动 user " + userId + " 不可用，尝试 createContextAsUser", t);
@@ -936,6 +1160,7 @@ public class ShortcutItem {
                         Context.class.getMethod("createContextAsUser", android.os.UserHandle.class, int.class);
                 Context userCtx = (Context) m.invoke(context, target, 0);
                 userCtx.startActivity(intent);
+                recordExecutionLog(context, entry, startMs, true, "", "createContextAsUser(" + userId + ")");
                 return;
             } catch (Throwable t) {
                 Log.w(TAG, "createContextAsUser 启动 user " + userId + " 失败，改用 am start --user 兜底", t);
@@ -943,10 +1168,13 @@ public class ShortcutItem {
         }
         try {
             String uri = intent.toUri(Intent.URI_INTENT_SCHEME);
-            runRootCommand(context, "am start --user " + userId + " " + quoteForSh(uri));
+            if (entry != null) entry.useRoot = true;
+            runRootCommand(context, "am start --user " + userId + " " + quoteForSh(uri), entry, true);
         } catch (Throwable t) {
             Log.e(TAG, "跨用户启动失败: user=" + userId + " intent=" + intent, t);
-            showToast(context, "启动失败(需跨用户权限或 Root): " + t.getMessage());
+            String errMsg = "启动失败(需跨用户权限或 Root): " + describe(t);
+            showToast(context, errMsg);
+            recordExecutionLog(context, entry, startMs, false, errMsg, "");
         }
     }
 
@@ -1000,41 +1228,60 @@ public class ShortcutItem {
         return "'" + s.replace("'", "'\\''") + "'";
     }
 
-    private static void runRootAmStart(Context context, String payload) {
-        runRootCommand(context, "am start " + quoteForSh(payload));
+    /** Shell 进程执行结果（包含有界输出、超时、退出码及错误详情） */
+    public static final class ShellExecResult {
+        public boolean success;
+        public int exitCode = -1;
+        public boolean timedOut;
+        public String stdout = "";
+        public String stderr = "";
+        public String errorDetail = "";
+        public long durationMs;
+    }
+
+    private static void runRootAmStart(Context context, String payload, ShortcutLaunchLogStore.Entry entry) {
+        runRootCommand(context, "am start " + quoteForSh(payload), entry, true);
     }
 
     /**
      * root 命令统一入口：优先桥接给拥有 Root 授权的模块 App 后台代理执行（避免 SystemUI/KernelSU 无权调用 su）；
      * 若桥接未受理或无响应，自动降级回退到当前进程本地 su 执行。
      */
-    private static void runRootCommand(Context context, String cmd) {
+    private static void runRootCommand(Context context, String cmd,
+            ShortcutLaunchLogStore.Entry entry, boolean checkAmError) {
         // 如果当前就是 App 自身进程（如用户在编辑页面点立即测试），直接本地执行
         if (isOwnAppProcess(context)) {
-            runShellBinary("su", cmd);
+            runShellBinaryWithLog(context, "su", cmd, entry, checkAmError);
             return;
         }
 
         // 在 SystemUI 进程中：
         // 因面板完全展开时已静默预热解冻模块进程，此处桥接将直接由已解冻的模块 App 秒级执行；
         // 若桥接失败再回退本地尝试
-        if (runRootViaBridge(context, cmd)) {
+        if (runRootViaBridge(context, cmd, entry, checkAmError)) {
             return;
         }
-        runShellBinary("su", cmd);
+        runShellBinaryWithLog(context, "su", cmd, entry, checkAmError);
     }
 
-    /** Shell 动作执行入口（供 Provider 桥接回调）：useRoot=true 经 su 以 root 身份执行，false 以普通 sh 身份执行 */
+    /** Shell 动作执行入口（供 Provider 桥接回调兼容旧调用）：useRoot=true 经 su 以 root 身份执行，false 以普通 sh 身份执行 */
     public static void runShellCommand(String cmd, boolean useRoot) {
-        runShellBinary(useRoot ? "su" : "sh", cmd);
+        runShellBinaryWithLog(null, useRoot ? "su" : "sh", cmd, null, false);
+    }
+
+    /** Shell 动作执行入口（供 Provider 桥接回调并记录真实执行日志） */
+    public static void runShellCommandWithLog(Context context, String cmd, boolean useRoot,
+            ShortcutLaunchLogStore.Entry template, boolean checkAmError) {
+        runShellBinaryWithLog(context, useRoot ? "su" : "sh", cmd, template, checkAmError);
     }
 
     /** Shell 动作执行入口：root 命令桥接到模块 App 进程（SystemUI 内 su 常因锁屏无法弹 Magisk 授权而失败） */
-    private static void runShellCommand(Context context, String cmd, boolean useRoot) {
+    private static void runShellCommand(Context context, String cmd, boolean useRoot,
+            ShortcutLaunchLogStore.Entry entry, boolean checkAmError) {
         if (useRoot) {
-            runRootCommand(context, cmd);
+            runRootCommand(context, cmd, entry, checkAmError);
         } else {
-            runShellBinary("sh", cmd);
+            runShellBinaryWithLog(context, "sh", cmd, entry, checkAmError);
         }
     }
 
@@ -1042,14 +1289,17 @@ public class ShortcutItem {
      * 把 root/shell 命令桥接给模块 App 进程执行（SettingsProvider 的 run_shell 方法）。
      * 背景：指纹面板在 SystemUI 进程里执行，su 从系统进程请求 root 时 Magisk 无法弹授权/超时；
      * 而模块 App 进程的 su 已获授权（编辑界面测试按钮即在该进程执行成功）。
-     * fire-and-forget：返回是否受理，不等待命令结果。
+     * fire-and-forget：返回是否受理，不等待命令结果；若携带日志模板则由模块 App 进程在命令结束后落盘唯一一条日志。
      */
-    private static boolean runRootViaBridge(Context context, String cmd) {
+    private static boolean runRootViaBridge(Context context, String cmd,
+            ShortcutLaunchLogStore.Entry template, boolean checkAmError) {
         try {
-            Bundle b = new Bundle();
+            Bundle b = template != null ? template.toBundle() : new Bundle();
             b.putString("cmd", cmd);
             b.putBoolean("useRoot", true);
             b.putString("useRootStr", "true"); // 兼容 adb content call 等只支持字符串 extra 的入口
+            b.putBoolean("has_log_meta", template != null);
+            b.putBoolean("check_am_error", checkAmError);
             Bundle r = context.getContentResolver().call(
                     Uri.parse("content://io.github.qmryqmm.hyperopen.provider"),
                     "run_shell", null, b);
@@ -1108,32 +1358,58 @@ public class ShortcutItem {
         }
     }
 
-    private static void runShellBinary(String shell, String cmd) {
+    private static void runShellBinaryWithLog(Context context, String shell, String cmd,
+            ShortcutLaunchLogStore.Entry template, boolean checkAmError) {
         // 走独立的守护线程执行，绝不霸占 IpcExecutor 单线程 HandlerThread 造成 SystemUI IPC 阻塞
         Thread runner = new Thread(() -> {
+            ShellExecResult res = null;
             try {
-                if ("su".equals(shell)) {
-                    executeShellProcess(resolveSuBinary(), cmd, 15000L);
-                } else {
-                    executeShellProcess(shell, cmd, 15000L);
-                }
+                String bin = "su".equals(shell) ? resolveSuBinary() : shell;
+                res = executeShellProcess(bin, cmd, 15000L, checkAmError);
             } catch (Throwable t) {
                 Log.e(TAG, ("su".equals(shell) ? "Root" : "Shell") + " 命令执行异常: " + cmd, t);
+                res = new ShellExecResult();
+                res.success = false;
+                res.errorDetail = describe(t);
+            }
+            if (context != null && template != null) {
+                ShortcutLaunchLogStore.Entry finalEntry = template.copy();
+                finalEntry.durationMs = res.durationMs;
+                finalEntry.success = res.success;
+                finalEntry.errorMessage = res.errorDetail != null ? res.errorDetail : "";
+                finalEntry.outputSnippet = buildOutputSnippet(res);
+                ShortcutLaunchLogStore.recordFromAnyProcess(context, finalEntry);
             }
         }, "HyperOpen-ShellRunner");
         runner.setDaemon(true);
         runner.start();
     }
 
-    private static boolean executeShellProcess(String shellBin, String cmd, long timeoutMs) {
+    private static String buildOutputSnippet(ShellExecResult res) {
+        if (res == null) return "";
+        String out = res.stdout != null ? res.stdout.trim() : "";
+        String err = res.stderr != null ? res.stderr.trim() : "";
+        if (!out.isEmpty() && !err.isEmpty()) {
+            return out + "\n[stderr] " + err;
+        }
+        return !out.isEmpty() ? out : err;
+    }
+
+    private static ShellExecResult executeShellProcess(String shellBin, String cmd,
+            long timeoutMs, boolean checkAmError) {
+        ShellExecResult result = new ShellExecResult();
+        long startNs = System.nanoTime();
         Process p = null;
         OutputStream os = null;
         try {
             p = Runtime.getRuntime().exec(shellBin);
             final InputStream in = p.getInputStream();
             final InputStream err = p.getErrorStream();
-            Thread drainIn = new Thread(() -> drainStream(in), "HyperOpen-DrainIn");
-            Thread drainErr = new Thread(() -> drainStream(err), "HyperOpen-DrainErr");
+            final ByteArrayOutputStream outBuf = new ByteArrayOutputStream();
+            final ByteArrayOutputStream errBuf = new ByteArrayOutputStream();
+
+            Thread drainIn = new Thread(() -> readBoundedAndDrain(in, outBuf, 2048), "HyperOpen-DrainIn");
+            Thread drainErr = new Thread(() -> readBoundedAndDrain(err, errBuf, 4096), "HyperOpen-DrainErr");
             drainIn.setDaemon(true);
             drainErr.setDaemon(true);
             drainIn.start();
@@ -1149,16 +1425,51 @@ public class ShortcutItem {
             if (!finished) {
                 Log.w(TAG, shellBin + " 命令执行超时(" + timeoutMs + "ms): " + cmd);
                 p.destroyForcibly();
-                return false;
+                try { drainIn.join(300L); } catch (InterruptedException ignored) {}
+                try { drainErr.join(300L); } catch (InterruptedException ignored) {}
+                result.durationMs = (System.nanoTime() - startNs) / 1_000_000L;
+                result.timedOut = true;
+                result.success = false;
+                result.stdout = new String(outBuf.toByteArray(), StandardCharsets.UTF_8).trim();
+                result.stderr = new String(errBuf.toByteArray(), StandardCharsets.UTF_8).trim();
+                result.errorDetail = "命令执行超时 (" + timeoutMs + "ms)";
+                return result;
             }
+
+            try { drainIn.join(500L); } catch (InterruptedException ignored) {}
+            try { drainErr.join(500L); } catch (InterruptedException ignored) {}
+            result.durationMs = (System.nanoTime() - startNs) / 1_000_000L;
+            result.stdout = new String(outBuf.toByteArray(), StandardCharsets.UTF_8).trim();
+            result.stderr = new String(errBuf.toByteArray(), StandardCharsets.UTF_8).trim();
+
             int code = p.exitValue();
+            result.exitCode = code;
             if (code != 0) {
                 Log.w(TAG, shellBin + " 命令 exit=" + code + ": " + cmd);
+                result.success = false;
+                result.errorDetail = "退出码 " + code
+                        + (result.stderr.isEmpty() ? "" : ": " + result.stderr);
+                return result;
             }
-            return code == 0;
+
+            if (checkAmError) {
+                String amErr = findAmErrorLine(result.stdout, result.stderr);
+                if (amErr != null) {
+                    Log.w(TAG, shellBin + " am 命令输出报错: " + amErr);
+                    result.success = false;
+                    result.errorDetail = amErr;
+                    return result;
+                }
+            }
+
+            result.success = true;
+            return result;
         } catch (Throwable t) {
-            Log.w(TAG, shellBin + " 执行异常: " + t.getMessage());
-            return false;
+            result.durationMs = (System.nanoTime() - startNs) / 1_000_000L;
+            result.success = false;
+            result.errorDetail = describe(t);
+            Log.w(TAG, shellBin + " 执行异常: " + result.errorDetail);
+            return result;
         } finally {
             if (os != null) {
                 try { os.close(); } catch (Throwable ignored) {}
@@ -1166,6 +1477,42 @@ public class ShortcutItem {
             if (p != null) {
                 try { p.destroy(); } catch (Throwable ignored) {}
             }
+        }
+    }
+
+    private static String findAmErrorLine(String stdout, String stderr) {
+        String combined = (stdout != null ? stdout : "") + "\n" + (stderr != null ? stderr : "");
+        String[] lines = combined.split("\\r?\\n");
+        for (String line : lines) {
+            if (line == null) continue;
+            String trimmed = line.trim();
+            if (trimmed.isEmpty() || trimmed.startsWith("Warning:")) {
+                continue;
+            }
+            if (trimmed.contains("Error:") || trimmed.contains("Exception:")
+                    || trimmed.contains("Activity not started")) {
+                return trimmed;
+            }
+        }
+        return null;
+    }
+
+    private static void readBoundedAndDrain(InputStream stream, ByteArrayOutputStream out, int maxBytes) {
+        if (stream == null) return;
+        try {
+            byte[] buf = new byte[1024];
+            int remaining = maxBytes;
+            int n;
+            while ((n = stream.read(buf)) != -1) {
+                if (remaining > 0) {
+                    int toWrite = Math.min(n, remaining);
+                    out.write(buf, 0, toWrite);
+                    remaining -= toWrite;
+                }
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            try { stream.close(); } catch (Throwable ignored) {}
         }
     }
 

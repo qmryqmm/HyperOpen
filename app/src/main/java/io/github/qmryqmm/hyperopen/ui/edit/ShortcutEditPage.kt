@@ -957,7 +957,10 @@ fun ShortcutEditPage(
                                         // 与保存一致：URI 同步写回用户标记，测试的就是最终生效的 payload
                                         testItem.actionPayload = ShortcutItem.syncUserMarker(testItem.actionPayload, pickedUser)
                                     }
-                                    testItem.executeAsync(ctx)
+                                    testItem.executeAsync(
+                                        ctx,
+                                        io.github.qmryqmm.hyperopen.log.ShortcutLaunchLogStore.SOURCE_EDIT_TEST,
+                                    )
                                 },
                             )
                             if (!isNew) {

@@ -41,9 +41,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.github.qmryqmm.hyperopen.BuildConfig
+import io.github.qmryqmm.hyperopen.log.ShortcutLaunchLogStore
 import io.github.qmryqmm.hyperopen.safety.ModuleStatus
 import io.github.qmryqmm.hyperopen.safety.SafetyStore
 import io.github.qmryqmm.hyperopen.util.LauncherIcon
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
@@ -83,6 +86,7 @@ fun SettingsPage(
     onSafetyRefresh: () -> Unit,
     onOpenThemePage: () -> Unit,
     onOpenPermissionPage: () -> Unit,
+    onOpenLaunchLogPage: () -> Unit = {},
     onResetDefaults: () -> Unit,
     onResetShortcuts: () -> Unit,
 ) {
@@ -147,6 +151,41 @@ fun SettingsPage(
         item(key = "safety_title") { SmallTitle("模块运行状态与安全保护") }
         item(key = "safety_card") {
             SafetyCard(tick = safetyTick, onRequestRefresh = onSafetyRefresh)
+        }
+
+        item(key = "launch_log_card") {
+            val ctx = LocalContext.current
+            var logSummary by remember { mutableStateOf<ShortcutLaunchLogStore.Summary?>(null) }
+            LaunchedEffect(safetyTick) {
+                logSummary = withContext(Dispatchers.IO) {
+                    ShortcutLaunchLogStore.getSummary(ctx)
+                }
+            }
+            val summaryText = when {
+                logSummary == null -> "正在读取启动记录…"
+                logSummary!!.totalCount <= 0 -> "暂无启动记录（自动保留最近 100 条）"
+                logSummary!!.failureCount > 0 -> "共 ${logSummary!!.totalCount} 条记录（最近保留 100 条）· ${logSummary!!.failureCount} 条失败"
+                else -> "共 ${logSummary!!.totalCount} 条记录（最近保留 100 条）· 最近一次成功"
+            }
+            Card(
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .fillMaxWidth(),
+            ) {
+                ArrowPreference(
+                    title = "快捷方式启动日志",
+                    summary = summaryText,
+                    startAction = {
+                        Icon(
+                            imageVector = MiuixIcons.ListView,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.primary,
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                    },
+                    onClick = onOpenLaunchLogPage,
+                )
+            }
         }
 
         item(key = "restart_systemui_card") {

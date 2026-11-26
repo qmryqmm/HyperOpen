@@ -985,7 +985,7 @@ public class CustomHyperOpenContainer extends FrameLayout {
         final Context appCtx = ctx != null && ctx.getApplicationContext() != null ? ctx.getApplicationContext() : ctx;
         final Runnable executeOnce = () -> {
             if (selectedItem != null && executed.compareAndSet(false, true) && appCtx != null) {
-                selectedItem.executeAsync(appCtx);
+                selectedItem.executeAsync(appCtx, io.github.qmryqmm.hyperopen.log.ShortcutLaunchLogStore.SOURCE_LOCKSCREEN);
             }
         };
         this.pendingDismissAction = executeOnce;

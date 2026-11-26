@@ -1717,12 +1717,22 @@ class HyperOpenPreviewView(
                 hidePanel(animated = true, selectedBubble = popBubble) {
                     if (selectedToRun != null) {
                         triggerHaptic()
-                        selectedToRun.executeAsync(context)
+                        val launchSource = if (sandboxMode) {
+                            io.github.qmryqmm.hyperopen.log.ShortcutLaunchLogStore.SOURCE_SANDBOX_PREVIEW
+                        } else {
+                            io.github.qmryqmm.hyperopen.log.ShortcutLaunchLogStore.SOURCE_PREVIEW
+                        }
+                        selectedToRun.executeAsync(context, launchSource)
                     }
                 }
             } else if (selectedToRun != null) {
                 triggerHaptic()
-                selectedToRun.executeAsync(context)
+                val launchSource = if (sandboxMode) {
+                    io.github.qmryqmm.hyperopen.log.ShortcutLaunchLogStore.SOURCE_SANDBOX_PREVIEW
+                } else {
+                    io.github.qmryqmm.hyperopen.log.ShortcutLaunchLogStore.SOURCE_PREVIEW
+                }
+                selectedToRun.executeAsync(context, launchSource)
             }
             return true
         }
@@ -1824,7 +1834,12 @@ class HyperOpenPreviewView(
                 pendingPressBubble = null
                 if (selected != null) {
                     triggerHaptic()
-                    selected.executeAsync(context)
+                    val launchSource = if (sandboxMode) {
+                        io.github.qmryqmm.hyperopen.log.ShortcutLaunchLogStore.SOURCE_SANDBOX_PREVIEW
+                    } else {
+                        io.github.qmryqmm.hyperopen.log.ShortcutLaunchLogStore.SOURCE_PREVIEW
+                    }
+                    selected.executeAsync(context, launchSource)
                 }
                 return true
             }

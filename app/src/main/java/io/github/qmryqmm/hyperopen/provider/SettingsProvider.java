@@ -18,6 +18,7 @@ import androidx.annotation.Nullable;
 
 import io.github.qmryqmm.hyperopen.BuildConfig;
 import io.github.qmryqmm.hyperopen.config.HyperOpenConfig;
+import io.github.qmryqmm.hyperopen.log.ShortcutLaunchLogStore;
 import io.github.qmryqmm.hyperopen.safety.SafetyStore;
 import io.github.qmryqmm.hyperopen.util.DePrefs;
 
@@ -39,6 +40,8 @@ public class SettingsProvider extends ContentProvider {
      * extras: cmd(String, 必填), useRoot(boolean, 默认 true), useRootStr(String, 兼容 adb content call)
      */
     public static final String METHOD_RUN_SHELL = "run_shell";
+    /** 跨进程启动日志上报：SystemUI 等外部进程将快捷方式执行结果写入模块独立 DE 日志文件 */
+    public static final String METHOD_RECORD_LAUNCH_LOG = "record_launch_log";
 
     /** 安全模式：启动闸门查询（SystemUI 每次启动时调用，并据此决定是否安装 Hook） */
     public static final String METHOD_SAFETY_CHECK = "safety_check";
@@ -167,6 +170,24 @@ public class SettingsProvider extends ContentProvider {
             return r;
         }
 
+        if (METHOD_RECORD_LAUNCH_LOG.equals(method)) {
+            Bundle r = new Bundle();
+            r.putBoolean("ok", false);
+            try {
+                Context ctx = getContext();
+                if (ctx != null && extras != null) {
+                    ShortcutLaunchLogStore.Entry entry = ShortcutLaunchLogStore.Entry.fromBundle(extras);
+                    if (entry != null) {
+                        ShortcutLaunchLogStore.recordLocal(ctx, entry);
+                        r.putBoolean("ok", true);
+                    }
+                }
+            } catch (Throwable t) {
+                Log.e(TAG, "record_launch_log 执行异常", t);
+            }
+            return r;
+        }
+
         if (METHOD_RUN_SHELL.equals(method)) {
             Bundle r = new Bundle();
             r.putBoolean("accepted", false);
@@ -181,8 +202,17 @@ public class SettingsProvider extends ContentProvider {
                         }
                     }
                     if (cmd != null && !cmd.isEmpty()) {
-                        // fire-and-forget：runShellCommand 内部自行异步执行，不阻塞 Binder 调用
-                        io.github.qmryqmm.hyperopen.model.ShortcutItem.runShellCommand(cmd, useRoot);
+                        boolean hasLogMeta = extras.getBoolean("has_log_meta", false);
+                        if (hasLogMeta) {
+                            ShortcutLaunchLogStore.Entry template = ShortcutLaunchLogStore.Entry.fromBundle(extras);
+                            boolean checkAmError = extras.getBoolean("check_am_error", false);
+                            Context ctx = getContext();
+                            io.github.qmryqmm.hyperopen.model.ShortcutItem.runShellCommandWithLog(
+                                    ctx, cmd, useRoot, template, checkAmError);
+                        } else {
+                            // fire-and-forget：runShellCommand 内部自行异步执行，不阻塞 Binder 调用
+                            io.github.qmryqmm.hyperopen.model.ShortcutItem.runShellCommand(cmd, useRoot);
+                        }
                         Log.i(TAG, "run_shell 桥接受理(" + (useRoot ? "root" : "shell") + "): " + cmd);
                         r.putBoolean("accepted", true);
                     }

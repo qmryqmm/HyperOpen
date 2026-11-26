@@ -527,7 +527,10 @@ fun ShortcutMarketPage(
             onDismiss = { pendingTestConfirmItem = null },
             onConfirm = {
                 pendingTestConfirmItem = null
-                target.executeAsync(ctx)
+                target.executeAsync(
+                    ctx,
+                    io.github.qmryqmm.hyperopen.log.ShortcutLaunchLogStore.SOURCE_MARKET_TEST,
+                )
             },
         )
     }

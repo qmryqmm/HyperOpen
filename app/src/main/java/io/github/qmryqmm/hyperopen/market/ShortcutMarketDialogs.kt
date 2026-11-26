@@ -914,7 +914,10 @@ fun ShortcutMarketDetailDialog(
             onDismiss = { pendingTestItem = null },
             onConfirm = {
                 pendingTestItem = null
-                target.executeAsync(ctx)
+                target.executeAsync(
+                    ctx,
+                    io.github.qmryqmm.hyperopen.log.ShortcutLaunchLogStore.SOURCE_MARKET_TEST,
+                )
             },
         )
     }
@@ -1197,7 +1200,10 @@ internal fun triggerMarketShortcutTest(
     if (isHighRiskShortcutForTest(item)) {
         onRequireConfirm(item)
     } else {
-        item.executeAsync(ctx)
+        item.executeAsync(
+            ctx,
+            io.github.qmryqmm.hyperopen.log.ShortcutLaunchLogStore.SOURCE_MARKET_TEST,
+        )
     }
 }
 

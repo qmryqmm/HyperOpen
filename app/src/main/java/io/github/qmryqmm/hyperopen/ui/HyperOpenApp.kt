@@ -114,6 +114,7 @@ import io.github.qmryqmm.hyperopen.ui.pages.ConfigProfileMultiSelectBottomBar
 import io.github.qmryqmm.hyperopen.ui.pages.ConfigProfilesPage
 import io.github.qmryqmm.hyperopen.ui.pages.ConfigProfileSelectionState
 import io.github.qmryqmm.hyperopen.ui.pages.SettingsPage
+import io.github.qmryqmm.hyperopen.ui.pages.ShortcutLaunchLogPage
 import io.github.qmryqmm.hyperopen.ui.pages.ShortcutsManagementPage
 import io.github.qmryqmm.hyperopen.ui.pages.SoftGlassSettingsPage
 import io.github.qmryqmm.hyperopen.ui.pages.ShortcutsTreeState
@@ -618,9 +619,15 @@ fun HyperOpenApp(
     val softGlassListState = rememberLazyListState()
     val blurMaterialListState = rememberLazyListState()
     val permissionListState = rememberLazyListState()
+    val launchLogListState = rememberLazyListState()
 
-    // 导航路由：0=主界面, 1=主题设置页, 2=快捷方式编辑页, 3=整体预览页, 4=权限检测页, 5=柔光玻璃设置页
+    // 导航路由：0=主界面, 1=主题设置页, 2=快捷方式编辑页, 3=整体预览页, 4=权限检测页, 5=柔光玻璃设置页, 6=全局模糊材质, 7=快捷方式启动日志
     var subPage by remember { mutableStateOf(0) }
+    LaunchedEffect(subPage, page) {
+        if (subPage == 0 && page == 3) {
+            safetyTick++
+        }
+    }
     var editingItem by remember { mutableStateOf<ShortcutItem?>(null) }
     var isNewShortcut by remember { mutableStateOf(false) }
     var requestEditBackTrigger by remember { mutableIntStateOf(0) }
@@ -1881,6 +1888,7 @@ fun HyperOpenApp(
             4 -> "权限检测"
             5 -> "柔光玻璃设置"
             6 -> "全局模糊材质"
+            7 -> "快捷方式启动日志"
             else -> when (page) {
                 0 -> "参数配置"
                 1 -> if (shortcutsTreeState.multiSelect) "已选择 ${shortcutsTreeState.selectedCount} 项" else "快捷项目"
@@ -2175,6 +2183,12 @@ fun HyperOpenApp(
                                 globalDimAlpha = 0f
                                 persistParamsImmediate()
                             },
+                        )
+                    }
+                    7 -> {
+                        ShortcutLaunchLogPage(
+                            contentPadding = pagePadding,
+                            lazyListState = launchLogListState,
                         )
                     }
                     else -> {
@@ -2635,6 +2649,7 @@ fun HyperOpenApp(
                                     onSafetyRefresh = { safetyTick++ },
                                     onOpenThemePage = { subPage = 1 },
                                     onOpenPermissionPage = { subPage = 4 },
+                                    onOpenLaunchLogPage = { subPage = 7 },
                                     onResetDefaults = { showResetDefaultsDialog = true },
                                     onResetShortcuts = { showResetShortcutsDialog = true },
                                 )
