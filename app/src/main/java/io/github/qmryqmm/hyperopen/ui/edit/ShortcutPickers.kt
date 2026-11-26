@@ -3,11 +3,15 @@ package io.github.qmryqmm.hyperopen.ui.edit
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.LauncherApps
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.os.Build
+import android.os.UserHandle
+import android.os.UserManager
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -64,6 +68,7 @@ import io.github.qmryqmm.hyperopen.ui.MiuixIconRegistry
 import io.github.qmryqmm.hyperopen.ui.RemixIconRegistry
 import io.github.qmryqmm.hyperopen.ui.components.toComposeImageBitmap
 import io.github.qmryqmm.hyperopen.ui.icons.glass.MiuixGlassIconRegistry
+import io.github.qmryqmm.hyperopen.util.AndroidUserHelper
 import io.github.qmryqmm.hyperopen.view.IconGlyphFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -636,12 +641,14 @@ data class AppInfoItem(
     val appName: String,
     val isSystem: Boolean,
     val icon: android.graphics.drawable.Drawable? = null,
+    val userId: Int = 0,
+    val userLabel: String = "",
 )
 
 /**
  * 进程内轻量应用元数据与图标缩略图缓存：
- * 1) 扫描应用列表时仅缓存包名、应用名、是否系统应用等轻量元数据，不一次性预加载 300+ 个应用的 Drawable 驻留内存；
- * 2) 列表可见行图标按需在 Dispatchers.IO 加载并渲染为 96×96 ImageBitmap，通过 LruCache 复用，消除主线程组合期同步绘图卡顿。
+ * 1) 扫描应用列表时仅缓存包名、应用名、是否系统应用与所属用户空间等轻量元数据，不一次性预加载 300+ 个应用的 Drawable 驻留内存；
+ * 2) 列表可见行图标按需在 Dispatchers.IO 加载并渲染为 96×96 ImageBitmap，通过 LruCache（键 "$userId:$packageName"）复用，消除主线程组合期同步绘图卡顿。
  */
 private object InstalledAppsCache {
     private const val CACHE_TTL_MS = 60_000L
@@ -655,21 +662,29 @@ private object InstalledAppsCache {
     private var cachedAtMs: Long = 0L
 
     private val iconThumbCache =
-        object : android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(100) {}
+        object : android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(120) {}
 
-    fun getCachedAppsIfFresh(): List<AppInfoItem>? {
+    private fun iconCacheKey(packageName: String, userId: Int): String = "$userId:$packageName"
+
+    fun getCachedAppsIfFresh(includeSecondaryUsers: Boolean = true): List<AppInfoItem>? {
         val list = cachedApps ?: return null
         if (System.currentTimeMillis() - cachedAtMs > CACHE_TTL_MS) return null
-        return list
+        return if (includeSecondaryUsers) list else list.filter { it.userId == 0 }
     }
 
-    fun loadInstalledApps(context: Context): List<AppInfoItem> {
-        getCachedAppsIfFresh()?.let { return it }
+    fun loadInstalledApps(context: Context, includeSecondaryUsers: Boolean = true): List<AppInfoItem> {
+        getCachedAppsIfFresh(includeSecondaryUsers)?.let { return it }
         val pm = context.packageManager
         val installedPackages = pm.getInstalledPackages(PackageManager.GET_META_DATA)
-        val list = installedPackages.mapNotNull { pi ->
-            val appInfo = pi.applicationInfo ?: return@mapNotNull null
+        val mainSysMap = HashMap<String, Boolean>(installedPackages.size)
+        val seenKeys = HashSet<String>(installedPackages.size + 32)
+        val combined = ArrayList<AppInfoItem>(installedPackages.size + 32)
+
+        for (pi in installedPackages) {
+            val appInfo = pi.applicationInfo ?: continue
             val pkg = pi.packageName
+            val key = iconCacheKey(pkg, 0)
+            if (!seenKeys.add(key)) continue
             val name = try {
                 appInfo.loadLabel(pm).toString().ifBlank { pkg }
             } catch (_: Throwable) {
@@ -677,26 +692,114 @@ private object InstalledAppsCache {
             }
             val isSys = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
                 (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-            AppInfoItem(pkg, name, isSys)
-        }.distinctBy { it.packageName }
-            .sortedWith(compareBy({ it.appName.lowercase() }, { it.packageName }))
+            mainSysMap[pkg] = isSys
+            combined.add(
+                AppInfoItem(
+                    packageName = pkg,
+                    appName = name,
+                    isSystem = isSys,
+                    userId = 0,
+                    userLabel = "",
+                )
+            )
+        }
+
+        // 扫描次级空间（应用双开 / 工作资料）已安装应用
+        val la = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
+        if (la != null) {
+            val profileHandles = ArrayList<UserHandle>()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                try {
+                    la.profiles?.let { profileHandles.addAll(it) }
+                } catch (_: Throwable) {
+                }
+            }
+            if (profileHandles.isEmpty()) {
+                try {
+                    val um = context.getSystemService(Context.USER_SERVICE) as? UserManager
+                    um?.userProfiles?.let { profileHandles.addAll(it) }
+                } catch (_: Throwable) {
+                }
+            }
+            val visitedUids = HashSet<Int>()
+            for (handle in profileHandles) {
+                val uid = AndroidUserHelper.extractUserId(handle)
+                if (uid <= 0 || !visitedUids.add(uid)) continue
+                val userLabel = if (uid == 999) "应用双开 999" else "工作资料 $uid"
+                val activities = try {
+                    la.getActivityList(null, handle)
+                } catch (_: Throwable) {
+                    null
+                } ?: continue
+                for (lai in activities) {
+                    val appInfo = lai.applicationInfo
+                    val pkg = appInfo?.packageName ?: lai.componentName.packageName
+                    val key = iconCacheKey(pkg, uid)
+                    if (!seenKeys.add(key)) continue
+                    val name = try {
+                        appInfo?.loadLabel(pm)?.toString()?.ifBlank { null }
+                            ?: lai.label?.toString()?.ifBlank { null }
+                            ?: pkg
+                    } catch (_: Throwable) {
+                        pkg
+                    }
+                    val flags = appInfo?.flags ?: 0
+                    val isSys = mainSysMap[pkg] ?: (
+                        (flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
+                            (flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                        )
+                    combined.add(
+                        AppInfoItem(
+                            packageName = pkg,
+                            appName = name,
+                            isSystem = isSys,
+                            userId = uid,
+                            userLabel = userLabel,
+                        )
+                    )
+                }
+            }
+        }
+
+        val sorted = combined.sortedWith(
+            compareBy<AppInfoItem>({ it.appName.lowercase() }, { it.userId }, { it.packageName })
+        )
         synchronized(lock) {
-            cachedApps = list
+            cachedApps = sorted
             cachedAtMs = System.currentTimeMillis()
         }
-        return list
+        return if (includeSecondaryUsers) sorted else sorted.filter { it.userId == 0 }
     }
 
-    fun getCachedIconThumb(packageName: String): androidx.compose.ui.graphics.ImageBitmap? {
+    fun getCachedIconThumb(packageName: String, userId: Int = 0): androidx.compose.ui.graphics.ImageBitmap? {
+        val key = iconCacheKey(packageName, userId)
         synchronized(iconThumbCache) {
-            return iconThumbCache.get(packageName)
+            return iconThumbCache.get(key)
         }
     }
 
-    fun loadIconThumb(context: Context, packageName: String): androidx.compose.ui.graphics.ImageBitmap? {
-        getCachedIconThumb(packageName)?.let { return it }
+    fun loadIconThumb(
+        context: Context,
+        packageName: String,
+        userId: Int = 0,
+    ): androidx.compose.ui.graphics.ImageBitmap? {
+        getCachedIconThumb(packageName, userId)?.let { return it }
         return try {
-            val drawable = context.packageManager.getApplicationIcon(packageName)
+            var drawable: Drawable? = null
+            if (userId > 0) {
+                val handle = AndroidUserHelper.resolveProfileHandle(context, userId)
+                val la = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
+                if (handle != null && la != null) {
+                    drawable = try {
+                        la.getActivityList(packageName, handle)?.firstOrNull()?.getBadgedIcon(0)
+                    } catch (_: Throwable) {
+                        null
+                    }
+                }
+            }
+            if (drawable == null) {
+                drawable = context.packageManager.getApplicationIcon(packageName)
+            }
             val bmp = Bitmap.createBitmap(
                 ICON_THUMB_SIZE_PX,
                 ICON_THUMB_SIZE_PX,
@@ -706,8 +809,9 @@ private object InstalledAppsCache {
             drawable.setBounds(0, 0, ICON_THUMB_SIZE_PX, ICON_THUMB_SIZE_PX)
             drawable.draw(canvas)
             val imageBitmap = bmp.toComposeImageBitmap()
+            val key = iconCacheKey(packageName, userId)
             synchronized(iconThumbCache) {
-                iconThumbCache.put(packageName, imageBitmap)
+                iconThumbCache.put(key, imageBitmap)
             }
             imageBitmap
         } catch (_: Throwable) {
@@ -720,15 +824,16 @@ private object InstalledAppsCache {
 private fun AppPickerRowIcon(
     packageName: String,
     appName: String,
+    userId: Int = 0,
 ) {
     val ctx = LocalContext.current
-    var thumb by remember(packageName) {
-        mutableStateOf(InstalledAppsCache.getCachedIconThumb(packageName))
+    var thumb by remember(packageName, userId) {
+        mutableStateOf(InstalledAppsCache.getCachedIconThumb(packageName, userId))
     }
-    LaunchedEffect(packageName) {
+    LaunchedEffect(packageName, userId) {
         if (thumb == null) {
             thumb = withContext(Dispatchers.IO) {
-                InstalledAppsCache.loadIconThumb(ctx, packageName)
+                InstalledAppsCache.loadIconThumb(ctx, packageName, userId)
             }
         }
     }
@@ -754,33 +859,52 @@ private fun AppPickerRowIcon(
 @Composable
 fun AppListPickerDialog(
     onDismiss: () -> Unit,
-    onSelectApp: (pkg: String, name: String) -> Unit,
+    includeSecondaryUsers: Boolean = false,
+    onSelectApp: (pkg: String, name: String, userId: Int) -> Unit,
 ) {
     val ctx = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
-    var filterTab by remember { mutableIntStateOf(0) } // 0=全部, 1=用户应用, 2=系统应用
-    var allApps by remember { mutableStateOf(InstalledAppsCache.getCachedAppsIfFresh().orEmpty()) }
-    var isLoading by remember { mutableStateOf(allApps.isEmpty()) }
+    var filterTab by remember { mutableIntStateOf(0) } // 0=全部, 1=用户应用, 2=系统应用, 3=双开/分身
+    var scopedApps by remember(includeSecondaryUsers) {
+        mutableStateOf(InstalledAppsCache.getCachedAppsIfFresh(includeSecondaryUsers).orEmpty())
+    }
+    var isLoading by remember(includeSecondaryUsers) { mutableStateOf(scopedApps.isEmpty()) }
 
-    LaunchedEffect(Unit) {
-        if (allApps.isEmpty()) {
+    LaunchedEffect(includeSecondaryUsers) {
+        if (scopedApps.isEmpty()) {
             val list = withContext(Dispatchers.IO) {
-                InstalledAppsCache.loadInstalledApps(ctx)
+                InstalledAppsCache.loadInstalledApps(ctx, includeSecondaryUsers)
             }
-            allApps = list
+            scopedApps = list
             isLoading = false
         }
     }
 
-    val filteredApps = remember(searchQuery, filterTab, allApps) {
-        var base = when (filterTab) {
-            1 -> allApps.filter { !it.isSystem }
-            2 -> allApps.filter { it.isSystem }
-            else -> allApps
+    val secondaryApps = remember(scopedApps, includeSecondaryUsers) {
+        if (includeSecondaryUsers) scopedApps.filter { it.userId > 0 } else emptyList()
+    }
+    val hasSecondary = includeSecondaryUsers && secondaryApps.isNotEmpty()
+    val tabs = remember(scopedApps.size, secondaryApps.size, hasSecondary) {
+        if (hasSecondary) {
+            listOf("全部 (${scopedApps.size})", "用户应用", "系统应用", "双开/分身 (${secondaryApps.size})")
+        } else {
+            listOf("全部 (${scopedApps.size})", "用户应用", "系统应用")
+        }
+    }
+    val activeTab = filterTab.coerceIn(0, tabs.lastIndex)
+
+    val filteredApps = remember(searchQuery, activeTab, scopedApps, secondaryApps) {
+        var base = when (activeTab) {
+            1 -> scopedApps.filter { !it.isSystem }
+            2 -> scopedApps.filter { it.isSystem }
+            3 -> secondaryApps
+            else -> scopedApps
         }
         if (searchQuery.isNotBlank()) {
             base = base.filter {
-                it.appName.contains(searchQuery, ignoreCase = true) || it.packageName.contains(searchQuery, ignoreCase = true)
+                it.appName.contains(searchQuery, ignoreCase = true) ||
+                    it.packageName.contains(searchQuery, ignoreCase = true) ||
+                    it.userLabel.contains(searchQuery, ignoreCase = true)
             }
         }
         base
@@ -807,14 +931,18 @@ fun AppListPickerDialog(
                     color = MiuixTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = "选取应用作为快捷图标或启动目标",
+                    text = if (includeSecondaryUsers) {
+                        "选取应用作为启动目标（含双开 / 工作资料应用）"
+                    } else {
+                        "选取应用作为快捷图标"
+                    },
                     fontSize = 12.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
                 TabRow(
-                    tabs = listOf("全部 (${allApps.size})", "用户应用", "系统应用"),
-                    selectedTabIndex = filterTab,
+                    tabs = tabs,
+                    selectedTabIndex = activeTab,
                     onTabSelected = { filterTab = it },
                     colors = TabRowDefaults.tabRowColors(backgroundColor = Color.Transparent),
                     modifier = Modifier.padding(bottom = 10.dp),
@@ -843,18 +971,22 @@ fun AppListPickerDialog(
                             .fillMaxWidth()
                             .heightIn(max = 380.dp),
                     ) {
-                        items(filteredApps.size, key = { filteredApps[it].packageName }) { idx ->
+                        items(
+                            filteredApps.size,
+                            key = { "${filteredApps[it].userId}:${filteredApps[it].packageName}" },
+                        ) { idx ->
                             val app = filteredApps[idx]
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { onSelectApp(app.packageName, app.appName) }
+                                    .clickable { onSelectApp(app.packageName, app.appName, app.userId) }
                                     .padding(vertical = 8.dp, horizontal = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 AppPickerRowIcon(
                                     packageName = app.packageName,
                                     appName = app.appName,
+                                    userId = app.userId,
                                 )
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
@@ -868,6 +1000,21 @@ fun AppListPickerDialog(
                                             color = MiuixTheme.colorScheme.onSurface,
                                             modifier = Modifier.weight(1f, fill = false),
                                         )
+                                        if (app.userId > 0 && app.userLabel.isNotBlank()) {
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(
+                                                text = app.userLabel,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = Color(0xFFFF6900),
+                                                modifier = Modifier
+                                                    .background(
+                                                        Color(0xFFFF6900).copy(alpha = 0.14f),
+                                                        RoundedCornerShape(4.dp),
+                                                    )
+                                                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                                            )
+                                        }
                                         if (app.isSystem) {
                                             Spacer(Modifier.width(6.dp))
                                             Text(
@@ -912,28 +1059,31 @@ data class ActivityInfoItem(
     val label: String,
 )
 
-/** 应用 → 活动列表两级选择器：点活动直接填入 目标组件/目标包名 */
+/** 应用 → 活动列表两级选择器：点活动直接填入 目标组件/目标包名（含次级空间回退） */
 @Composable
 fun ActivityPickerDialog(
     onDismiss: () -> Unit,
-    onPick: (pkg: String, cls: String, appName: String) -> Unit,
+    onPick: (pkg: String, cls: String, appName: String, userId: Int) -> Unit,
 ) {
     val ctx = LocalContext.current
     var selectedApp by remember { mutableStateOf<AppInfoItem?>(null) }
     var appSearch by remember { mutableStateOf("") }
-    var filterTab by remember { mutableIntStateOf(0) } // 0=全部, 1=用户应用, 2=系统应用
-    var allApps by remember { mutableStateOf(InstalledAppsCache.getCachedAppsIfFresh().orEmpty()) }
+    var filterTab by remember { mutableIntStateOf(0) } // 0=全部, 1=用户应用, 2=系统应用, 3=双开/分身
+    var allApps by remember {
+        mutableStateOf(InstalledAppsCache.getCachedAppsIfFresh(includeSecondaryUsers = true).orEmpty())
+    }
     var isLoading by remember { mutableStateOf(allApps.isEmpty()) }
 
     var activities by remember { mutableStateOf<List<ActivityInfoItem>>(emptyList()) }
     var actLoading by remember { mutableStateOf(false) }
+    var isFallbackLauncherActs by remember { mutableStateOf(false) }
     var actSearch by remember { mutableStateOf("") }
     var actFilter by remember { mutableIntStateOf(0) } // 0=全部, 1=已导出, 2=未导出
 
     LaunchedEffect(Unit) {
         if (allApps.isEmpty()) {
             val list = withContext(Dispatchers.IO) {
-                InstalledAppsCache.loadInstalledApps(ctx)
+                InstalledAppsCache.loadInstalledApps(ctx, includeSecondaryUsers = true)
             }
             allApps = list
             isLoading = false
@@ -943,39 +1093,75 @@ fun ActivityPickerDialog(
     LaunchedEffect(selectedApp) {
         val app = selectedApp ?: return@LaunchedEffect
         actLoading = true
+        isFallbackLauncherActs = false
         activities = emptyList()
-        withContext(Dispatchers.IO) {
-            val list = try {
-                val pm = ctx.packageManager
+        val (loadedActs, usedFallback) = withContext(Dispatchers.IO) {
+            val pm = ctx.packageManager
+            val pmList = try {
                 @Suppress("DEPRECATION")
                 val acts = pm.getPackageInfo(app.packageName, PackageManager.GET_ACTIVITIES).activities ?: emptyArray()
                 acts.map { ai ->
                     val label = try {
                         ai.loadLabel(pm).toString()
-                    } catch (t: Throwable) {
+                    } catch (_: Throwable) {
                         ""
                     }
                     ActivityInfoItem(ai.name, ai.exported, label)
                 }.sortedBy { it.className }
-            } catch (t: Throwable) {
+            } catch (_: Throwable) {
                 emptyList()
             }
-            withContext(Dispatchers.Main) {
-                activities = list
-                actLoading = false
+            if (pmList.isEmpty() && app.userId > 0) {
+                val handle = AndroidUserHelper.resolveProfileHandle(ctx, app.userId)
+                val la = ctx.getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
+                val laList = if (handle != null && la != null) {
+                    try {
+                        la.getActivityList(app.packageName, handle)?.map { lai ->
+                            ActivityInfoItem(
+                                className = lai.componentName.className,
+                                exported = true,
+                                label = lai.label?.toString().orEmpty(),
+                            )
+                        }?.sortedBy { it.className }.orEmpty()
+                    } catch (_: Throwable) {
+                        emptyList()
+                    }
+                } else {
+                    emptyList()
+                }
+                laList to true
+            } else {
+                pmList to false
             }
         }
+        activities = loadedActs
+        isFallbackLauncherActs = usedFallback
+        actLoading = false
     }
 
-    val filteredApps = remember(appSearch, filterTab, allApps) {
-        var base = when (filterTab) {
+    val secondaryApps = remember(allApps) { allApps.filter { it.userId > 0 } }
+    val hasSecondary = secondaryApps.isNotEmpty()
+    val appTabs = remember(allApps.size, secondaryApps.size, hasSecondary) {
+        if (hasSecondary) {
+            listOf("全部 (${allApps.size})", "用户应用", "系统应用", "双开/分身 (${secondaryApps.size})")
+        } else {
+            listOf("全部 (${allApps.size})", "用户应用", "系统应用")
+        }
+    }
+    val activeAppTab = filterTab.coerceIn(0, appTabs.lastIndex)
+
+    val filteredApps = remember(appSearch, activeAppTab, allApps, secondaryApps) {
+        var base = when (activeAppTab) {
             1 -> allApps.filter { !it.isSystem }
             2 -> allApps.filter { it.isSystem }
+            3 -> secondaryApps
             else -> allApps
         }
         if (appSearch.isNotBlank()) {
             base = base.filter {
-                it.appName.contains(appSearch, ignoreCase = true) || it.packageName.contains(appSearch, ignoreCase = true)
+                it.appName.contains(appSearch, ignoreCase = true) ||
+                    it.packageName.contains(appSearch, ignoreCase = true) ||
+                    it.userLabel.contains(appSearch, ignoreCase = true)
             }
         }
         base
@@ -1025,8 +1211,8 @@ fun ActivityPickerDialog(
                         modifier = Modifier.padding(bottom = 8.dp),
                     )
                     TabRow(
-                        tabs = listOf("全部 (${allApps.size})", "用户应用", "系统应用"),
-                        selectedTabIndex = filterTab,
+                        tabs = appTabs,
+                        selectedTabIndex = activeAppTab,
                         onTabSelected = { filterTab = it },
                         colors = TabRowDefaults.tabRowColors(backgroundColor = Color.Transparent),
                         modifier = Modifier.padding(bottom = 10.dp),
@@ -1055,7 +1241,10 @@ fun ActivityPickerDialog(
                                 .fillMaxWidth()
                                 .heightIn(max = 380.dp),
                         ) {
-                            items(filteredApps.size, key = { "app-" + filteredApps[it].packageName }) { idx ->
+                            items(
+                                filteredApps.size,
+                                key = { "app-${filteredApps[it].userId}:${filteredApps[it].packageName}" },
+                            ) { idx ->
                                 val item = filteredApps[idx]
                                 Row(
                                     modifier = Modifier
@@ -1067,6 +1256,7 @@ fun ActivityPickerDialog(
                                     AppPickerRowIcon(
                                         packageName = item.packageName,
                                         appName = item.appName,
+                                        userId = item.userId,
                                     )
                                     Spacer(Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
@@ -1080,6 +1270,21 @@ fun ActivityPickerDialog(
                                                 color = MiuixTheme.colorScheme.onSurface,
                                                 modifier = Modifier.weight(1f, fill = false),
                                             )
+                                            if (item.userId > 0 && item.userLabel.isNotBlank()) {
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(
+                                                    text = item.userLabel,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = Color(0xFFFF6900),
+                                                    modifier = Modifier
+                                                        .background(
+                                                            Color(0xFFFF6900).copy(alpha = 0.14f),
+                                                            RoundedCornerShape(4.dp),
+                                                        )
+                                                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                                                )
+                                            }
                                             if (item.isSystem) {
                                                 Spacer(Modifier.width(6.dp))
                                                 Text(
@@ -1114,12 +1319,17 @@ fun ActivityPickerDialog(
                             onClick = {
                                 selectedApp = null
                                 activities = emptyList()
+                                isFallbackLauncherActs = false
                                 actSearch = ""
                             },
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = app.appName,
+                            text = if (app.userId > 0 && app.userLabel.isNotBlank()) {
+                                "${app.appName} (${app.userLabel})"
+                            } else {
+                                app.appName
+                            },
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = MiuixTheme.colorScheme.onSurface,
@@ -1129,7 +1339,11 @@ fun ActivityPickerDialog(
                         )
                     }
                     Text(
-                        text = "点活动直接填入 目标组件 / 目标包名（共 ${activities.size} 个活动）",
+                        text = if (isFallbackLauncherActs) {
+                            "该空间仅列出公开入口活动（共 ${activities.size} 个）；内部类名可返回手动填写"
+                        } else {
+                            "点活动直接填入 目标组件 / 目标包名（共 ${activities.size} 个活动）"
+                        },
                         fontSize = 12.sp,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         modifier = Modifier.padding(bottom = 8.dp),
@@ -1179,7 +1393,7 @@ fun ActivityPickerDialog(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable { onPick(app.packageName, act.className, app.appName) }
+                                        .clickable { onPick(app.packageName, act.className, app.appName, app.userId) }
                                         .padding(vertical = 8.dp, horizontal = 4.dp),
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {

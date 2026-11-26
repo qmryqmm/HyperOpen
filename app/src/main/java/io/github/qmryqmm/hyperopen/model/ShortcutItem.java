@@ -35,6 +35,7 @@ import io.github.qmryqmm.hyperopen.util.IpcExecutor;
 
 public class ShortcutItem {
     private static final String TAG = "HyperOpen_Shortcut";
+    private static final int MAX_VALID_USER_ID = 9999;
 
     public static final String ACTION_APP = "APP";
     public static final String ACTION_INTENT_URI = "INTENT_URI";
@@ -456,20 +457,17 @@ public class ShortcutItem {
                         delegatedOrLogged = true;
                         break;
                     }
+                    if (userId > 0) {
+                        // 跨用户启动（如 999 应用双开 / 工作资料 / 手机分身）：优先零 Root 直启目标空间
+                        launchAppForUser(context, pkg, userId, entry, startMs);
+                        delegatedOrLogged = true;
+                        break;
+                    }
                     Intent intent = context.getPackageManager().getLaunchIntentForPackage(pkg);
                     if (intent != null) {
-                        if (userId > 0) {
-                            // 编辑界面「启动用户」指定了跨用户（如 999 应用双开/分身）
-                            launchAsUser(context, intent, userId, entry, startMs);
-                            delegatedOrLogged = true;
-                            break;
-                        }
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
                         context.startActivity(intent);
                         recordExecutionLog(context, entry, startMs, true, "", "");
-                        delegatedOrLogged = true;
-                    } else if (userId > 0) {
-                        launchDualAppFallback(context, pkg, userId, entry, startMs);
                         delegatedOrLogged = true;
                     } else {
                         String errMsg = "未找到目标应用: " + actionPayload;
@@ -564,8 +562,38 @@ public class ShortcutItem {
                         if (cn == null) {
                             String pkg = spec.packageName == null ? "" : spec.packageName.trim();
                             if (!pkg.isEmpty()) {
-                                Intent launch = context.getPackageManager().getLaunchIntentForPackage(pkg);
-                                if (launch != null) cn = launch.getComponent();
+                                if (userId > 0) {
+                                    UserHandle targetHandle = resolveUserHandle(userId);
+                                    if (targetHandle == null) {
+                                        String errMsg = "用户 ID 无效: " + userId;
+                                        showToast(context, errMsg);
+                                        recordExecutionLog(context, entry, startMs, false, errMsg, "");
+                                        delegatedOrLogged = true;
+                                        break;
+                                    }
+                                    if (android.os.Build.VERSION.SDK_INT >= 21) {
+                                        try {
+                                            LauncherApps la = (LauncherApps) context.getSystemService(Context.LAUNCHER_APPS_SERVICE);
+                                            if (la != null) {
+                                                List<LauncherActivityInfo> activities = la.getActivityList(pkg, targetHandle);
+                                                if (activities != null && !activities.isEmpty()) {
+                                                    cn = activities.get(0).getComponentName();
+                                                }
+                                            }
+                                        } catch (Throwable t) {
+                                            Log.w(TAG, "LauncherApps 解析目标空间入口失败: pkg=" + pkg + ", user=" + userId, t);
+                                        }
+                                    }
+                                    if (cn == null) {
+                                        // 目标空间未暴露给 LauncherApps（如独立用户或主空间未安装），直接走 Root 在目标空间解析并启动
+                                        resolveAndLaunchAppViaRoot(context, pkg, userId, entry);
+                                        delegatedOrLogged = true;
+                                        break;
+                                    }
+                                } else {
+                                    Intent launch = context.getPackageManager().getLaunchIntentForPackage(pkg);
+                                    if (launch != null) cn = launch.getComponent();
+                                }
                             }
                         }
                         if (cn == null) {
@@ -1090,22 +1118,69 @@ public class ShortcutItem {
         }
     }
 
-    private static void launchDualAppFallback(Context context, String pkg, int userId,
+    /**
+     * 安全构造指定 userId 的 UserHandle，防止负数、0 或超大值乘以 100000 溢出。
+     * 优先反射调用 UserHandle.of(int)，失败后回退 UserHandle.getUserHandleForUid(userId * 100000)。
+     */
+    private static UserHandle resolveUserHandle(int userId) {
+        if (userId <= 0 || userId > MAX_VALID_USER_ID) {
+            return null;
+        }
+        try {
+            java.lang.reflect.Method ofMethod = UserHandle.class.getMethod("of", int.class);
+            Object res = ofMethod.invoke(null, userId);
+            if (res instanceof UserHandle) {
+                return (UserHandle) res;
+            }
+        } catch (Throwable ignored) {
+        }
+        try {
+            return UserHandle.getUserHandleForUid(userId * 100000);
+        } catch (Throwable t) {
+            Log.w(TAG, "构造 UserHandle 失败: userId=" + userId, t);
+            return null;
+        }
+    }
+
+    /** 剥离反射调用包装的 InvocationTargetException，获取真实根因异常 */
+    private static Throwable unwrapCause(Throwable t) {
+        Throwable cur = t;
+        while (cur instanceof java.lang.reflect.InvocationTargetException && cur.getCause() != null) {
+            cur = cur.getCause();
+        }
+        return cur;
+    }
+
+    /**
+     * 跨用户启动应用（零 Root 优先）：
+     * 1) 校验 userId 合法性；
+     * 2) 优先通过 LauncherApps.getActivityList + startMainActivity 直启目标空间真实入口；
+     * 3) 若 startMainActivity 失败，构造显式 MAIN/LAUNCHER Intent 走 launchAsUser；
+     * 4) 若 LauncherApps 未返回入口，在非 App 进程（SystemUI）尝试 getLaunchIntentForPackage -> launchAsUser；
+     * 5) 最终回退 Root 在目标空间解析并启动。
+     */
+    private static void launchAppForUser(Context context, String pkg, int userId,
             ShortcutLaunchLogStore.Entry entry, long startMs) {
+        UserHandle targetHandle = resolveUserHandle(userId);
+        if (targetHandle == null) {
+            String errMsg = "用户 ID 无效: " + userId;
+            showToast(context, errMsg);
+            recordExecutionLog(context, entry, startMs, false, errMsg, "");
+            return;
+        }
         if (android.os.Build.VERSION.SDK_INT >= 21) {
             try {
                 LauncherApps la = (LauncherApps) context.getSystemService(Context.LAUNCHER_APPS_SERVICE);
                 if (la != null) {
-                    UserHandle target = UserHandle.getUserHandleForUid(userId * 100000);
-                    List<LauncherActivityInfo> activities = la.getActivityList(pkg, target);
+                    List<LauncherActivityInfo> activities = la.getActivityList(pkg, targetHandle);
                     if (activities != null && !activities.isEmpty()) {
                         ComponentName comp = activities.get(0).getComponentName();
                         try {
-                            la.startMainActivity(comp, target, null, null);
+                            la.startMainActivity(comp, targetHandle, null, null);
                             recordExecutionLog(context, entry, startMs, true, "", "LauncherApps: " + comp.flattenToShortString());
                             return;
                         } catch (Throwable t) {
-                            Log.w(TAG, "LauncherApps.startMainActivity 启动双开失败，改走 launchAsUser: " + comp, t);
+                            Log.w(TAG, "LauncherApps.startMainActivity 启动跨用户应用失败，改走 launchAsUser: " + comp, t);
                         }
                         Intent fallbackIntent = new Intent(Intent.ACTION_MAIN);
                         fallbackIntent.addCategory(Intent.CATEGORY_LAUNCHER);
@@ -1116,9 +1191,26 @@ public class ShortcutItem {
                     }
                 }
             } catch (Throwable t) {
-                Log.w(TAG, "LauncherApps 解析双开应用失败: pkg=" + pkg + ", user=" + userId, t);
+                Log.w(TAG, "LauncherApps 解析跨用户应用失败: pkg=" + pkg + ", user=" + userId, t);
             }
         }
+        if (!isOwnAppProcess(context)) {
+            try {
+                Intent intent = context.getPackageManager().getLaunchIntentForPackage(pkg);
+                if (intent != null) {
+                    launchAsUser(context, intent, userId, entry, startMs);
+                    return;
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "SystemUI getLaunchIntentForPackage 跨用户启动失败: pkg=" + pkg + ", user=" + userId, t);
+            }
+        }
+        resolveAndLaunchAppViaRoot(context, pkg, userId, entry);
+    }
+
+    /** 通过 Root 在指定用户空间解析包的主入口 Activity 并启动 */
+    private static void resolveAndLaunchAppViaRoot(Context context, String pkg, int userId,
+            ShortcutLaunchLogStore.Entry entry) {
         String quotedPkg = quoteForSh(pkg);
         String cmd = "comp=$(cmd package resolve-activity --user " + userId
                 + " --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "
@@ -1135,37 +1227,63 @@ public class ShortcutItem {
     /**
      * 以指定用户身份启动 Activity（如 userId=999 → MIUI/HyperOS 应用双开 XSpace/分身）。
      * Intent URI 规范里没有 user 字段，用户只能在发起侧指定：
-     * 1) 系统上下文 createContextAsUser（需 INTERACT_ACROSS_USERS[_FULL]，SystemUI/系统签名可直连）
+     * 1) 系统上下文 startActivityAsUser / createContextAsUser（需 INTERACT_ACROSS_USERS[_FULL]，SystemUI/系统签名可直连）
      * 2) Root 兜底：su -c 'am start --user N "intent:..."'
      */
     private static void launchAsUser(Context context, Intent intent, int userId,
             ShortcutLaunchLogStore.Entry entry, long startMs) {
+        UserHandle target = resolveUserHandle(userId);
+        if (target == null) {
+            String errMsg = "用户 ID 无效: " + userId;
+            showToast(context, errMsg);
+            recordExecutionLog(context, entry, startMs, false, errMsg, "");
+            return;
+        }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         if (android.os.Build.VERSION.SDK_INT >= 30) {
-            // getUserHandleForUid(uid) 按 uid/PER_USER_RANGE(100000) 取用户 → userId*100000 即该用户的 UserHandle
-            android.os.UserHandle target =
-                    android.os.UserHandle.getUserHandleForUid(userId * 100000);
             // 0) Context#startActivityAsUser（SDK 桩非公开）：SystemUI 等系统上下文
             //    持有 INTERACT_ACROSS_USERS[_FULL] 时可直连，最快路径
             try {
                 java.lang.reflect.Method m =
-                        Context.class.getMethod("startActivityAsUser", Intent.class, android.os.UserHandle.class);
+                        Context.class.getMethod("startActivityAsUser", Intent.class, UserHandle.class);
                 m.invoke(context, intent, target);
                 recordExecutionLog(context, entry, startMs, true, "", "startActivityAsUser(" + userId + ")");
                 return;
             } catch (Throwable t) {
-                Log.w(TAG, "startActivityAsUser 启动 user " + userId + " 不可用，尝试 createContextAsUser", t);
+                Throwable cause = unwrapCause(t);
+                if (cause instanceof android.content.ActivityNotFoundException) {
+                    String errMsg = "用户 " + userId + " 中未找到目标应用或组件";
+                    Log.w(TAG, errMsg, cause);
+                    showToast(context, errMsg);
+                    recordExecutionLog(context, entry, startMs, false, errMsg, "");
+                    return;
+                }
+                if (!(cause instanceof NoSuchMethodException
+                        || cause instanceof IllegalAccessException
+                        || cause instanceof SecurityException)) {
+                    Log.w(TAG, "startActivityAsUser 启动 user " + userId + " 失败，尝试 createContextAsUser", cause);
+                } else {
+                    Log.w(TAG, "startActivityAsUser 启动 user " + userId + " 不可用，尝试 createContextAsUser", cause);
+                }
             }
             // 1) Context#createContextAsUser（SDK 桩非公开）反射调用（API 30+ 运行时存在）
             try {
                 java.lang.reflect.Method m =
-                        Context.class.getMethod("createContextAsUser", android.os.UserHandle.class, int.class);
+                        Context.class.getMethod("createContextAsUser", UserHandle.class, int.class);
                 Context userCtx = (Context) m.invoke(context, target, 0);
                 userCtx.startActivity(intent);
                 recordExecutionLog(context, entry, startMs, true, "", "createContextAsUser(" + userId + ")");
                 return;
             } catch (Throwable t) {
-                Log.w(TAG, "createContextAsUser 启动 user " + userId + " 失败，改用 am start --user 兜底", t);
+                Throwable cause = unwrapCause(t);
+                if (cause instanceof android.content.ActivityNotFoundException) {
+                    String errMsg = "用户 " + userId + " 中未找到目标应用或组件";
+                    Log.w(TAG, errMsg, cause);
+                    showToast(context, errMsg);
+                    recordExecutionLog(context, entry, startMs, false, errMsg, "");
+                    return;
+                }
+                Log.w(TAG, "createContextAsUser 启动 user " + userId + " 失败，改用 am start --user 兜底", cause);
             }
         }
         try {

@@ -21,6 +21,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -85,6 +87,8 @@ import io.github.qmryqmm.hyperopen.ui.components.duplicateShortcut
 import io.github.qmryqmm.hyperopen.ui.components.newBlankChildShortcut
 import io.github.qmryqmm.hyperopen.ui.components.shortcutRowGestures
 import io.github.qmryqmm.hyperopen.ui.components.toComposeImageBitmap
+import io.github.qmryqmm.hyperopen.util.AndroidUserHelper
+import io.github.qmryqmm.hyperopen.util.AndroidUserOption
 import io.github.qmryqmm.hyperopen.view.IconGlyphFactory
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -122,49 +126,6 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
  *   - 提示文字：顶部胶囊内独立颜色、透明度、投影、描边、字重与字距；
  *   - 动作配置：App 启动、Intent URI、Activity 精准定位（参数构建）、广播、手电筒、勿扰、静音与 Shell。
  */
-
-/** 设备 Android 用户条目（id + 显示名），供「启动用户」选择列表使用 */
-data class AndroidUserOption(val id: Int, val name: String)
-
-/**
- * 枚举设备上的 Android 用户：
- * 1) 反射 UserManager#getUsers()（@SystemApi；可用时拿到真实用户名，如「手机分身」）
- * 2) 失败则退化为常用固定项：主空间 0 + 应用双开/手机分身 999
- */
-fun loadAndroidUsers(ctx: android.content.Context): List<AndroidUserOption> {
-    val found = mutableListOf<AndroidUserOption>()
-    try {
-        val um = ctx.getSystemService(android.os.UserManager::class.java)
-        if (um != null) {
-            val raw: List<*>? = try {
-                @Suppress("UNCHECKED_CAST")
-                um.javaClass.getMethod("getUsers").invoke(um) as? List<*>
-            } catch (_: Throwable) {
-                try {
-                    @Suppress("UNCHECKED_CAST")
-                    um.javaClass.getMethod("getUsers", java.lang.Boolean.TYPE)
-                        .invoke(um, true) as? List<*>
-                } catch (_: Throwable) {
-                    null
-                }
-            }
-            raw?.forEach { u ->
-                if (u == null) return@forEach
-                try {
-                    val id = u.javaClass.getField("id").getInt(u)
-                    val name = (u.javaClass.getField("name").get(u) as? String)
-                        ?.ifBlank { "用户$id" } ?: "用户$id"
-                    found.add(AndroidUserOption(id, name))
-                } catch (_: Throwable) {
-                }
-            }
-        }
-    } catch (_: Throwable) {
-    }
-    if (found.isEmpty()) found.add(AndroidUserOption(0, "主空间"))
-    if (found.none { it.id == 999 }) found.add(AndroidUserOption(999, "应用双开 / 手机分身"))
-    return found.sortedBy { it.id }
-}
 
 /** 「启动 Activity」附加 Extra 的编辑器内存行（保存/测试时转 ActivityLaunchSpec.Extra） */
 data class ActivityExtraRow(
@@ -459,8 +420,13 @@ fun ShortcutEditPage(
             else if (initialItem.hintTextColor != 0) initialItem.hintTextColor else initialItem.resolveIconPrimaryColor()
         mutableStateOf(formatRgbHex(base))
     }
-    // 设备用户列表（「启动用户」选择用；反射枚举一次即可）
-    val userOptions = remember(ctx) { loadAndroidUsers(ctx) }
+    // 设备用户列表（「启动用户」选择用：先零 Root 快速加载，再在 IO 线程补充 Root pm list users）
+    var userOptions by remember(ctx) { mutableStateOf(AndroidUserHelper.loadFastUsers(ctx)) }
+    LaunchedEffect(ctx) {
+        userOptions = withContext(Dispatchers.IO) {
+            AndroidUserHelper.loadDeviceUsersWithRootEnrich(ctx)
+        }
+    }
     // 启动用户（0 = 当前/主空间默认；>0 跨用户，如 999 应用双开/分身）与 SHELL Root 执行开关
     // 启动用户：userId 字段优先；老快捷方式只有 URI 标记（i.hyperopen_user）时从 payload 解析回来
     val initialPickedUser = if (initialItem.userId > 0) initialItem.userId
@@ -480,6 +446,12 @@ fun ShortcutEditPage(
                 ""
             }
         )
+    }
+    LaunchedEffect(userOptions, initialPickedUser) {
+        if (customUserMode && pickedUser > 0 && userOptions.any { it.id == pickedUser }) {
+            customUserMode = false
+            customUserText = ""
+        }
     }
     // ── 「启动 Activity」结构化 Intent 编辑状态（与 actionPayload 的 JSON 双向同步）──
     val initialActSpec = remember(initialItem) {
@@ -558,8 +530,8 @@ fun ShortcutEditPage(
         ) {
             if (customUserMode) {
                 val parsedUser = customUserText.trim().toIntOrNull()
-                if (parsedUser == null || parsedUser <= 0) {
-                    return "请填写有效的自定义用户 ID（大于 0 的整数）"
+                if (parsedUser == null || parsedUser !in 1..9999) {
+                    return "请填写有效的自定义用户 ID（1~9999 之间的整数）"
                 }
             }
         }
@@ -1067,57 +1039,35 @@ fun ShortcutEditPage(
                 CollapsibleSectionTitle("启动用户（应用双开 / 分身）", isOpen("target_user")) { toggle("target_user") }
             }
             if (isOpen("target_user")) {
-            item(key = "target_user_card") {
-                Card(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .fillMaxWidth(),
-                ) {
-                    RadioButtonPreference(
-                        title = "当前用户 / 主空间（默认）",
-                        summary = "在默认用户空间中启动，不跨用户",
-                        selected = !customUserMode && pickedUser <= 0,
-                        onClick = {
+                item(key = "target_user_card") {
+                    val targetPkg = AndroidUserHelper.resolveTargetPackageFromShortcut(
+                        actionType = actionType,
+                        actionPayload = actionPayload,
+                        actPackage = actPackage,
+                        actComponent = actComponent,
+                    )
+                    TargetUserPickerCard(
+                        userOptions = userOptions,
+                        pickedUser = pickedUser,
+                        customUserMode = customUserMode,
+                        customUserText = customUserText,
+                        targetPackage = targetPkg,
+                        onSelectPresetUser = { uid ->
                             customUserMode = false
-                            pickedUser = 0
+                            customUserText = ""
+                            pickedUser = uid
                         },
-                    )
-                    userOptions.filter { it.id > 0 }.forEach { u ->
-                        RadioButtonPreference(
-                            title = "${u.id} · ${u.name}",
-                            summary = "以 user ${u.id} 身份跨用户启动（该用户内需已安装/双开目标应用）",
-                            selected = !customUserMode && pickedUser == u.id,
-                            onClick = {
-                                customUserMode = false
-                                pickedUser = u.id
-                            },
-                        )
-                    }
-                    RadioButtonPreference(
-                        title = "自定义用户 ID",
-                        summary = "手动输入其他 Android 用户 ID（user > 0）",
-                        selected = customUserMode,
-                        onClick = {
+                        onSelectCustomMode = {
                             customUserMode = true
-                            pickedUser = customUserText.trim().toIntOrNull()?.takeIf { it > 0 } ?: 0
+                            pickedUser = customUserText.trim().toIntOrNull()?.takeIf { it in 1..9999 } ?: 0
+                        },
+                        onCustomTextChange = { text ->
+                            val filtered = text.filter { it.isDigit() }.take(4)
+                            customUserText = filtered
+                            pickedUser = filtered.toIntOrNull()?.takeIf { it in 1..9999 } ?: 0
                         },
                     )
-                    if (customUserMode) {
-                        Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                            TextField(
-                                value = customUserText,
-                                onValueChange = { text ->
-                                    customUserText = text
-                                    pickedUser = text.trim().toIntOrNull()?.takeIf { it > 0 } ?: 0
-                                },
-                                label = "目标用户 ID（正整数，例如 10）",
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    }
                 }
-            }
             }
         }
 
@@ -1341,10 +1291,14 @@ fun ShortcutEditPage(
         val currentPickMode = pickAppMode
         AppListPickerDialog(
             onDismiss = { pickAppMode = PickAppMode.NONE },
-            onSelectApp = { pkg, appName ->
+            includeSecondaryUsers = (currentPickMode == PickAppMode.PAYLOAD),
+            onSelectApp = { pkg, appName, selectedUserId ->
                 when (currentPickMode) {
                     PickAppMode.PAYLOAD -> {
                         actionPayload = pkg
+                        pickedUser = selectedUserId
+                        customUserMode = false
+                        customUserText = ""
                         if (title.isBlank() || title == "新快捷方式" || title == "新子快捷方式") {
                             title = appName
                         }
@@ -1368,9 +1322,12 @@ fun ShortcutEditPage(
     if (showActivityPicker) {
         ActivityPickerDialog(
             onDismiss = { showActivityPicker = false },
-            onPick = { pkg, cls, appName ->
+            onPick = { pkg, cls, appName, selectedUserId ->
                 actComponent = cls
                 actPackage = pkg
+                pickedUser = selectedUserId
+                customUserMode = false
+                customUserText = ""
                 if (title.isBlank() || title == "新快捷方式") {
                     title = appName
                 }
@@ -2504,6 +2461,211 @@ private fun ChildAddActionButton(
                 fontWeight = FontWeight.Medium,
                 color = MiuixTheme.colorScheme.onSurface,
                 maxLines = 1,
+            )
+        }
+    }
+}
+
+/**
+ * 启动用户（应用双开 / 分身）紧凑芯片选择卡片：
+ * 1) 使用 FlowRow 展示主空间 (0)、探测到的双开/工作资料/独立分身用户与自定义芯片；
+ * 2) 结合 targetPackage 在 IO 线程实时探测各空间安装状态并给出清晰提示。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TargetUserPickerCard(
+    userOptions: List<AndroidUserOption>,
+    pickedUser: Int,
+    customUserMode: Boolean,
+    customUserText: String,
+    targetPackage: String?,
+    onSelectPresetUser: (Int) -> Unit,
+    onSelectCustomMode: () -> Unit,
+    onCustomTextChange: (String) -> Unit,
+) {
+    val ctx = LocalContext.current
+    var installedByUser by remember { mutableStateOf<Map<Int, Boolean?>>(emptyMap()) }
+
+    LaunchedEffect(targetPackage, userOptions) {
+        val pkg = targetPackage?.trim().orEmpty()
+        if (pkg.isEmpty()) {
+            installedByUser = emptyMap()
+        } else {
+            installedByUser = withContext(Dispatchers.IO) {
+                AndroidUserHelper.inspectPackageInstalledByUser(
+                    ctx = ctx,
+                    packageName = pkg,
+                    userIds = userOptions.map { it.id },
+                )
+            }
+        }
+    }
+
+    Card(
+        modifier = Modifier
+            .padding(horizontal = 12.dp)
+            .fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // 主空间 (0)
+                val mainSelected = !customUserMode && pickedUser <= 0
+                UserOptionChip(
+                    label = "主空间 (0)",
+                    selected = mainSelected,
+                    installStatus = installedByUser[0],
+                    onClick = { onSelectPresetUser(0) },
+                )
+
+                // 其他探测到的空间
+                userOptions.filter { it.id > 0 }.forEach { opt ->
+                    val label = when {
+                        opt.id == 999 -> "应用双开 (999)"
+                        !opt.isProfile -> "${opt.name} (${opt.id}) · 分身"
+                        else -> "${opt.name} (${opt.id})"
+                    }
+                    UserOptionChip(
+                        label = label,
+                        selected = !customUserMode && pickedUser == opt.id,
+                        installStatus = installedByUser[opt.id],
+                        onClick = { onSelectPresetUser(opt.id) },
+                    )
+                }
+
+                // 自定义用户 ID
+                UserOptionChip(
+                    label = "自定义",
+                    selected = customUserMode,
+                    installStatus = null,
+                    onClick = onSelectCustomMode,
+                )
+            }
+
+            if (customUserMode) {
+                TextField(
+                    value = customUserText,
+                    onValueChange = onCustomTextChange,
+                    label = "目标用户 ID（1~9999，例如 10）",
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            // 选中空间的安装状态或分身限制提示
+            val selectedOpt = if (customUserMode) null else userOptions.firstOrNull { it.id == pickedUser }
+            val selectedLabel = when {
+                customUserMode -> if (pickedUser in 1..9999) "自定义用户 ($pickedUser)" else "自定义用户"
+                pickedUser <= 0 -> "主空间 (0)"
+                selectedOpt?.id == 999 -> "应用双开 (999)"
+                selectedOpt != null -> "${selectedOpt.name} (${selectedOpt.id})"
+                else -> "用户 ($pickedUser)"
+            }
+            val currentStatus = if (customUserMode) null else installedByUser[pickedUser]
+            val pkgTrimmed = targetPackage?.trim().orEmpty()
+
+            when {
+                customUserMode -> {
+                    Text(
+                        text = "请输入 1~9999 的 Android 用户 ID，启动时将按指定身份跨用户拉起。",
+                        fontSize = 12.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+                selectedOpt != null && !selectedOpt.isProfile -> {
+                    Text(
+                        text = "ℹ 「$selectedLabel」为独立分身用户：系统不允许免 Root 检测安装状态，且无法与主空间同屏运行。",
+                        fontSize = 12.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+                pkgTrimmed.isNotEmpty() && currentStatus == true -> {
+                    Text(
+                        text = "✓ 已在「$selectedLabel」检测到目标应用 ($pkgTrimmed)",
+                        fontSize = 12.sp,
+                        color = Color(0xFF07C160),
+                    )
+                }
+                pkgTrimmed.isNotEmpty() && currentStatus == false -> {
+                    Text(
+                        text = "⚠ 未在「$selectedLabel」检测到目标应用 ($pkgTrimmed)，启动可能失败",
+                        fontSize = 12.sp,
+                        color = Color(0xFFFF6900),
+                    )
+                }
+                else -> {
+                    Text(
+                        text = "当前将在「$selectedLabel」中启动目标动作。",
+                        fontSize = 12.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UserOptionChip(
+    label: String,
+    selected: Boolean,
+    installStatus: Boolean?,
+    onClick: () -> Unit,
+) {
+    val bgColor = if (selected) {
+        MiuixTheme.colorScheme.primary.copy(alpha = 0.14f)
+    } else {
+        MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+    }
+    val borderColor = if (selected) {
+        MiuixTheme.colorScheme.primary
+    } else {
+        MiuixTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    }
+    val textColor = if (selected) {
+        MiuixTheme.colorScheme.primary
+    } else {
+        MiuixTheme.colorScheme.onSurface
+    }
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(bgColor)
+            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = textColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (installStatus == true) {
+            Text(
+                text = "✓",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF07C160),
+            )
+        } else if (installStatus == false) {
+            Text(
+                text = "!",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFFF6900),
             )
         }
     }
