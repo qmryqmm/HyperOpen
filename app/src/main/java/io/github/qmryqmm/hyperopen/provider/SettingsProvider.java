@@ -203,16 +203,13 @@ public class SettingsProvider extends ContentProvider {
                     }
                     if (cmd != null && !cmd.isEmpty()) {
                         boolean hasLogMeta = extras.getBoolean("has_log_meta", false);
-                        if (hasLogMeta) {
-                            ShortcutLaunchLogStore.Entry template = ShortcutLaunchLogStore.Entry.fromBundle(extras);
-                            boolean checkAmError = extras.getBoolean("check_am_error", false);
-                            Context ctx = getContext();
-                            io.github.qmryqmm.hyperopen.model.ShortcutItem.runShellCommandWithLog(
-                                    ctx, cmd, useRoot, template, checkAmError);
-                        } else {
-                            // fire-and-forget：runShellCommand 内部自行异步执行，不阻塞 Binder 调用
-                            io.github.qmryqmm.hyperopen.model.ShortcutItem.runShellCommand(cmd, useRoot);
-                        }
+                        ShortcutLaunchLogStore.Entry logTemplate = hasLogMeta
+                                ? ShortcutLaunchLogStore.Entry.fromBundle(extras)
+                                : null;
+                        boolean checkAmError = extras.getBoolean("check_am_error", false);
+                        Context ctx = getContext();
+                        io.github.qmryqmm.hyperopen.model.ShortcutItem.runShellCommandWithLog(
+                                ctx, cmd, useRoot, logTemplate, checkAmError, 4000L);
                         Log.i(TAG, "run_shell 桥接受理(" + (useRoot ? "root" : "shell") + "): " + cmd);
                         r.putBoolean("accepted", true);
                     }

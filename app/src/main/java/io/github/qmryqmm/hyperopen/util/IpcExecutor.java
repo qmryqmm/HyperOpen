@@ -63,7 +63,7 @@ public final class IpcExecutor {
                         }
                     };
                     ThreadPoolExecutor executor = new ThreadPoolExecutor(
-                            1,
+                            2,
                             4,
                             30L,
                             TimeUnit.SECONDS,

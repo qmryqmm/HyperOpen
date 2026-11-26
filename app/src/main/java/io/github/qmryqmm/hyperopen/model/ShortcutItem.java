@@ -21,12 +21,13 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import io.github.qmryqmm.hyperopen.log.ShortcutLaunchLogStore;
@@ -635,14 +636,15 @@ public class ShortcutItem {
                 }
                 case ACTION_SHELL: {
                     entry.useRoot = shellUseRoot;
-                    entry.params = actionPayload != null ? actionPayload : "";
-                    if (actionPayload == null || actionPayload.trim().isEmpty()) {
+                    String normalizedShell = normalizeShellCommand(actionPayload);
+                    entry.params = normalizedShell;
+                    if (normalizedShell.isEmpty()) {
                         showToast(context, "Shell 命令为空");
                         recordExecutionLog(context, entry, startMs, false, "Shell 命令为空", "");
                         delegatedOrLogged = true;
                         break;
                     }
-                    runShellCommand(context, actionPayload, shellUseRoot, entry, false);
+                    runShellCommand(context, normalizedShell, shellUseRoot, entry, isAmCommand(normalizedShell));
                     delegatedOrLogged = true;
                     break;
                 }
@@ -946,7 +948,7 @@ public class ShortcutItem {
     }
 
     private static ShellExecResult runRootCommandSyncWithResult(String cmd, long timeoutMs) {
-        return executeShellProcess(resolveSuBinary(), cmd, timeoutMs, false);
+        return executeShellProcess(true, cmd, timeoutMs, false);
     }
 
     /** 读取当前勿扰过滤器；被权限拒绝等异常时返回 -1 */
@@ -1243,6 +1245,20 @@ public class ShortcutItem {
         runRootCommand(context, "am start " + quoteForSh(payload), entry, true);
     }
 
+    /** 统一清洗 Shell 命令中的 CRLF/CR 换行并去除首尾空白，避免剪贴板换行符导致参数末尾带 \r 失效。 */
+    private static String normalizeShellCommand(String cmd) {
+        if (cmd == null) return "";
+        return cmd.replace("\r\n", "\n").replace('\r', '\n').trim();
+    }
+
+    /** 判断规范化后的命令是否包含 am start / am startservice / am broadcast 调用。 */
+    private static boolean isAmCommand(String normalizedCmd) {
+        if (normalizedCmd == null || normalizedCmd.isEmpty()) return false;
+        return normalizedCmd.contains("am start")
+                || normalizedCmd.contains("am startservice")
+                || normalizedCmd.contains("am broadcast");
+    }
+
     /**
      * root 命令统一入口：优先桥接给拥有 Root 授权的模块 App 后台代理执行（避免 SystemUI/KernelSU 无权调用 su）；
      * 若桥接未受理或无响应，自动降级回退到当前进程本地 su 执行。
@@ -1251,7 +1267,7 @@ public class ShortcutItem {
             ShortcutLaunchLogStore.Entry entry, boolean checkAmError) {
         // 如果当前就是 App 自身进程（如用户在编辑页面点立即测试），直接本地执行
         if (isOwnAppProcess(context)) {
-            runShellBinaryWithLog(context, "su", cmd, entry, checkAmError);
+            runShellBinaryWithLog(context, true, cmd, entry, checkAmError, 0L);
             return;
         }
 
@@ -1261,18 +1277,24 @@ public class ShortcutItem {
         if (runRootViaBridge(context, cmd, entry, checkAmError)) {
             return;
         }
-        runShellBinaryWithLog(context, "su", cmd, entry, checkAmError);
+        runShellBinaryWithLog(context, true, cmd, entry, checkAmError, 0L);
     }
 
     /** Shell 动作执行入口（供 Provider 桥接回调兼容旧调用）：useRoot=true 经 su 以 root 身份执行，false 以普通 sh 身份执行 */
     public static void runShellCommand(String cmd, boolean useRoot) {
-        runShellBinaryWithLog(null, useRoot ? "su" : "sh", cmd, null, false);
+        runShellBinaryWithLog(null, useRoot, cmd, null, false, 0L);
     }
 
     /** Shell 动作执行入口（供 Provider 桥接回调并记录真实执行日志） */
     public static void runShellCommandWithLog(Context context, String cmd, boolean useRoot,
             ShortcutLaunchLogStore.Entry template, boolean checkAmError) {
-        runShellBinaryWithLog(context, useRoot ? "su" : "sh", cmd, template, checkAmError);
+        runShellBinaryWithLog(context, useRoot, cmd, template, checkAmError, 0L);
+    }
+
+    /** Shell 动作执行入口（支持指定最长同步等待时间，用于跨进程 Binder 桥接保活防冻结） */
+    public static void runShellCommandWithLog(Context context, String cmd, boolean useRoot,
+            ShortcutLaunchLogStore.Entry template, boolean checkAmError, long maxSyncWaitMs) {
+        runShellBinaryWithLog(context, useRoot, cmd, template, checkAmError, maxSyncWaitMs);
     }
 
     /** Shell 动作执行入口：root 命令桥接到模块 App 进程（SystemUI 内 su 常因锁屏无法弹 Magisk 授权而失败） */
@@ -1281,7 +1303,7 @@ public class ShortcutItem {
         if (useRoot) {
             runRootCommand(context, cmd, entry, checkAmError);
         } else {
-            runShellBinaryWithLog(context, "sh", cmd, entry, checkAmError);
+            runShellBinaryWithLog(context, false, cmd, entry, checkAmError, 0L);
         }
     }
 
@@ -1314,75 +1336,43 @@ public class ShortcutItem {
         }
     }
 
-    private static volatile String cachedSuBinary;
-
-    private static String resolveSuBinary() {
-        String cached = cachedSuBinary;
-        if (cached != null) {
-            return cached;
-        }
-        synchronized (ShortcutItem.class) {
-            if (cachedSuBinary != null) {
-                return cachedSuBinary;
-            }
-            boolean mmSupported = probeSuMountMaster();
-            cachedSuBinary = mmSupported ? "su -mm" : "su";
-            Log.i(TAG, "su 探测完成，选定入口: " + cachedSuBinary);
-            return cachedSuBinary;
-        }
-    }
-
-    private static boolean probeSuMountMaster() {
-        Process p = null;
-        try {
-            p = Runtime.getRuntime().exec(new String[]{"su", "-mm", "-c", "true"});
-            final InputStream in = p.getInputStream();
-            final InputStream err = p.getErrorStream();
-            Thread drainIn = new Thread(() -> drainStream(in), "HyperOpen-SuProbeIn");
-            Thread drainErr = new Thread(() -> drainStream(err), "HyperOpen-SuProbeErr");
-            drainIn.setDaemon(true);
-            drainErr.setDaemon(true);
-            drainIn.start();
-            drainErr.start();
-            if (!p.waitFor(3000L, TimeUnit.MILLISECONDS)) {
-                p.destroyForcibly();
-                return false;
-            }
-            return p.exitValue() == 0;
-        } catch (Throwable ignored) {
-            return false;
-        } finally {
-            if (p != null) {
-                try { p.destroy(); } catch (Throwable ignored) {}
-            }
-        }
-    }
-
-    private static void runShellBinaryWithLog(Context context, String shell, String cmd,
-            ShortcutLaunchLogStore.Entry template, boolean checkAmError) {
+    private static void runShellBinaryWithLog(Context context, boolean useRoot, String cmd,
+            ShortcutLaunchLogStore.Entry template, boolean checkAmError, long maxSyncWaitMs) {
+        final CountDownLatch latch = new CountDownLatch(1);
         // 走独立的守护线程执行，绝不霸占 IpcExecutor 单线程 HandlerThread 造成 SystemUI IPC 阻塞
         Thread runner = new Thread(() -> {
-            ShellExecResult res = null;
             try {
-                String bin = "su".equals(shell) ? resolveSuBinary() : shell;
-                res = executeShellProcess(bin, cmd, 15000L, checkAmError);
-            } catch (Throwable t) {
-                Log.e(TAG, ("su".equals(shell) ? "Root" : "Shell") + " 命令执行异常: " + cmd, t);
-                res = new ShellExecResult();
-                res.success = false;
-                res.errorDetail = describe(t);
-            }
-            if (context != null && template != null) {
-                ShortcutLaunchLogStore.Entry finalEntry = template.copy();
-                finalEntry.durationMs = res.durationMs;
-                finalEntry.success = res.success;
-                finalEntry.errorMessage = res.errorDetail != null ? res.errorDetail : "";
-                finalEntry.outputSnippet = buildOutputSnippet(res);
-                ShortcutLaunchLogStore.recordFromAnyProcess(context, finalEntry);
+                ShellExecResult res;
+                try {
+                    res = executeShellProcess(useRoot, cmd, 15000L, checkAmError);
+                } catch (Throwable t) {
+                    Log.e(TAG, (useRoot ? "Root" : "Shell") + " 命令执行异常: " + cmd, t);
+                    res = new ShellExecResult();
+                    res.success = false;
+                    res.errorDetail = describe(t);
+                }
+                if (context != null && template != null) {
+                    ShortcutLaunchLogStore.Entry finalEntry = template.copy();
+                    finalEntry.durationMs = res.durationMs;
+                    finalEntry.success = res.success;
+                    finalEntry.errorMessage = res.errorDetail != null ? res.errorDetail : "";
+                    finalEntry.outputSnippet = buildOutputSnippet(res);
+                    ShortcutLaunchLogStore.recordFromAnyProcess(context, finalEntry);
+                }
+            } finally {
+                latch.countDown();
             }
         }, "HyperOpen-ShellRunner");
         runner.setDaemon(true);
         runner.start();
+
+        if (maxSyncWaitMs > 0 && Looper.myLooper() != Looper.getMainLooper()) {
+            try {
+                latch.await(maxSyncWaitMs, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     private static String buildOutputSnippet(ShellExecResult res) {
@@ -1395,14 +1385,40 @@ public class ShortcutItem {
         return !out.isEmpty() ? out : err;
     }
 
-    private static ShellExecResult executeShellProcess(String shellBin, String cmd,
+    private static ShellExecResult executeShellProcess(boolean useRoot, String cmd,
             long timeoutMs, boolean checkAmError) {
         ShellExecResult result = new ShellExecResult();
         long startNs = System.nanoTime();
+        String normalizedCmd = normalizeShellCommand(cmd);
+        String[] candidates = useRoot
+                ? new String[]{"su", "/system/bin/su", "/system/xbin/su", "/sbin/su", "/debug_ramdisk/su"}
+                : new String[]{"/system/bin/sh", "sh"};
+        String usedBin = candidates[0];
         Process p = null;
-        OutputStream os = null;
         try {
-            p = Runtime.getRuntime().exec(shellBin);
+            IOException lastIoEx = null;
+            for (String bin : candidates) {
+                try {
+                    p = new ProcessBuilder(bin, "-c", normalizedCmd).start();
+                    usedBin = bin;
+                    break;
+                } catch (IOException e) {
+                    lastIoEx = e;
+                }
+            }
+            if (p == null) {
+                result.durationMs = (System.nanoTime() - startNs) / 1_000_000L;
+                result.success = false;
+                result.errorDetail = lastIoEx != null ? describe(lastIoEx) : "无法启动 Shell 进程";
+                Log.w(TAG, (useRoot ? "su" : "sh") + " 启动失败: " + result.errorDetail);
+                return result;
+            }
+
+            // 立即关闭子进程 stdin，防止命令尝试读取标准输入导致挂起至超时
+            try {
+                p.getOutputStream().close();
+            } catch (Throwable ignored) {}
+
             final InputStream in = p.getInputStream();
             final InputStream err = p.getErrorStream();
             final ByteArrayOutputStream outBuf = new ByteArrayOutputStream();
@@ -1415,15 +1431,9 @@ public class ShortcutItem {
             drainIn.start();
             drainErr.start();
 
-            os = p.getOutputStream();
-            os.write((cmd + "\nexit\n").getBytes(StandardCharsets.UTF_8));
-            os.flush();
-            os.close();
-            os = null;
-
             boolean finished = p.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
             if (!finished) {
-                Log.w(TAG, shellBin + " 命令执行超时(" + timeoutMs + "ms): " + cmd);
+                Log.w(TAG, usedBin + " 命令执行超时(" + timeoutMs + "ms): " + normalizedCmd);
                 p.destroyForcibly();
                 try { drainIn.join(300L); } catch (InterruptedException ignored) {}
                 try { drainErr.join(300L); } catch (InterruptedException ignored) {}
@@ -1445,7 +1455,7 @@ public class ShortcutItem {
             int code = p.exitValue();
             result.exitCode = code;
             if (code != 0) {
-                Log.w(TAG, shellBin + " 命令 exit=" + code + ": " + cmd);
+                Log.w(TAG, usedBin + " 命令 exit=" + code + ": " + normalizedCmd);
                 result.success = false;
                 result.errorDetail = "退出码 " + code
                         + (result.stderr.isEmpty() ? "" : ": " + result.stderr);
@@ -1455,7 +1465,7 @@ public class ShortcutItem {
             if (checkAmError) {
                 String amErr = findAmErrorLine(result.stdout, result.stderr);
                 if (amErr != null) {
-                    Log.w(TAG, shellBin + " am 命令输出报错: " + amErr);
+                    Log.w(TAG, usedBin + " am 命令输出报错: " + amErr);
                     result.success = false;
                     result.errorDetail = amErr;
                     return result;
@@ -1468,12 +1478,9 @@ public class ShortcutItem {
             result.durationMs = (System.nanoTime() - startNs) / 1_000_000L;
             result.success = false;
             result.errorDetail = describe(t);
-            Log.w(TAG, shellBin + " 执行异常: " + result.errorDetail);
+            Log.w(TAG, usedBin + " 执行异常: " + result.errorDetail);
             return result;
         } finally {
-            if (os != null) {
-                try { os.close(); } catch (Throwable ignored) {}
-            }
             if (p != null) {
                 try { p.destroy(); } catch (Throwable ignored) {}
             }
@@ -1509,19 +1516,6 @@ public class ShortcutItem {
                     out.write(buf, 0, toWrite);
                     remaining -= toWrite;
                 }
-            }
-        } catch (Throwable ignored) {
-        } finally {
-            try { stream.close(); } catch (Throwable ignored) {}
-        }
-    }
-
-    private static void drainStream(InputStream stream) {
-        if (stream == null) return;
-        try {
-            byte[] buf = new byte[1024];
-            while (stream.read(buf) != -1) {
-                // discard
             }
         } catch (Throwable ignored) {
         } finally {
