@@ -1,5 +1,6 @@
 # Gradle
 .gradle/
+.kotlin/
 build/
 app/build/
 */build/
@@ -35,3 +36,4 @@ lsposed_log/
 market-backend/.wrangler/
 market-backend/.dev.vars
 market-backend/node_modules/
+/.kotlin/
